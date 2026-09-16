@@ -4318,7 +4318,7 @@ function renderGoodsTab(el){
       ${lowStockItems().length ? `
       <div class="msg warn">⚠ ${lowStockItems().length} صنف وصل أو تجاوز حد التنبيه: ${lowStockItems().map(it=>`${esc(it.name)} (${it.totalIn-it.totalOut})`).join('، ')}</div>
       ` : ''}
-      <div class="tablewrap"><table class="data">
+      <div class="tablewrap" id="goodsSummaryTableWrap"><table class="data">
         <thead><tr><th>${L('goods_th_code')}</th><th>${L('goods_th_name')}</th><th>${L('goods_th_category')}</th><th>${L('goods_th_unit')}</th><th>${L('goods_th_in')}</th><th>${L('goods_th_out')}</th><th>${L('goods_th_remaining')}</th><th>${L('goods_th_threshold')}</th>${renderCustomColHeaders('goods')}</tr></thead>
         <tbody>
           ${Object.values(STATE.goodsCatalog)
@@ -4399,8 +4399,14 @@ function renderGoodsTab(el){
   });
   document.querySelectorAll('.thresholdInput').forEach(inp=>{
     inp.addEventListener('change', async (e)=>{
+      const scrollWrap = document.getElementById('goodsSummaryTableWrap');
+      const savedScrollTop = scrollWrap ? scrollWrap.scrollTop : null;
       await updateGoodsThreshold(e.target.dataset.key, e.target.value);
       renderApp();
+      if(savedScrollTop !== null){
+        const newWrap = document.getElementById('goodsSummaryTableWrap');
+        if(newWrap) newWrap.scrollTop = savedScrollTop;
+      }
     });
   });
 
