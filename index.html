@@ -3290,11 +3290,11 @@ async function qmSubmit(){
     return;
   }
   // إعادة الضبط: تفريغ المادة، إعادة الكمية لـ1، رجوع التركيز لخانة البحث — مع الحفاظ على اسم الموقع المثبَّت (QM_DESTINATION) لإخراج التالي
-  QM_SELECTED_KEY = null; QM_QTY = 1; QM_DIRECTION='IN'; QM_TAG_SELECTED = null; QM_REASON=''; QM_LAST_WARN_STATE = false;
+  QM_SELECTED_KEY = null; QM_QTY = 1; QM_TAG_SELECTED = null; QM_REASON=''; QM_LAST_WARN_STATE = false;
   QM_FLASH_MSG = res.msg;
   renderQuickModeInner();
   const searchInp = document.getElementById('qmSearch');
-  if(searchInp){ searchInp.value=''; searchInp.focus(); }
+  if(searchInp){ searchInp.value=''; searchInp.focus({preventScroll:true}); }
   setTimeout(()=>{
     QM_FLASH_MSG = null;
     const el = document.getElementById('qmFlash');
