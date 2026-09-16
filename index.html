@@ -248,6 +248,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .qm-dropdown-item .rem{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--muted);white-space:nowrap;}
   .qm-dropdown-empty{padding:16px;text-align:center;color:var(--muted);font-size:13.5px;}
 
+  /* اختيار التاج في وضع المستودع السريع */
+  .qm-tag-status{margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .qm-tag-hint{color:var(--muted);font-size:12.5px;}
+  .qm-tag-hint b{color:var(--text);}
+  .qm-tag-ok{color:#1e7d32;font-size:13px;}
+  .qm-tag-ok b{font-family:'IBM Plex Mono',monospace;font-size:13.5px;}
+  .qm-tag-clear{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;}
+  .qm-tag-clear:hover{background:var(--surface);color:#c0392b;border-color:#c0392b;}
+
   .qm-selected-name{font-size:22px;font-weight:800;margin:18px 0 4px;}
   .qm-selected-meta{color:var(--muted);font-size:13px;margin-bottom:14px;}
   .qm-balance-box{
@@ -398,6 +407,67 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     .qm-qty-input{font-size:24px;}
     .kpi-grid{grid-template-columns:repeat(2,1fr);}
   }
+
+  /* ---- Custom Labels & Columns UI ---- */
+  .col-mgmt-btn{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;margin-inline-start:8px;vertical-align:middle;}
+  .col-mgmt-btn:hover{background:var(--surface);color:var(--text);}
+  .custom-col-header{background:#f0ede4 !important;font-size:12px;color:var(--accent);white-space:nowrap;}
+  .custom-col-cell{padding:2px !important;}
+  .custom-col-input{width:90px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);}
+  .custom-col-input:focus{outline:2px solid var(--accent);border-color:var(--accent);}
+  .col-del-btn{background:none;border:none;color:#c0392b;cursor:pointer;font-size:11px;margin-inline-start:3px;padding:0 3px;vertical-align:middle;}
+  .col-del-btn:hover{color:#e74c3c;}
+  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .modal-card{background:var(--card);border-radius:14px;padding:28px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.35);direction:rtl;}
+  .modal-card h2{margin:0 0 16px 0;font-size:18px;color:var(--text);}
+  .modal-card .close-btn{position:absolute;top:12px;left:16px;background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;}
+  .col-list-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;}
+  .col-list-item label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;}
+  .col-list-item input[type="text"]{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12.5px;}
+  .col-list-item .pill{font-size:11px;cursor:pointer;}
+  .add-col-row{display:flex;gap:8px;margin-top:12px;align-items:center;}
+  .add-col-row input{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;}
+  .add-col-row select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;}
+  .label-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);}
+  .label-item .lbl-key{min-width:160px;font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+  .label-item input{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12.5px;}
+  .label-item .reset-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:2px 6px;}
+  .label-item .reset-btn:hover{text-decoration:underline;}
+
+  /* ---- Movements table editing (Admin) ---- */
+  .movements-table td{padding:3px 6px !important;}
+  .movements-table .mov-edit{width:100%;min-width:70px;padding:3px 6px;font-size:12.5px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);}
+  .movements-table .mov-edit:focus{outline:2px solid var(--accent);border-color:var(--accent);background:var(--surface);}
+  .movements-table .mov-edit.num-input{text-align:center;font-weight:600;width:70px;}
+  .movements-table .mov-edit.code-input{font-family:'IBM Plex Mono',monospace;direction:ltr;text-align:left;width:110px;}
+  .movements-table select.mov-edit{min-width:80px;cursor:pointer;}
+  .movements-table .mov-save-status{font-size:11px;white-space:nowrap;min-width:70px;display:inline-block;}
+  .movements-table .mov-save-status.ok{color:#27ae60;}
+  .movements-table .mov-save-status.bad{color:#c0392b;}
+  .movements-table .mov-balance{font-weight:600;color:var(--accent);text-align:center;}
+
+  /* ---- تعديل النصوص بالضغط مباشرة (Admin) ---- */
+  .editable-lbl{border-bottom:1px dashed rgba(120,110,80,0.35);border-radius:3px;cursor:text;transition:background .15s;}
+  .editable-lbl:hover{background:rgba(197,177,120,0.22);}
+  .editable-lbl.editing{border-bottom-color:transparent;}
+  .label-inline-edit{font:inherit;color:inherit;background:rgba(197,177,120,0.25);border:1px solid var(--accent);border-radius:4px;padding:0 4px;min-width:140px;max-width:100%;box-sizing:border-box;}
+  .label-inline-edit:focus{outline:2px solid var(--accent);}
+  nav.tabs .editable-lbl{cursor:default;border-bottom-color:transparent;}
+  nav.tabs .editable-lbl:hover{background:transparent;}
+.modal-overlay{position:fixed;inset:0;background:rgba(20,18,12,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal-box{background:#fff;border-radius:14px;max-width:960px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+.modal-head{position:sticky;top:0;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eee;z-index:1;}
+.modal-head h2{margin:0;font-size:17px;}
+.modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:#888;line-height:1;padding:4px 8px;}
+.modal-close:hover{color:#333;}
+.modal-body{padding:16px 20px 22px;}
+.modal-filter{width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;margin-bottom:12px;font-size:13.5px;box-sizing:border-box;}
+.records-btn{background:#f2efe7;border:1px solid #ddd;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;margin-inline-start:10px;vertical-align:middle;}
+.records-btn:hover{background:#e9e4d6;}
+.tab-group-label{display:inline-block;font-size:11.5px;font-weight:700;color:#8a8264;margin:0 10px 0 4px;align-self:center;text-transform:uppercase;letter-spacing:.03em;}
+.tabs-grouped{display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;}
+.admin-settings-row{display:flex;flex-wrap:wrap;gap:10px;padding:12px 0 4px;border-top:1px dashed #ddd;margin-top:10px;}
+.qm-location-banner{display:flex;align-items:center;gap:10px;background:#f2efe7;border:1px solid #e0dac8;border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:13.5px;}
 </style>
 </head>
 <body>
@@ -421,7 +491,11 @@ const STORE_KEYS = {
   cableItems: 'wms_cable_items_v1',
   cableLedger: 'wms_cable_ledger_v1',
   goodsCatalog: 'wms_goods_catalog_v1',
-  goodsLedger: 'wms_goods_ledger_v1'
+  goodsLedger: 'wms_goods_ledger_v1',
+  customLabels: 'wms_custom_labels_v1',
+  hiddenColumns: 'wms_hidden_columns_v1',
+  customColumns: 'wms_custom_columns_v1',
+  customValues: 'wms_custom_values_v1',
 };
 
 let STATE = {
@@ -435,13 +509,276 @@ let STATE = {
   cableItems: {}, // (deprecated, unused) legacy key kept only so old saved data doesn't error on load
   cableLedger: [],
   goodsCatalog: {},   // { key: {code, name, category, unit, totalIn, totalOut} } — كتالوج البضاعة المرجعي (مستورد من ملف العميل)
-  goodsLedger: []      // [{id, date, key, name, qty, direction:'IN'|'OUT', note, source}]
+  goodsLedger: [],      // [{id, date, key, name, qty, direction:'IN'|'OUT', note, source}]
+  customLabels: {},      // { labelKey: newValue } — تعديلات التسميات المخصصة من المستخدم
+  hiddenColumns: {},     // { sectionKey: [colId, ...] } — الأعمدة المخفية لكل قسم
+  customColumns: {},     // { sectionKey: [{id, name, type:'text'|'number'}, ...] } — أعمدة مخصصة إضافية لكل جدول
+  customValues: {},      // { sectionKey: { itemKey: { colId: value } } } — قيم الأعمدة المخصصة لكل صنف
 };
 
 let PENDING_SID = null;   // holds parsed SID awaiting confirmation
 let ACTIVE_TAB = 'setup';
 let ID_COUNTER = 1;
 function nextId(){ return (Date.now().toString(36) + '_' + (ID_COUNTER++)); }
+
+/* ---------- نظام التسميات المخصصة (Custom Labels) ----------
+   كل تسمية يمكن تعديلها من واجهة Admin. L(key) ترجع التعديل المخصص أو الافتراضي. */
+const LABELS = {
+  // عناوين عامة / شريط التنقل
+  app_title: 'نظام إدارة المستودع',
+  app_quick_mode: 'وضع المستودع',
+  app_admin_mode: 'الوضع الإداري',
+  app_viewer_chip: '👁️ وضع القراءة فقط',
+  app_admin_heading: 'الوضع الإداري ⚙️',
+  app_admin_sub: 'Phase 2 — تتبّع الاستلام، الفكّ، الصرف حسب SID، والرصيد الدائم',
+  app_footer: '© جميع الحقوق محفوظة للمهندس خالد كتانة',
+  tab_setup: 'استلام مواد 4G',
+  tab_receipts: 'سجل استلام مواد 4G',
+  tab_movements: 'سجل حركات مواد 4G',
+  tab_sid: 'رفع SID',
+  tab_stock: 'مواد 4G المتوفرة',
+  tab_dismantled: 'مواد ارجاع',
+  tab_goods: 'مخزون المستودع',
+  tab_sidhistory: 'سجل SID المنفَّذة',
+  tab_search: 'البحث',
+  tab_issues: 'المشاكل',
+  tab_reports: 'التقارير',
+  tab_customize: '🎨 تخصيص الأعمدة',
+  tab_backup: '💾 نسخ احتياطي',
+  tab_tags: 'تاجات المواد المتوفرة',
+
+  // عناوين فرعية / أقسام داخلية
+  tags_heading: 'تاجات المواد المتوفرة',
+  goods_search_heading: 'البحث في الكتالوج',
+  goods_viewer_search_heading: 'البحث في كتالوج الأصناف',
+  goods_ledger_heading: 'سجل الحركات',
+  goods_add_heading: 'إضافة صنف جديد يدوياً (إذا لم يكن موجوداً في القائمة)',
+  goods_quick_heading: 'تسجيل حركة سريعة (صنف واحد)',
+  goods_batch_heading: 'رفع ملف كميات (دفعة) — شراء أو إخراج لجوال',
+  goods_batch_preview_heading: 'معاينة ملف',
+  sid_batch_summary_heading: 'ملخص الدفعة',
+  receipt_detail_heading: 'تفاصيل الاستلام',
+  customize_labels_heading: '🎨 تخصيص التسميات',
+  customize_columns_heading: '⚙️ إدارة الأعمدة',
+  backup_preview_heading: 'ملخص النسخة الاحتياطية قبل الاستعادة',
+  search_hits_stock: 'أصناف مطابقة',
+  search_hits_tags: 'تاجات مطابقة',
+  search_hits_dismantled: 'مواد مفكوكة مطابقة',
+  search_hits_sids: 'مواقع/SID مطابقة',
+
+  // عناوين الأقسام الرئيسية
+  setup_heading: 'استلام مواد 4G',
+  setup_desc: 'ارفع ملف الاستلام (شيت "Consolidated Materials" وشيت "Tags" اختياري)...',
+  setup_dismantled_heading: 'إضافة مواد مفكوكة (مواد ارجاع)',
+  setup_dismantled_desc: 'ارفع ملف "مواد ارجاع"...',
+  setup_summary_heading: 'ملخص سريع',
+  setup_files_heading: 'آخر الملفات المعالَجة',
+  receipts_heading: 'سجل استلام مواد 4G',
+  receipts_desc: 'كل ملف تم رفعه من "استلام مواد 4G" يُسجَّل هنا كاستلام مستقل برقم خاص به، منفصل تماماً عن بقية الاستلامات.',
+  movements_heading: 'سجل حركات مواد 4G',
+  movements_desc: 'كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.',
+  sid_heading: 'رفع ملف أو عدة ملفات SID',
+  sid_desc: 'يمكنك اختيار أكثر من ملف SID دفعة واحدة...',
+  stock_heading: 'مواد 4G المتوفرة',
+  stock_desc: 'الرصيد التراكمي لكل صنف بعد كل عمليات الاستلام والصرف.',
+  dismantled_heading: 'مواد ارجاع (تُرجَع بالكامل للمورد)',
+  dismantled_desc: 'هذا السجل معلوماتي فقط — لا يُستخدم أبداً لتلبية أي SID.',
+  goods_heading: 'كتالوج الأصناف',
+  goods_summary_heading: 'ملخص الأصناف والرصيد المتبقي',
+  sidhistory_heading: 'سجل SID المنفَّذة',
+  sidhistory_desc: 'كل SID يُنفَّذ مرة واحدة فقط...',
+  search_heading: 'البحث',
+  search_desc: 'ابحث بالكود، اسم المادة، رقم التاج، اسم الموقع، أو معرّف SID.',
+  issues_heading: 'المشاكل والتكرارات المسجَّلة',
+  issues_desc: 'هذه المشاكل تُعرض للمراجعة فقط، ولا يقوم النظام بتصحيحها تلقائياً.',
+  reports_heading: 'تقرير شامل',
+  reports_desc: 'يشمل: لوحة المؤشرات، مواد 4G المتوفرة، سجل الحركات الكامل، سجل SID المنفَّذة، مواد ارجاع، والمشاكل.',
+  reports_sid_heading: 'تقارير SID فردية',
+  reports_sid_desc: 'لتنزيل تقرير SID محدد بعد تنفيذه، اذهب لتبويب "سجل SID المنفَّذة".',
+  backup_heading: '💾 النسخ الاحتياطي والاستعادة',
+  backup_restore_heading: '♻️ استعادة نسخة احتياطية',
+  backup_bundle_heading: '📦 إرسال التطبيق مع بياناته لشخص آخر',
+  backup_db_heading: '🗄️ قاعدة البيانات المشتركة (Supabase)',
+  backup_server_heading: '🗓️ سجل النسخ الاحتياطية على الخادم (تلقائية كل ساعة)',
+
+  // أعمدة جدول استلام 4G
+  receipts_th_number: 'رقم الاستلام',
+  receipts_th_date: 'التاريخ',
+  receipts_th_file: 'اسم الملف',
+  receipts_th_items: 'عدد الأصناف',
+  receipts_th_total: 'إجمالي الكميات',
+  // أعمدة جدول تفاصيل الاستلام
+  receipt_detail_th_name: 'اسم المادة',
+  receipt_detail_th_code: 'الكود',
+  receipt_detail_th_qty: 'الكمية المستلمة في هذا الاستلام',
+  receipt_detail_th_balance: 'الرصيد الحالي الإجمالي للصنف (كل الاستلامات)',
+
+  // أعمدة جدول حركات 4G
+  movements_th_date: 'التاريخ',
+  movements_th_type: 'نوع الحركة',
+  movements_th_name: 'اسم المادة',
+  movements_th_code: 'الكود',
+  movements_th_qty: 'الكمية',
+  movements_th_balance: 'الرصيد بعد الحركة',
+  movements_th_source: 'المصدر/الجهة',
+  movements_th_receipt: 'رقم الاستلام',
+  movements_th_notes: 'ملاحظات',
+
+  // أعمدة جدول SID
+  sid_th_code: 'الكود',
+  sid_th_desc: 'الوصف',
+  sid_th_requested: 'مطلوب (قابل للتعديل)',
+  sid_th_available: 'متوفر',
+  sid_th_issue: 'سيُصرف',
+  sid_th_shortage: 'نقص',
+  sid_th_status: 'الحالة',
+
+  // أعمدة جدول مواد 4G
+  stock_th_code: 'الكود',
+  stock_th_desc: 'الوصف',
+  stock_th_received: 'إجمالي مستلم',
+  stock_th_issued: 'مصروف',
+  stock_th_remaining: 'المتبقي',
+  stock_th_tags: 'تاجات متوفرة',
+
+  // أعمدة جدول مواد ارجاع
+  dismantled_th_tag: 'التاج',
+  dismantled_th_material: 'المادة',
+  dismantled_th_from: 'من',
+  dismantled_th_to: 'إلى',
+  dismantled_th_note: 'ملاحظة',
+  dismantled_th_date: 'التاريخ',
+
+  // أعمدة جدول بضاعة المستودع
+  goods_th_code: 'كود',
+  goods_th_name: 'اسم الصنف',
+  goods_th_category: 'التصنيف',
+  goods_th_unit: 'الوحدة',
+  goods_th_in: 'إجمالي مُدخَل',
+  goods_th_out: 'إجمالي مُخرَج',
+  goods_th_remaining: 'المتبقي',
+  goods_th_threshold: 'حد التنبيه',
+  goods_th_action: '',
+
+  // أعمدة جدول سجل حركات البضاعة
+  goods_ledger_th_date: 'التاريخ',
+  goods_ledger_th_type: 'النوع',
+  goods_ledger_th_name: 'الصنف',
+  goods_ledger_th_qty: 'الكمية',
+  goods_ledger_th_note: 'ملاحظة',
+  goods_ledger_th_source: 'المصدر',
+  goods_ledger_th_action: '',
+
+  // أعمدة جدول SID المنفَّذة
+  sidhistory_th_site: 'الموقع',
+  sidhistory_th_date: 'التاريخ',
+  sidhistory_th_file: 'الملف',
+  sidhistory_th_items: 'أصناف',
+  sidhistory_th_requested: 'مطلوب',
+  sidhistory_th_issued: 'مصروف',
+  sidhistory_th_shortage: 'نقص',
+
+  // أعمدة جدول المشاكل
+  issues_th_type: 'النوع',
+  issues_th_code: 'الكود',
+  issues_th_name: 'اسم المادة',
+  issues_th_detail: 'التفاصيل',
+  issues_th_date: 'التاريخ',
+
+  // أعمدة جدول البحث - أصناف
+  search_th_code: 'الكود',
+  search_th_desc: 'الوصف',
+  search_th_remaining: 'المتبقي',
+  // أعمدة جدول البحث - تاجات
+  search_th_tag: 'التاج',
+  search_th_status: 'الحالة',
+  search_th_sid: 'صُرف لـ SID',
+  // أعمدة جدول البحث - مفكوكة
+  search_dism_th_tag: 'التاج',
+  search_dism_th_material: 'المادة',
+  search_dism_th_from: 'من',
+  // أعمدة جدول البحث - مواقع
+  search_sid_th_site: 'الموقع',
+  search_sid_th_date: 'التاريخ',
+  search_sid_th_issued: 'مصروف',
+  search_sid_th_shortage: 'نقص',
+
+  // أعمدة جدول ملخص SID (المعاينة)
+  sid_summary_th_items: 'أصناف',
+  sid_summary_th_requested: 'مطلوب',
+  sid_summary_th_available: 'متوفر',
+  sid_summary_th_issue: 'سيُصرف',
+  sid_summary_th_shortage: 'نقص',
+  sid_summary_th_unmatched: 'غير مطابق',
+
+  // أعمدة جدول ملخص البضاعة (المعاينة)
+  goods_batch_th_name: 'الاسم',
+  goods_batch_th_category: 'التصنيف',
+  goods_batch_th_qty: 'الكمية (قابلة للتعديل)',
+  goods_batch_th_available: 'المتوفر',
+  goods_batch_th_apply: 'سيُطبَّق',
+  goods_batch_th_shortage: 'نقص',
+  goods_batch_th_status: 'الحالة',
+};
+function L(key){
+  const v = (STATE.customLabels && STATE.customLabels[key]) || LABELS[key] || key;
+  if(typeof CURRENT_ROLE!=='undefined' && CURRENT_ROLE==='admin'){
+    return `<span class="editable-lbl" data-lk="${esc(key)}">${esc(v)}</span>`;
+  }
+  return v;
+}
+function isColHidden(section, colId){
+  return STATE.hiddenColumns && STATE.hiddenColumns[section] && STATE.hiddenColumns[section].includes(colId);
+}
+function toggleColumnHidden(section, colId){
+  if(!STATE.hiddenColumns) STATE.hiddenColumns = {};
+  if(!STATE.hiddenColumns[section]) STATE.hiddenColumns[section] = [];
+  const idx = STATE.hiddenColumns[section].indexOf(colId);
+  if(idx >= 0) STATE.hiddenColumns[section].splice(idx, 1);
+  else STATE.hiddenColumns[section].push(colId);
+}
+function getCustomCols(section){
+  return (STATE.customColumns && STATE.customColumns[section]) || [];
+}
+function getCustomVal(section, itemKey, colId){
+  return (STATE.customValues && STATE.customValues[section] && STATE.customValues[section][itemKey] && STATE.customValues[section][itemKey][colId]) || '';
+}
+function setCustomVal(section, itemKey, colId, value){
+  if(!STATE.customValues) STATE.customValues = {};
+  if(!STATE.customValues[section]) STATE.customValues[section] = {};
+  if(!STATE.customValues[section][itemKey]) STATE.customValues[section][itemKey] = {};
+  STATE.customValues[section][itemKey][colId] = value;
+  saveState(['customValues']);
+}
+function addCustomColumn(section, name, type){
+  if(!STATE.customColumns) STATE.customColumns = {};
+  if(!STATE.customColumns[section]) STATE.customColumns[section] = [];
+  const id = 'ccol_' + Date.now().toString(36);
+  STATE.customColumns[section].push({id, name: name || 'عمود جديد', type: type || 'text'});
+  saveState(['customColumns']);
+  return id;
+}
+function removeCustomColumn(section, colId){
+  if(!STATE.customColumns || !STATE.customColumns[section]) return;
+  STATE.customColumns[section] = STATE.customColumns[section].filter(c=>c.id !== colId);
+  if(STATE.customValues && STATE.customValues[section]){
+    Object.values(STATE.customValues[section]).forEach(vals=> delete vals[colId]);
+  }
+  saveState(['customColumns', 'customValues']);
+}
+function renderCustomColHeaders(section){
+  const cols = getCustomCols(section);
+  if(!cols.length) return '';
+  return cols.filter(c=>!isColHidden(section, c.id)).map(c=>`<th class="custom-col-header">${esc(c.name)} <button class="col-del-btn" data-rmccol="${section}:${c.id}" title="حذف العمود">✕</button></th>`).join('');
+}
+function renderCustomColCells(section, itemKey){
+  const cols = getCustomCols(section);
+  if(!cols.length) return '';
+  return cols.filter(c=>!isColHidden(section, c.id)).map(c=>{
+    const val = getCustomVal(section, itemKey, c.id);
+    return `<td class="custom-col-cell"><input type="text" ${c.type==='number'?'inputmode="numeric"':''} class="custom-col-input" data-ccol-section="${section}" data-ccol-key="${esc(itemKey)}" data-ccol-id="${c.id}" value="${esc(val)}" placeholder="—"></td>`;
+  }).join('');
+}
 function todayStr(){
   const d = new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -1365,7 +1702,7 @@ function lowStockItems(){
 }
 
 /* تسجيل حركة سريعة (صنف واحد مُختار من الكتالوج) */
-async function submitGoodsQuickEntry({key, qty, date, note, direction, source}){
+async function submitGoodsQuickEntry({key, qty, date, note, direction, source, site}){
   const cat = STATE.goodsCatalog[key];
   if(!cat) return {ok:false, msg:'اختر صنفاً من الكتالوج أولاً (عبر خانة البحث).'};
   const q = Number(qty);
@@ -1377,7 +1714,7 @@ async function submitGoodsQuickEntry({key, qty, date, note, direction, source}){
   } else {
     cat.totalIn += q;
   }
-  const entry = {id:nextId(), date: date||todayStr(), time: nowTimeStr(), key, name:cat.name, qty:q, direction, note: trim(note||''), source: source||'إدخال يدوي'};
+  const entry = {id:nextId(), date: date||todayStr(), time: nowTimeStr(), key, name:cat.name, qty:q, direction, note: trim(note||''), site: (direction==='OUT' ? trim(site||'') : ''), source: source||'إدخال يدوي'};
   STATE.goodsLedger.push(entry);
   await saveState(['goodsCatalog','goodsLedger']);
   return {ok:true, msg: direction==='OUT' ? `تم تسجيل إخراج ${q} من "${cat.name}".` : `تم تسجيل إدخال ${q} من "${cat.name}".`, entry};
@@ -1443,23 +1780,37 @@ function searchStockCatalog(q){
     (s.description||'').toLowerCase().includes(ql) || (s.code||'').toLowerCase().includes(ql)
   );
 }
-async function submitStockQuickOut({code, qty, destination, reason}){
+async function submitStockQuickOut({code, qty, destination, reason, tag}){
   const stockEntry = STATE.stock[code];
   if(!stockEntry) return {ok:false, msg:'اختر مادة صحيحة من القائمة.'};
-  const q = Number(qty);
+  let q = Number(qty);
   if(!q || q<=0) return {ok:false, msg:'أدخل كمية صحيحة أكبر من صفر.'};
   const remaining = stockEntry.total_quantity - stockEntry.issued_quantity;
   if(q > remaining) return {ok:false, msg:`الكمية المطلوبة أكبر من الكمية المتوفرة. المتوفر حالياً: ${remaining}.`};
+  let issuedTag = null;
+  if(tag){
+    // إخراج بتاج محدد: يتحقق أن التاج موجود ومتوفر، ويعلّمه كمصروف باسم الموقع
+    const avail = (stockEntry.tags||[]).filter(t=>t.status==='available');
+    const chosen = avail.find(t=>t.tag===tag);
+    if(!chosen) return {ok:false, msg:`التاج "${tag}" غير متوفر للإخراج (مصروف مسبقاً أو غير موجود). اختر تاجاً من الاقتراحات.`};
+    chosen.status = 'issued';
+    chosen.issued_to_sid = trim(destination||'') || '-';
+    chosen.issued_date = todayStr();
+    issuedTag = chosen.tag;
+    q = 1; // تاج واحد = وحدة واحدة
+  }
   stockEntry.issued_quantity += q;
   const date = todayStr();
   const entry = {
     id:nextId(), date, time: nowTimeStr(), type:'ISSUED', sid:'', site: trim(destination||''),
-    code, description: stockEntry.description, tag:'', qty:q,
-    source: trim(destination||'') || '-', notes: trim(reason||''), quickOut:true
+    code, description: stockEntry.description, tag: issuedTag||'', qty:q,
+    source: trim(destination||'') || '-', notes: trim(reason||''), quickOut:true, issuedTag: !!issuedTag
   };
   STATE.ledger.push(entry);
   await saveState(['stock','ledger']);
-  return {ok:true, msg:`تم إخراج ${q} من "${stockEntry.description}".`, entry};
+  return issuedTag
+    ? {ok:true, msg:`تم إخراج التاج "${issuedTag}" من "${stockEntry.description}"${trim(destination||'')?` إلى ${trim(destination)}`:''}.`, entry}
+    : {ok:true, msg:`تم إخراج ${q} من "${stockEntry.description}".`, entry};
 }
 function peekLastStockQuickOut(){
   for(let i=STATE.ledger.length-1;i>=0;i--){
@@ -1472,12 +1823,17 @@ async function undoLastStockOut(){
   if(!last) return {ok:false, msg:'لا توجد حركة إخراج سريع لمواد 4G للتراجع عنها.'};
   const stockEntry = STATE.stock[last.code];
   if(!stockEntry) return {ok:false, msg:'الصنف لم يعد موجوداً في المخزون.'};
+  if(last.tag && stockEntry.tags){
+    // إرجاع التاج المصروف إلى الحالة "متوفر" حتى يمكن إخراجه مرة أخرى
+    const t = stockEntry.tags.find(x=>x.tag===last.tag && x.status==='issued');
+    if(t){ t.status='available'; t.issued_to_sid=undefined; t.issued_date=undefined; }
+  }
   stockEntry.issued_quantity = Math.max(0, stockEntry.issued_quantity - last.qty);
   const date = todayStr();
   STATE.ledger.push({
     id:nextId(), date, time: nowTimeStr(), type:'ADJUSTMENT', sid:'', site:last.site, code:last.code,
-    description:stockEntry.description, tag:'', qty:-last.qty, source:'تراجع',
-    notes:`تصحيح / تراجع عن إخراج مواد 4G بتاريخ ${last.date}${last.time?' '+last.time:''}`,
+    description:stockEntry.description, tag:last.tag||'', qty:-last.qty, source:'تراجع',
+    notes:`تصحيح / تراجع عن إخراج مواد 4G بتاريخ ${last.date}${last.time?' '+last.time:''}${last.tag?' — التاج: '+last.tag:''}`,
     correction:true, correctsId:last.id, quickOut:true
   });
   await saveState(['stock','ledger']);
@@ -1578,6 +1934,10 @@ function buildBackupObject(){
     goodsLedger: STATE.goodsLedger,
     cableItems: STATE.cableItems,
     cableLedger: STATE.cableLedger,
+    customLabels: STATE.customLabels || {},
+    hiddenColumns: STATE.hiddenColumns || {},
+    customColumns: STATE.customColumns || {},
+    customValues: STATE.customValues || {},
   }));
   return {
     system: BACKUP_SYSTEM_ID,
@@ -1964,19 +2324,12 @@ function downloadGoodsReport(){
    5) واجهة المستخدم
    ============================================================ */
 const TABS = [
-  {id:'setup', label:'استلام مواد 4G'},
-  {id:'receipts', label:'سجل استلام مواد 4G'},
-  {id:'movements', label:'سجل حركات مواد 4G'},
-  {id:'sid', label:'رفع SID'},
-  {id:'stock', label:'مواد 4G المتوفرة'},
-  {id:'dismantled', label:'مواد ارجاع'},
-  {id:'goods', label:'مخزون المستودع'},
-  {id:'sidhistory', label:'سجل SID المنفَّذة'},
-  {id:'search', label:'البحث'},
-  {id:'issues', label:'المشاكل'},
-  {id:'reports', label:'التقارير'},
-  {id:'backup', label:'💾 نسخ احتياطي'},
+  {id:'setup', lk:'tab_setup', group:'4g'},
+  {id:'sid', lk:'tab_sid', group:'4g'},
+  {id:'stock', lk:'tab_stock', group:'4g'},
+  {id:'goods', lk:'tab_goods', group:'wh'},
 ];
+const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع'};
 
 function esc(s){
   return String(s===null||s===undefined?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1997,18 +2350,18 @@ function renderApp(roleFetchError, roleResult){
   const isAdmin = CURRENT_ROLE === 'admin';
   app.innerHTML = `
     <div class="modebar">
-      <div class="modebar-title">نظام إدارة المستودع</div>
+      <div class="modebar-title">${L('app_title')}</div>
       <div class="modebar-switch">
         ${isAdmin ? `
-          <button id="modeBtnQuick" class="${APP_MODE==='quick'?'active':''}">⚡ وضع المستودع</button>
-          <button id="modeBtnAdmin" class="${APP_MODE==='admin'?'active':''}">⚙️ الوضع الإداري</button>
-        ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">👁️ وضع القراءة فقط</span>`}
+          <button id="modeBtnQuick" class="${APP_MODE==='quick'?'active':''}">⚡ ${L('app_quick_mode')}</button>
+          <button id="modeBtnAdmin" class="${APP_MODE==='admin'?'active':''}">⚙️ ${L('app_admin_mode')}</button>
+        ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">${L('app_viewer_chip')}</span>`}
       </div>
       ${CURRENT_SESSION ? `<span style="color:#d9d4c6;font-size:11.5px;margin-inline-end:10px;">${esc(CURRENT_SESSION.user.email)}</span><button id="btnSignOut" class="secondary" style="padding:6px 14px;font-size:12px;">خروج</button>` : ''}
       <span id="saveIndicator" class="modebar-save"></span>
     </div>
     <div id="modeContent"></div>
-    <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">© جميع الحقوق محفوظة للمهندس خالد كتانة</footer>
+    <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">${L('app_footer')}</footer>
   `;
   if(isAdmin){
     document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ APP_MODE='quick'; renderApp(); });
@@ -2025,6 +2378,83 @@ function renderApp(roleFetchError, roleResult){
   const content = document.getElementById('modeContent');
   if(!isAdmin){ renderViewerMode(content); return; }
   if(APP_MODE==='quick') renderQuickMode(content); else renderAdminMode(content);
+}
+
+/* Event delegation for custom column value inputs */
+document.addEventListener('change', (e)=>{
+  if(e.target.classList.contains('custom-col-input')){
+    const section = e.target.dataset.ccolSection;
+    const itemKey = e.target.dataset.ccolKey;
+    const colId = e.target.dataset.ccolId;
+    if(section && itemKey && colId) setCustomVal(section, itemKey, colId, e.target.value);
+  }
+});
+
+/* ---- تعديل أي نص بالضغط عليه (Admin فقط) — كل عنصر يحمل data-lk يُفتح للتعديل لمرة واحدة ---------------------- */
+function isInsideInteractive(elm){
+  let n = elm;
+  while(n && n !== document.body){
+    if(n.matches && n.matches('button, a, input, select, textarea, label, [role="button"], .tabs button')) return true;
+    n = n.parentElement;
+  }
+  return false;
+}
+document.addEventListener('click', (e)=>{
+  if(typeof CURRENT_ROLE==='undefined' || CURRENT_ROLE!=='admin') return;
+  if(!e.target || !e.target.closest) return;
+  const span = e.target.closest('.editable-lbl');
+  if(!span || span.dataset.editing) return;
+  if(isInsideInteractive(span)) return; // لا نعترض نقر الأزرار والروابط والقوائم — تبقى تعمل بشكل طبيعي
+  e.preventDefault();
+  startLabelEdit(span);
+});
+function startLabelEdit(span){
+  const key = span.dataset.lk;
+  const orig = (span.dataset.orig!==undefined) ? span.dataset.orig : span.textContent;
+  span.dataset.orig = orig;
+  span.dataset.editing = '1';
+  span.classList.add('editing');
+  span.textContent = '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'label-inline-edit';
+  input.value = orig;
+  span.appendChild(input);
+  input.focus();
+  input.select();
+  let closed = false;
+  const close = async (save)=>{
+    if(closed) return;
+    closed = true;
+    span.dataset.editing = '';
+    span.classList.remove('editing');
+    if(save){
+      const val = input.value.trim();
+      if(!STATE.customLabels) STATE.customLabels = {};
+      if(val && val !== LABELS[key]) STATE.customLabels[key] = val;
+      else delete STATE.customLabels[key];
+      refreshLabelInstances(key);
+      try{
+        await saveState(['customLabels']);
+      }catch(err){
+        console.error('فشل حفظ التسمية:', err);
+      }
+    }else{
+      span.textContent = orig;
+    }
+  };
+  input.addEventListener('keydown', (ev)=>{
+    if(ev.key==='Enter'){ ev.preventDefault(); close(true); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); close(false); }
+  });
+  input.addEventListener('blur', ()=>{ close(true); });
+}
+function refreshLabelInstances(key){
+  const v = (STATE.customLabels && STATE.customLabels[key]) || LABELS[key] || key;
+  document.querySelectorAll('.editable-lbl[data-lk="'+key+'"]').forEach(sp=>{
+    if(sp.dataset.editing) return;
+    sp.textContent = v;
+  });
 }
 
 /* ---- شاشة تسجيل الدخول (تظهر فقط عندما تكون Supabase مُفعَّلة ولا توجد جلسة حالية) ---- */
@@ -2124,8 +2554,8 @@ function renderAdminMode(root){
   root.innerHTML = `
     <header class="topbar">
       <div class="title-block">
-        <h1>الوضع الإداري ⚙️</h1>
-        <div class="sub">Phase 2 — تتبّع الاستلام، الفكّ، الصرف حسب SID، والرصيد الدائم</div>
+        <h1>${L('app_admin_heading')}</h1>
+        <div class="sub">${L('app_admin_sub')}</div>
       </div>
       <div class="status-chip">
         <span>مواد 4G المتوفرة: <b>${totalRemaining}</b></span>
@@ -2133,14 +2563,37 @@ function renderAdminMode(root){
         <span>مشاكل مسجّلة: <b>${issuesCount}</b></span>
       </div>
     </header>
-    <nav class="tabs">
-      ${TABS.map(t=>`<button data-tab="${t.id}" class="${ACTIVE_TAB===t.id?'active':''}">${t.label}${t.id==='issues'&&issuesCount?`<span class="badge">${issuesCount}</span>`:''}</button>`).join('')}
+    <nav class="tabs tabs-grouped">
+      ${(function(){
+        let html=''; let lastGroup=null;
+        TABS.forEach(t=>{
+          if(t.group!==lastGroup){ html+=`<span class="tab-group-label">${TAB_GROUP_LABELS[t.group]||''}</span>`; lastGroup=t.group; }
+          html+=`<button data-tab="${t.id}" class="${ACTIVE_TAB===t.id?'active':''}">${L(t.lk)}</button>`;
+        });
+        return html;
+      })()}
     </nav>
     <div id="tabContent"></div>
+    <div class="admin-settings-row">
+      <button class="secondary" id="btnOpenIssuesModal">⚠️ مشاكل مسجلة (${issuesCount})</button>
+      <button class="secondary" id="btnOpenBackupModal">💾 نسخة احتياطي</button>
+      <button class="secondary" id="btnOpenFullReport">📊 التقرير الشامل</button>
+      <button class="secondary" id="btnOpenCustomizeModal">🎨 تخصيص الأعمدة</button>
+    </div>
     <div class="footer-note">يُحفظ كل شيء تلقائياً في متصفحك بعد كل عملية — لا حاجة لأي زر حفظ يدوي. لا تُحذف أي حركة من السجل، أي تصحيح يُسجَّل كحركة جديدة.</div>
   `;
   root.querySelectorAll('nav.tabs button').forEach(btn=>{
     btn.addEventListener('click', ()=>{ ACTIVE_TAB = btn.dataset.tab; renderAdminMode(root); });
+  });
+  document.getElementById('btnOpenIssuesModal').addEventListener('click', ()=>{
+    openModal('⚠️ '+L('tab_issues'), (bodyEl)=>{ renderIssuesTab(bodyEl); });
+  });
+  document.getElementById('btnOpenBackupModal').addEventListener('click', ()=>{
+    openModal('💾 '+L('tab_backup'), (bodyEl)=>{ renderBackupTab(bodyEl); });
+  });
+  document.getElementById('btnOpenFullReport').addEventListener('click', downloadFullReport);
+  document.getElementById('btnOpenCustomizeModal').addEventListener('click', ()=>{
+    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
   });
   renderTabContent();
 }
@@ -2148,17 +2601,9 @@ function renderAdminMode(root){
 function renderTabContent(){
   const el = document.getElementById('tabContent');
   if(ACTIVE_TAB==='setup') return renderSetupTab(el);
-  if(ACTIVE_TAB==='receipts') return renderReceiptsTab(el);
-  if(ACTIVE_TAB==='movements') return renderMovementsTab(el);
   if(ACTIVE_TAB==='sid') return renderSidTab(el);
   if(ACTIVE_TAB==='stock') return renderStockTab(el);
-  if(ACTIVE_TAB==='dismantled') return renderDismantledTab(el);
   if(ACTIVE_TAB==='goods') return renderGoodsTab(el);
-  if(ACTIVE_TAB==='sidhistory') return renderSidHistoryTab(el);
-  if(ACTIVE_TAB==='search') return renderSearchTab(el);
-  if(ACTIVE_TAB==='issues') return renderIssuesTab(el);
-  if(ACTIVE_TAB==='reports') return renderReportsTab(el);
-  if(ACTIVE_TAB==='backup') return renderBackupTab(el);
 }
 
 /* ============================================================
@@ -2166,28 +2611,28 @@ function renderTabContent(){
    الحماية الحقيقية هي RLS على مستوى Supabase، وهذا فقط لتجربة استخدام مريحة ومتّسقة معها.
    ============================================================ */
 const VIEWER_TABS = [
-  {id:'stock', label:'مواد 4G المتوفرة'},
-  {id:'receipts', label:'سجل استلام مواد 4G'},
-  {id:'movements', label:'سجل حركات مواد 4G'},
-  {id:'tags', label:'تاجات المواد المتوفرة'},
-  {id:'goods', label:'مخزون المستودع'},
-  {id:'dismantled', label:'مواد ارجاع'},
-  {id:'sidhistory', label:'سجل SID'},
-  {id:'issues', label:'المشاكل'},
-  {id:'search', label:'البحث'},
-  {id:'reports', label:'التقارير'},
+  {id:'stock', lk:'tab_stock'},
+  {id:'receipts', lk:'tab_receipts'},
+  {id:'movements', lk:'tab_movements'},
+  {id:'tags', lk:'tab_tags'},
+  {id:'goods', lk:'tab_goods'},
+  {id:'dismantled', lk:'tab_dismantled'},
+  {id:'sidhistory', lk:'tab_sidhistory'},
+  {id:'issues', lk:'tab_issues'},
+  {id:'search', lk:'tab_search'},
+  {id:'reports', lk:'tab_reports'},
 ];
 let VIEWER_ACTIVE_TAB = 'stock';
 function renderViewerMode(root){
   root.innerHTML = `
     <header class="topbar">
       <div class="title-block">
-        <h1>وضع القراءة فقط 👁️</h1>
+        <h1>${L('app_viewer_chip')}</h1>
         <div class="sub">استعراض بيانات المستودع — لا صلاحية تعديل أو حذف</div>
       </div>
     </header>
     <nav class="tabs">
-      ${VIEWER_TABS.map(t=>`<button data-tab="${t.id}" class="${VIEWER_ACTIVE_TAB===t.id?'active':''}">${t.label}</button>`).join('')}
+      ${VIEWER_TABS.map(t=>`<button data-tab="${t.id}" class="${VIEWER_ACTIVE_TAB===t.id?'active':''}">${L(t.lk)}</button>`).join('')}
     </nav>
     <div id="viewerTabContent"></div>
   `;
@@ -2215,7 +2660,7 @@ function renderReceiptsViewerTab(el){
   let rows = getReceiptRows();
   el.innerHTML = `
     <div class="panel">
-      <h2>سجل استلام مواد 4G</h2>
+      <h2>${L('receipts_heading')}</h2>
       <div class="btnrow"><button class="secondary" id="btnExportReceiptsViewer">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>رقم الاستلام</th><th>التاريخ</th><th>اسم الملف</th><th>عدد الأصناف</th><th>إجمالي الكميات</th><th></th></tr></thead>
@@ -2253,7 +2698,7 @@ function renderReceiptViewerDetail(){
   const items = Object.entries(fileRec.contributions||{});
   area.innerHTML = `
     <div class="panel">
-      <h2>تفاصيل الاستلام #${String(fileRec.receiptNumber||0).padStart(3,'0')}</h2>
+      <h2>${L('receipt_detail_heading')} #${String(fileRec.receiptNumber||0).padStart(3,'0')}</h2>
       <div class="desc">التاريخ: ${fileRec.date} — الملف: ${esc(fileRec.name)}</div>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>اسم المادة</th><th>الكود</th><th>الكمية المستلمة</th><th>الرصيد الحالي الإجمالي</th></tr></thead>
@@ -2310,7 +2755,7 @@ function renderAvailableTagsTab(el){
 
   el.innerHTML = `
     <div class="panel">
-      <h2>تاجات المواد المتوفرة</h2>
+      <h2>${L('tags_heading')}</h2>
       <div class="desc">كل التاجات غير المصروفة بعد (موجودة فعلياً في المستودع) عبر كل أصناف مواد 4G. اضغط على عنوان أي عمود للترتيب.</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
         <input type="text" id="tagsSearchInput" placeholder="ابحث بالتاج / اسم المادة / الكود..." value="${esc(TAGS_SEARCH_Q)}" style="max-width:340px;">
@@ -2368,12 +2813,12 @@ function renderGoodsViewerTab(el){
   const catRows = Object.values(STATE.goodsCatalog).filter(it => !GOODS_SHOW_AVAILABLE_ONLY || (it.totalIn-it.totalOut)>0).sort((a,b)=>a.name.localeCompare(b.name));
   el.innerHTML = `
     <div class="panel">
-      <h2>البحث في كتالوج الأصناف</h2>
+      <h2>${L('goods_viewer_search_heading')}</h2>
       <input type="text" id="goodsViewerSearch" placeholder="اكتب للبحث... مثال: براغي">
       <div id="goodsViewerResults" style="margin-top:14px;"></div>
     </div>
     <div class="panel">
-      <h2>ملخص الأصناف والرصيد المتبقي</h2>
+      <h2>${L('goods_summary_heading')}</h2>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
           <input type="checkbox" id="goodsViewerAvailOnlyToggle" ${GOODS_SHOW_AVAILABLE_ONLY?'checked':''}> إخفاء المواد ذات الرصيد صفر
@@ -2392,14 +2837,14 @@ function renderGoodsViewerTab(el){
       </table></div>
     </div>
     <div class="panel">
-      <h2>سجل الحركات</h2>
+      <h2>${L('goods_ledger_heading')}</h2>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>التاريخ</th><th>النوع</th><th>الصنف</th><th>الكمية</th><th>ملاحظة</th></tr></thead>
         <tbody>
           ${STATE.goodsLedger.slice().reverse().slice(0,200).map(e=>`<tr>
             <td>${e.time?e.time+' — ':''}${e.date}</td>
             <td>${e.direction==='IN'?'<span class="pill ok">إدخال</span>':'<span class="pill warn">إخراج</span>'}</td>
-            <td>${esc(e.name)}</td><td>${e.qty}</td><td>${esc(e.note)}</td>
+            <td>${esc(e.name)}</td><td>${e.qty}</td><td>${esc(e.note)}${e.site?` <span style="color:var(--muted);font-size:11.5px;">— الموقع: ${esc(e.site)}</span>`:''}</td>
           </tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد حركات بعد</td></tr>'}
         </tbody>
       </table></div>
@@ -2429,7 +2874,7 @@ function renderSidHistoryViewerTab(el){
   const entries = Object.entries(STATE.processedSids).sort((a,b)=>b[1].date.localeCompare(a[1].date));
   el.innerHTML = `
     <div class="panel">
-      <h2>سجل SID المنفَّذة</h2>
+      <h2>${L('sidhistory_heading')}</h2>
       <div class="btnrow"><button class="secondary" id="btnExportSidHistory" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>الموقع</th><th>التاريخ</th><th>الملف</th><th>أصناف</th><th>مطلوب</th><th>مصروف</th><th>نقص</th></tr></thead>
@@ -2457,8 +2902,13 @@ let QM_DOMAIN = 'goods'; // 'goods' = مخزون المستودع | 'stock' = م
 let QM_SELECTED_KEY = null;
 let QM_DIRECTION = 'IN';
 let QM_QTY = 1;
-let QM_DESTINATION = ''; // الجهة/الموقع (لمواد 4G فقط)
+let QM_DESTINATION_RAW = null;
+try{ QM_DESTINATION_RAW = localStorage.getItem('wms_qm_last_destination'); }catch(e){}
+let QM_DESTINATION = (typeof QM_DESTINATION_RAW==='string' && QM_DESTINATION_RAW) ? QM_DESTINATION_RAW : ''; // الجهة/الموقع (لمواد 4G فقط) — تثبَّت حتى يغيّرها المستخدم بنفسه
 let QM_REASON = '';      // سبب/نوع الإخراج (لمواد 4G فقط)
+let QM_TAG_SELECTED = null; // التاج المختار للإخراج السريع (مواد 4G)
+let QM_TAG_HL_INDEX = -1;   // فهرس التاج المُظلَّل في قائمة اقتراحات التاجات
+let QM_TAG_CURRENT_RESULTS = [];
 let QM_HL_INDEX = -1; // فهرس العنصر المُظلَّل حالياً في قائمة نتائج البحث (للتنقل بالسهمين واختيار Enter)
 let QM_CURRENT_RESULTS = [];
 let QM_BARCODE_STREAM = null;
@@ -2488,9 +2938,12 @@ function renderQuickModeInner(){
   const item = qmSelectedItem();
   const remaining = item ? qmItemRemaining(item) : null;
   const isStock = QM_DOMAIN==='stock';
-  const willExceed = item && (isStock || QM_DIRECTION==='OUT') && Number(QM_QTY) > remaining;
-  const qtyValid = Number(QM_QTY) > 0;
-  const canSubmit = !!item && qtyValid && !willExceed;
+  const availTags = (isStock && item && item.tags) ? item.tags.filter(t=>t.status==='available') : [];
+  const needsTag = availTags.length>0;
+  const effQty = needsTag ? 1 : Number(QM_QTY);
+  const willExceed = item && (isStock || QM_DIRECTION==='OUT') && effQty > remaining;
+  const qtyValid = effQty > 0;
+  const canSubmit = !!item && qtyValid && !willExceed && (!needsTag || !!QM_TAG_SELECTED);
 
   const recent = isStock
     ? STATE.ledger.filter(e=>e.quickOut).slice(-15).reverse()
@@ -2501,6 +2954,7 @@ function renderQuickModeInner(){
   wrap.innerHTML = `
     <div class="qm-card">
       <h2 class="qm-title">⚡ تسجيل حركة سريعة</h2>
+      ${QM_DESTINATION ? `<div class="qm-location-banner">📍 الموقع المثبّت حالياً: <b>${esc(QM_DESTINATION)}</b><button type="button" id="qmLocBannerChange" class="records-btn">✎ تغيير الموقع</button></div>` : ''}
       <div class="qm-dir-row" style="margin-bottom:16px;">
         <button class="qm-dir-btn qm-domain-btn ${!isStock?'active':''}" id="qmDomainGoods">📦 مخزون المستودع</button>
         <button class="qm-dir-btn qm-domain-btn ${isStock?'active':''}" id="qmDomainStock">📡 مواد 4G (إخراج)</button>
@@ -2520,6 +2974,20 @@ function renderQuickModeInner(){
           <span class="qm-balance-num">${remaining}</span>
         </div>
 
+        ${isStock && needsTag ? `
+          <div style="margin-bottom:16px;">
+            <label class="flabel">التاج المطلوب إخراجه (اكتب التاج أو جزءاً منه — ثم اختره من الاقتراحات)</label>
+            <div class="qm-search-wrap">
+              <input type="text" id="qmTagInput" class="qm-search-input" placeholder="مثال: TAG-12345 أو اكتب جزءاً..." value="${esc(QM_TAG_SELECTED||'')}" autocomplete="off" style="font-size:15px;padding:12px 14px;">
+              <div id="qmTagDropdown"></div>
+            </div>
+            <div class="qm-tag-status" id="qmTagStatus">
+              ${QM_TAG_SELECTED ? `<span class="qm-tag-ok">التاج المختار: <b>${esc(QM_TAG_SELECTED)}</b></span> <button class="qm-tag-clear" id="qmTagClear">✕ تغيير</button>`
+                : `<span class="qm-tag-hint">عدد التاجات المتوفرة لهذه المادة: <b>${availTags.length}</b> — اختر التاج الذي تريد إخراجه.</span>`}
+            </div>
+          </div>
+        ` : ''}
+
         ${isStock ? `
           <div class="grid2" style="margin-bottom:14px;">
             <div>
@@ -2536,19 +3004,31 @@ function renderQuickModeInner(){
             <button class="qm-dir-btn in ${QM_DIRECTION==='IN'?'active':''}" id="qmDirIn">🟢 إدخال</button>
             <button class="qm-dir-btn out ${QM_DIRECTION==='OUT'?'active':''}" id="qmDirOut">🟠 إخراج</button>
           </div>
+          ${QM_DIRECTION==='OUT' ? `
+          <div class="grid2" style="margin-bottom:14px;">
+            <div>
+              <label class="flabel">الجهة / الموقع (اختياري)</label>
+              <input type="text" id="qmDestination" placeholder="مثال: Site A" value="${esc(QM_DESTINATION)}">
+            </div>
+            <div>
+              <label class="flabel">سبب / نوع الإخراج (اختياري)</label>
+              <input type="text" id="qmReason" placeholder="مثال: صيانة، تركيب جديد..." value="${esc(QM_REASON)}">
+            </div>
+          </div>` : ''}
         `}
 
-        <label class="flabel">الكمية</label>
+        <label class="flabel">الكمية ${isStock && needsTag?'(تاج واحد لكل عملية)':''}</label>
         <div class="qm-qty-row">
-          <button class="qm-qty-btn" id="qmQtyMinus">−</button>
-          <input type="text" inputmode="numeric" id="qmQtyInput" class="qm-qty-input" value="${QM_QTY}">
-          <button class="qm-qty-btn" id="qmQtyPlus">+</button>
+          <button class="qm-qty-btn" id="qmQtyMinus" ${needsTag?'disabled':''}>−</button>
+          <input type="text" inputmode="numeric" id="qmQtyInput" class="qm-qty-input" value="${needsTag?1:QM_QTY}" ${needsTag?'disabled style="opacity:.55;"':''}>
+          <button class="qm-qty-btn" id="qmQtyPlus" ${needsTag?'disabled':''}>+</button>
         </div>
-        <div class="qm-preset-row">
+        ${needsTag ? `<div class="qm-tag-hint" style="margin-top:6px;">كل عملية سريعة تُخرج تاجاً واحداً تختاره من القائمة. لتحديد أكثر من تاج، كرر العملية بعد كل إخراج.</div>` : ''}
+        ${needsTag ? '' : `<div class="qm-preset-row">
           ${[1,5,10,20].map(n=>`<button class="qm-preset-btn" data-preset="${n}">${n}</button>`).join('')}
-        </div>
+        </div>`}
         ${willExceed ? `<div class="msg bad">${isStock?'الكمية المطلوبة أكبر من الكمية المتوفرة.':`لا يمكن إخراج ${QM_QTY} وحدة.`} الرصيد المتوفر حالياً ${remaining} وحدة فقط.</div>` : ''}
-        <button class="qm-submit-btn" id="qmSubmitBtn" ${canSubmit?'':'disabled'}>✅ ${isStock?'تأكيد الإخراج':'تسجيل الحركة'}</button>
+        <button class="qm-submit-btn" id="qmSubmitBtn" ${canSubmit?'':'disabled'}>✅ ${isStock ? (needsTag?'تأكيد إخراج التاج':'تأكيد الإخراج') : 'تسجيل الحركة'}</button>
       ` : `<div class="msg info" style="margin-top:14px;">ابحث عن مادة أعلاه واخترها لتبدأ (Enter يختار أول نتيجة).</div>`}
     </div>
 
@@ -2561,9 +3041,12 @@ function renderQuickModeInner(){
     </div>` : ''}
 
     <div class="qm-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
         <h2 class="qm-title" style="margin:0;">آخر الحركات</h2>
-        <button class="secondary" id="qmUndoBtn" ${lastEntry?'':'disabled'} style="font-size:12.5px;padding:7px 14px;">↩ تراجع عن آخر حركة</button>
+        <div style="display:flex;gap:8px;">
+          <button class="secondary" id="qmFullRecordsBtn" style="font-size:12.5px;padding:7px 14px;">📋 السجل الكامل</button>
+          <button class="secondary" id="qmUndoBtn" ${lastEntry?'':'disabled'} style="font-size:12.5px;padding:7px 14px;">↩ تراجع عن آخر حركة</button>
+        </div>
       </div>
       <div id="qmUndoMsg"></div>
       ${recent.length ? recent.map(e=>{
@@ -2572,7 +3055,7 @@ function renderQuickModeInner(){
         return `
         <div class="qm-recent-row">
           <span class="qm-recent-time">${e.time||e.date}</span>
-          <span style="flex:1;">${label}${isStock && e.site?` <span style="color:var(--muted);font-size:11.5px;">(${esc(e.site)})</span>`:''}</span>
+          <span style="flex:1;">${label}${e.site?` <span style="color:var(--muted);font-size:11.5px;">(${esc(e.site)})</span>`:''}</span>
           ${e.correction?'<span class="qm-recent-badge">↩ تصحيح</span>':''}
           <span class="qm-recent-qty ${isIn?'in':'out'}">${isIn?'+':'-'}${e.qty}</span>
         </div>
@@ -2586,12 +3069,12 @@ function renderQuickModeInner(){
 function wireQuickModeEvents(){
   document.getElementById('qmDomainGoods').addEventListener('click', ()=>{
     if(QM_DOMAIN==='goods') return;
-    QM_DOMAIN='goods'; QM_SELECTED_KEY=null; QM_QTY=1; QM_LAST_WARN_STATE=false;
+    QM_DOMAIN='goods'; QM_SELECTED_KEY=null; QM_QTY=1; QM_TAG_SELECTED=null; QM_LAST_WARN_STATE=false;
     renderQuickModeInner();
   });
   document.getElementById('qmDomainStock').addEventListener('click', ()=>{
     if(QM_DOMAIN==='stock') return;
-    QM_DOMAIN='stock'; QM_SELECTED_KEY=null; QM_QTY=1; QM_LAST_WARN_STATE=false;
+    QM_DOMAIN='stock'; QM_SELECTED_KEY=null; QM_QTY=1; QM_TAG_SELECTED=null; QM_LAST_WARN_STATE=false;
     renderQuickModeInner();
   });
 
@@ -2614,12 +3097,49 @@ function wireQuickModeEvents(){
   if(dirOut) dirOut.addEventListener('click', ()=>{ QM_DIRECTION='OUT'; renderQuickModeInner(); focusQtyKeepCursor(); });
 
   const destInp = document.getElementById('qmDestination');
-  if(destInp) destInp.addEventListener('input', ()=>{ QM_DESTINATION = destInp.value; });
+  if(destInp) destInp.addEventListener('input', ()=>{
+    QM_DESTINATION = destInp.value;
+    try{ localStorage.setItem('wms_qm_last_destination', QM_DESTINATION); }catch(e){}
+  });
+  const locBannerBtn = document.getElementById('qmLocBannerChange');
+  if(locBannerBtn) locBannerBtn.addEventListener('click', ()=>{
+    const di = document.getElementById('qmDestination');
+    if(di){ di.focus(); di.select(); } else { alert('اختر مادة أولاً لتظهر خانة الموقع، ثم غيّره منها.'); }
+  });
   const reasonInp = document.getElementById('qmReason');
   if(reasonInp) reasonInp.addEventListener('input', ()=>{ QM_REASON = reasonInp.value; });
 
+  /* اختيار التاج بالبحث والاقتراحات — لمواد 4G التي لها تاجات غير مصروفة */
+  const itemNow = qmSelectedItem();
+  const availTagsNow = (QM_DOMAIN==='stock' && itemNow && itemNow.tags) ? itemNow.tags.filter(t=>t.status==='available') : [];
+  const tagInp = document.getElementById('qmTagInput');
+  if(tagInp){
+    tagInp.addEventListener('input', ()=>qmRunTagSearch(tagInp.value));
+    tagInp.addEventListener('focus', ()=>qmRunTagSearch(tagInp.value));
+    tagInp.addEventListener('keydown', (e)=>{
+      if(e.key==='ArrowDown'){ e.preventDefault(); QM_TAG_HL_INDEX = Math.min(QM_TAG_HL_INDEX+1, QM_TAG_CURRENT_RESULTS.length-1); qmRenderTagDropdown(); }
+      else if(e.key==='ArrowUp'){ e.preventDefault(); QM_TAG_HL_INDEX = Math.max(QM_TAG_HL_INDEX-1, 0); qmRenderTagDropdown(); }
+      else if(e.key==='Enter'){
+        e.preventDefault();
+        const pick = QM_TAG_CURRENT_RESULTS[QM_TAG_HL_INDEX>=0?QM_TAG_HL_INDEX:0];
+        if(pick) qmSelectTag(pick.tag);
+      } else if(e.key==='Escape'){
+        document.getElementById('qmTagDropdown').innerHTML=''; QM_TAG_CURRENT_RESULTS=[];
+      }
+    });
+    tagInp.addEventListener('blur', ()=>{
+      if(QM_TAG_SELECTED) return;
+      const v = tagInp.value.trim();
+      if(!v){ document.getElementById('qmTagDropdown').innerHTML=''; QM_TAG_CURRENT_RESULTS=[]; return; }
+      const exact = availTagsNow.find(t=>t.tag===v);
+      if(exact) qmSelectTag(exact.tag);
+    });
+  }
+  const tagClearBtn = document.getElementById('qmTagClear');
+  if(tagClearBtn) tagClearBtn.addEventListener('click', ()=>{ QM_TAG_SELECTED = null; renderQuickModeInner(); });
+
   const qtyInp = document.getElementById('qmQtyInput');
-  if(qtyInp){
+  if(qtyInp && !qtyInp.disabled){
     qtyInp.addEventListener('input', ()=>{ QM_QTY = qtyInp.value; qmRefreshValidationOnly(); });
     qtyInp.addEventListener('keydown', (e)=>{
       if(e.key==='Enter'){ e.preventDefault(); qmSubmit(); }
@@ -2627,8 +3147,8 @@ function wireQuickModeEvents(){
     qtyInp.select();
   }
   const qtyMinus = document.getElementById('qmQtyMinus'), qtyPlus = document.getElementById('qmQtyPlus');
-  if(qtyMinus) qtyMinus.addEventListener('click', ()=>{ QM_QTY = Math.max(1, (Number(QM_QTY)||1)-1); renderQuickModeInner(); });
-  if(qtyPlus) qtyPlus.addEventListener('click', ()=>{ QM_QTY = (Number(QM_QTY)||0)+1; renderQuickModeInner(); });
+  if(qtyMinus && !qtyMinus.disabled) qtyMinus.addEventListener('click', ()=>{ QM_QTY = Math.max(1, (Number(QM_QTY)||1)-1); renderQuickModeInner(); });
+  if(qtyPlus && !qtyPlus.disabled) qtyPlus.addEventListener('click', ()=>{ QM_QTY = (Number(QM_QTY)||0)+1; renderQuickModeInner(); });
   document.querySelectorAll('[data-preset]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ QM_QTY = Number(btn.dataset.preset); renderQuickModeInner(); });
   });
@@ -2641,6 +3161,13 @@ function wireQuickModeEvents(){
   });
 
   document.getElementById('qmUndoBtn').addEventListener('click', qmUndo);
+  document.getElementById('qmFullRecordsBtn').addEventListener('click', ()=>{
+    if(isStock){
+      openModal('📋 '+L('tab_movements'), (bodyEl)=>{ renderMovementsTab(bodyEl); });
+    } else {
+      openModal('📋 سجل حركات مخزون المستودع', (bodyEl)=>{ renderGoodsLedgerModalContent(bodyEl); });
+    }
+  });
   const barcodeBtn = document.getElementById('qmBarcodeBtn');
   if(barcodeBtn) barcodeBtn.addEventListener('click', qmToggleBarcodeScanner);
 }
@@ -2673,10 +3200,51 @@ function qmSelectItem(key){
   if(!exists) return;
   QM_SELECTED_KEY = key;
   QM_QTY = 1;
+  QM_TAG_SELECTED = null;
   QM_LAST_WARN_STATE = false;
   renderQuickModeInner();
+  const tagInp = document.getElementById('qmTagInput');
+  if(tagInp){ tagInp.focus(); return; }
   const qtyInp = document.getElementById('qmQtyInput');
-  if(qtyInp){ qtyInp.focus(); qtyInp.select(); }
+  if(qtyInp && !qtyInp.disabled){ qtyInp.focus(); qtyInp.select(); }
+}
+function qmAvailTags(){
+  const item = qmSelectedItem();
+  return (QM_DOMAIN==='stock' && item && item.tags) ? item.tags.filter(t=>t.status==='available') : [];
+}
+function qmRunTagSearch(q){
+  const tags = qmAvailTags();
+  const ql = (q||'').trim().toLowerCase();
+  QM_TAG_CURRENT_RESULTS = ql ? tags.filter(t=>(t.tag||'').toLowerCase().includes(ql)).slice(0,8) : tags.slice(0,8);
+  QM_TAG_HL_INDEX = QM_TAG_CURRENT_RESULTS.length ? 0 : -1;
+  qmRenderTagDropdown();
+}
+function qmRenderTagDropdown(){
+  const dd = document.getElementById('qmTagDropdown');
+  if(!dd) return;
+  const q = document.getElementById('qmTagInput').value.trim();
+  if(!q && !QM_TAG_CURRENT_RESULTS.length){ dd.innerHTML=''; return; }
+  if(!QM_TAG_CURRENT_RESULTS.length){
+    dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا يوجد تاج مطابق</div></div>`;
+    return;
+  }
+  dd.innerHTML = `<div class="qm-dropdown">${QM_TAG_CURRENT_RESULTS.map((t,i)=>{
+    return `<div class="qm-dropdown-item ${i===QM_TAG_HL_INDEX?'hl':''}" data-tagpick="${esc(t.tag)}">
+      <span class="mono">${esc(t.tag)}</span>
+    </div>`;
+  }).join('')}</div>`;
+  dd.querySelectorAll('[data-tagpick]').forEach(row=>{
+    row.addEventListener('click', ()=>qmSelectTag(row.dataset.tagpick));
+  });
+}
+function qmSelectTag(tagValue){
+  const exists = qmAvailTags().find(t=>t.tag===tagValue);
+  if(!exists) return;
+  QM_TAG_SELECTED = tagValue;
+  QM_TAG_CURRENT_RESULTS = [];
+  renderQuickModeInner();
+  const tagInp = document.getElementById('qmTagInput');
+  if(tagInp) tagInp.focus();
 }
 let QM_LAST_WARN_STATE = false;
 function qmRefreshValidationOnly(){
@@ -2686,8 +3254,10 @@ function qmRefreshValidationOnly(){
   const remaining = qmItemRemaining(item);
   const willExceed = (QM_DOMAIN==='stock' || QM_DIRECTION==='OUT') && Number(QM_QTY) > remaining;
   const qtyValid = Number(QM_QTY) > 0;
+  const needsTag = QM_DOMAIN==='stock' && qmAvailTags().length>0;
+  const canSubmit = qtyValid && !willExceed && (!needsTag || !!QM_TAG_SELECTED);
   const submitBtn = document.getElementById('qmSubmitBtn');
-  if(submitBtn) submitBtn.disabled = !(qtyValid && !willExceed);
+  if(submitBtn) submitBtn.disabled = !canSubmit;
   if(willExceed !== QM_LAST_WARN_STATE){
     QM_LAST_WARN_STATE = willExceed;
     const cursorPos = document.getElementById('qmQtyInput') ? document.getElementById('qmQtyInput').selectionStart : null;
@@ -2704,18 +3274,23 @@ function focusQtyKeepCursor(){
 async function qmSubmit(){
   const item = qmSelectedItem();
   if(!item) return;
+  const needsTag = QM_DOMAIN==='stock' && qmAvailTags().length>0;
+  if(needsTag && !QM_TAG_SELECTED){
+    alert('اختر التاج المطلوب إخراجه أولاً لتتمكن من التأكيد.');
+    return;
+  }
   const submitBtn = document.getElementById('qmSubmitBtn');
   if(submitBtn) submitBtn.disabled = true;
   const res = QM_DOMAIN==='stock'
-    ? await submitStockQuickOut({code: QM_SELECTED_KEY, qty: QM_QTY, destination: QM_DESTINATION, reason: QM_REASON})
-    : await submitGoodsQuickEntry({key: QM_SELECTED_KEY, qty: QM_QTY, direction: QM_DIRECTION, source:'وضع المستودع السريع'});
+    ? await submitStockQuickOut({code: QM_SELECTED_KEY, qty: needsTag ? 1 : QM_QTY, destination: QM_DESTINATION, reason: QM_REASON, tag: QM_TAG_SELECTED})
+    : await submitGoodsQuickEntry({key: QM_SELECTED_KEY, qty: QM_QTY, direction: QM_DIRECTION, site: QM_DESTINATION, source:'وضع المستودع السريع'});
   if(!res.ok){
     alert(res.msg);
     if(submitBtn) submitBtn.disabled = false;
     return;
   }
-  // إعادة الضبط الكاملة كما طُلب: تفريغ المادة، إعادة الكمية لـ1، رجوع التركيز لخانة البحث
-  QM_SELECTED_KEY = null; QM_QTY = 1; QM_DIRECTION='IN'; QM_DESTINATION=''; QM_REASON=''; QM_LAST_WARN_STATE = false;
+  // إعادة الضبط: تفريغ المادة، إعادة الكمية لـ1، رجوع التركيز لخانة البحث — مع الحفاظ على اسم الموقع المثبَّت (QM_DESTINATION) لإخراج التالي
+  QM_SELECTED_KEY = null; QM_QTY = 1; QM_DIRECTION='IN'; QM_TAG_SELECTED = null; QM_REASON=''; QM_LAST_WARN_STATE = false;
   QM_FLASH_MSG = res.msg;
   renderQuickModeInner();
   const searchInp = document.getElementById('qmSearch');
@@ -2793,8 +3368,9 @@ function qmStopBarcodeScanner(){
 /* ---- تبويب: استلام مواد 4G ---- */
 function renderSetupTab(el){
   el.innerHTML = `
+    ${renderIssuesInlineBanner(['DUPLICATE_TAG_IN_RECEIPT','TAG_QTY_MISMATCH','DUPLICATE_TAG_DISMANTLED'], 'setup')}
     <div class="panel">
-      <h2>استلام مواد 4G</h2>
+      <h2>${L('setup_heading')}<button class="records-btn" id="btnRecordsReceipts" type="button">📋 السجل</button></h2>
       <div class="desc">ارفع ملف الاستلام (شيت "Consolidated Materials" وشيت "Tags" اختياري). يُضاف تلقائياً إلى مواد 4G المتوفرة — إن كان الكود موجوداً سلفاً تُزاد كميته، وإن كان جديداً يُنشأ صنف جديد.</div>
       <div class="filebox">
         <label class="flabel">ملف المواد المستلمة (.xlsx)</label>
@@ -2804,7 +3380,7 @@ function renderSetupTab(el){
       <div class="btnrow"><button class="primary" id="btnIngestReceipt">معالجة ودمج مع الرصيد</button></div>
     </div>
     <div class="panel">
-      <h2>إضافة مواد مفكوكة (مواد ارجاع)</h2>
+      <h2>${L('setup_dismantled_heading')}<button class="records-btn" id="btnRecordsDismantled" type="button">📋 السجل</button></h2>
       <div class="desc">ارفع ملف "مواد ارجاع". كل صف يُضاف كوحدة مستقلة إلى سجل المفكوكة — هذه المواد تُرجَع بالكامل للمورد ولا تدخل رصيد الصرف.</div>
       <div class="filebox">
         <label class="flabel">ملف مواد الإرجاع (.xlsx)</label>
@@ -2814,13 +3390,13 @@ function renderSetupTab(el){
       <div class="btnrow"><button class="primary" id="btnIngestDism">معالجة وإضافة للسجل</button></div>
     </div>
     <div class="panel">
-      <h2>ملخص سريع</h2>
+      <h2>${L('setup_summary_heading')}</h2>
       <div class="kpi-grid">
         <div class="kpi"><div class="num">${Object.keys(STATE.stock).length}</div><div class="lbl">عدد الأصناف في الرصيد</div></div>
         <div class="kpi"><div class="num">${STATE.dismantled.length}</div><div class="lbl">صفوف مواد مفكوكة</div></div>
         <div class="kpi"><div class="num">${STATE.processedFiles.length}</div><div class="lbl">ملفات تم استيعابها</div></div>
       </div>
-      <h3>آخر الملفات المعالَجة</h3>
+      <h3>${L('setup_files_heading')}</h3>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>الملف</th><th>النوع</th><th>التاريخ</th><th>الحالة</th><th></th></tr></thead>
         <tbody>
@@ -2843,6 +3419,13 @@ function renderSetupTab(el){
       alert(res.msg);
       if(res.ok) renderApp();
     });
+  });
+  wireIssuesInlineBanner(el, 'setup');
+  document.getElementById('btnRecordsReceipts').addEventListener('click', ()=>{
+    openRecordsModal('📋 '+L('tab_receipts'), renderReceiptsTab);
+  });
+  document.getElementById('btnRecordsDismantled').addEventListener('click', ()=>{
+    openRecordsModal('📋 '+L('tab_dismantled'), renderDismantledTab);
   });
   document.getElementById('btnIngestReceipt').addEventListener('click', async ()=>{
     const inp = document.getElementById('receiptFile');
@@ -2909,7 +3492,7 @@ function renderReceiptsTab(el){
 
   el.innerHTML = `
     <div class="panel">
-      <h2>سجل استلام مواد 4G</h2>
+      <h2>${L('receipts_heading')}</h2>
       <div class="desc">كل ملف تم رفعه من "استلام مواد 4G" يُسجَّل هنا كاستلام مستقل برقم خاص به، منفصل تماماً عن بقية الاستلامات.</div>
       <div class="grid2" style="margin-bottom:12px;">
         <input type="text" id="receiptsSearchInput" placeholder="ابحث برقم الاستلام / اسم الملف / اسم المادة..." value="${esc(RECEIPTS_SEARCH_Q)}">
@@ -2928,7 +3511,7 @@ function renderReceiptsTab(el){
       </div>` : ''}
       <div class="btnrow"><button class="secondary" id="btnExportReceipts">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>رقم الاستلام</th><th>التاريخ</th><th>اسم الملف</th><th>عدد الأصناف</th><th>إجمالي الكميات</th><th></th><th></th></tr></thead>
+        <thead><tr><th>${L('receipts_th_number')}</th><th>${L('receipts_th_date')}</th><th>${L('receipts_th_file')}</th><th>${L('receipts_th_items')}</th><th>${L('receipts_th_total')}</th><th></th><th></th></tr></thead>
         <tbody>
           ${rows.map(f=>`<tr>
             <td class="code-cell">#${String(f.receiptNumber||0).padStart(3,'0')}</td>
@@ -2982,10 +3565,10 @@ function renderReceiptDetail(){
   const items = Object.entries(fileRec.contributions||{});
   area.innerHTML = `
     <div class="panel">
-      <h2>تفاصيل الاستلام #${String(fileRec.receiptNumber||0).padStart(3,'0')}</h2>
+      <h2>${L('receipt_detail_heading')} #${String(fileRec.receiptNumber||0).padStart(3,'0')}</h2>
       <div class="desc">التاريخ: ${fileRec.date} — الملف: ${esc(fileRec.name)}</div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>اسم المادة</th><th>الكود</th><th>الكمية المستلمة في هذا الاستلام</th><th>الرصيد الحالي الإجمالي للصنف (كل الاستلامات)</th></tr></thead>
+        <thead><tr><th>${L('receipt_detail_th_name')}</th><th>${L('receipt_detail_th_code')}</th><th>${L('receipt_detail_th_qty')}</th><th>${L('receipt_detail_th_balance')}</th></tr></thead>
         <tbody>
           ${items.map(([code,c])=>{
             const stockEntry = STATE.stock[code];
@@ -3068,11 +3651,12 @@ function renderMovementsTab(el){
   if(MOV_TYPE_FILTER!=='all') rows = rows.filter(e=>e.type===MOV_TYPE_FILTER);
   rows = rows.filter(e=>receiptDateInRange(e.date, MOV_DATE_FILTER, MOV_DATE_FROM, MOV_DATE_TO));
   rows = rows.slice().reverse(); // الأحدث أولاً
+  const isAdmin = CURRENT_ROLE === 'admin';
 
   el.innerHTML = `
     <div class="panel">
-      <h2>سجل حركات مواد 4G</h2>
-      <div class="desc">كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.</div>
+      <h2>${L('movements_heading')}</h2>
+      <div class="desc">كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.${isAdmin?' <b>💡 يمكنك تعديل أي قيمة مباشرة بالضغط على الخانة.</b>':''}</div>
       <div class="grid2" style="margin-bottom:12px;">
         <input type="text" id="movSearchInput" placeholder="ابحث باسم المادة / الكود / رقم الاستلام / SID / الموقع..." value="${esc(MOV_SEARCH_Q)}">
         <select id="movTypeFilter">
@@ -3098,27 +3682,43 @@ function renderMovementsTab(el){
         <div><label class="flabel">إلى تاريخ</label><input type="date" id="movDateTo" value="${esc(MOV_DATE_TO)}"></div>
       </div>` : ''}
       <div class="btnrow"><button class="secondary" id="btnExportMovements">📥 تصدير إلى Excel</button></div>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاريخ</th><th>نوع الحركة</th><th>اسم المادة</th><th>الكود</th><th>الكمية</th><th>الرصيد بعد الحركة</th><th>المصدر/الجهة</th><th>رقم الاستلام</th><th>ملاحظات</th></tr></thead>
+      <div class="tablewrap"><table class="data movements-table">
+        <thead><tr><th>${L('movements_th_date')}</th><th>${L('movements_th_type')}</th><th>${L('movements_th_name')}</th><th>${L('movements_th_code')}</th><th>${L('movements_th_qty')}</th><th>${L('movements_th_balance')}</th><th>${L('movements_th_source')}</th><th>${L('movements_th_receipt')}</th><th>${L('movements_th_notes')}</th>${isAdmin?'<th></th>':''}</tr></thead>
         <tbody>
           ${rows.map(e=>{
             const stockEntry = STATE.stock[e.code];
             const balanceNow = stockEntry ? (stockEntry.total_quantity - stockEntry.issued_quantity) : '—';
-            const typeLabel = MOVEMENT_TYPE_LABELS[e.type] || e.type;
-            const qtyDisplay = (e.type==='ISSUED' ? '-' : (e.qty>=0?'+':'')) + Math.abs(e.qty);
             const recLabel = receiptLabelForSig(e.fileSig);
+            if(isAdmin){
+              return `<tr data-ledger-id="${e.id}">
+                <td><input type="date" class="mov-edit" data-field="date" data-id="${e.id}" value="${esc(e.date)}"></td>
+                <td><select class="mov-edit" data-field="type" data-id="${e.id}">
+                  <option value="RECEIVED" ${e.type==='RECEIVED'?'selected':''}>استلام</option>
+                  <option value="ISSUED" ${e.type==='ISSUED'?'selected':''}>إخراج</option>
+                  <option value="ADJUSTMENT" ${e.type==='ADJUSTMENT'?'selected':''}>تعديل/تصحيح</option>
+                </select></td>
+                <td><input type="text" class="mov-edit" data-field="description" data-id="${e.id}" value="${esc(e.description)}"></td>
+                <td class="code-cell"><input type="text" class="mov-edit code-input" data-field="code" data-id="${e.id}" value="${esc(e.code)}"></td>
+                <td><input type="text" inputmode="numeric" class="mov-edit num-input ${e.type==='ISSUED'?'tag-warn':(e.qty<0?'tag-bad':'')}" data-field="qty" data-id="${e.id}" value="${e.qty}"></td>
+                <td class="mov-balance" data-bal-for="${e.id}">${balanceNow}</td>
+                <td><input type="text" class="mov-edit" data-field="source" data-id="${e.id}" value="${esc(e.source||e.site||'')}"></td>
+                <td class="code-cell">${esc(recLabel)}</td>
+                <td><input type="text" class="mov-edit" data-field="notes" data-id="${e.id}" value="${esc(e.notes||'')}"></td>
+                <td><span class="mov-save-status" id="movStatus_${e.id}"></span></td>
+              </tr>`;
+            }
             return `<tr>
               <td>${e.time?e.time+' — ':''}${e.date}</td>
-              <td>${typeLabel}${e.correction?' <span class="qm-recent-badge">↩ تصحيح</span>':''}</td>
+              <td>${MOVEMENT_TYPE_LABELS[e.type]||e.type}${e.correction?' <span class="qm-recent-badge">↩ تصحيح</span>':''}</td>
               <td>${esc(e.description)}</td>
               <td class="code-cell">${esc(e.code)}</td>
-              <td class="${e.type==='ISSUED'?'tag-warn':(e.qty<0?'tag-bad':'')}">${qtyDisplay}</td>
+              <td class="${e.type==='ISSUED'?'tag-warn':(e.qty<0?'tag-bad':'')}">${(e.type==='ISSUED'?'-':(e.qty>=0?'+':''))+Math.abs(e.qty)}</td>
               <td>${balanceNow}</td>
               <td>${esc(e.source||e.site||'')}</td>
               <td class="code-cell">${esc(recLabel)}</td>
               <td>${esc(e.notes||'')}</td>
             </tr>`;
-          }).join('') || `<tr><td colspan="9" class="empty">${q||MOV_TYPE_FILTER!=='all'||MOV_DATE_FILTER!=='all'?'لا توجد حركات مطابقة':'لا توجد حركات بعد'}</td></tr>`}
+          }).join('') || `<tr><td colspan="${isAdmin?10:9}" class="empty">${q||MOV_TYPE_FILTER!=='all'||MOV_DATE_FILTER!=='all'?'لا توجد حركات مطابقة':'لا توجد حركات بعد'}</td></tr>`}
         </tbody>
       </table></div>
     </div>
@@ -3137,7 +3737,187 @@ function renderMovementsTab(el){
       const balanceNow = stockEntry ? (stockEntry.total_quantity - stockEntry.issued_quantity) : '';
       return [e.date, receiptLabelForSig(e.fileSig), e.description, e.code, MOVEMENT_TYPE_LABELS[e.type]||e.type, e.qty, balanceNow, e.source||e.site||'', e.notes||''];
     });
-    exportSectionToExcel(headers, exportRows, 'سجل حركات مواد 4G', [12,12,26,16,14,10,14,18,26]);
+exportSectionToExcel(headers, exportRows, 'سجل حركات مواد 4G', [12,12,26,16,14,10,14,18,26]);
+  });
+  if(isAdmin) bindMovementsEditListeners(el);
+}
+
+/* ---- تعديل الحركات مباشرة (Admin فقط) ---- */
+function bindMovementsEditListeners(el){
+  const statusMap = {};
+  el.querySelectorAll('.mov-edit').forEach(inp=>{
+    inp.addEventListener('change', async ()=>{
+      const id = inp.dataset.id;
+      const field = inp.dataset.field;
+      const entry = STATE.ledger.find(e=>e.id===id);
+      if(!entry){ statusMsg(id,'&nbsp;خطأ: الحركة غير موجودة','bad'); return; }
+      let val = inp.value;
+      if(field==='qty'){
+        val = parseFloat(val);
+        if(isNaN(val)){ statusMsg(id,'قيمة غير صالحة','bad'); inp.focus(); return; }
+      }
+      const oldVal = entry[field];
+      if(String(val) === String(oldVal)){ statusMsg(id,'', 'ok'); return; }
+      if(field==='code'){
+        val = val.trim();
+        if(!val){ statusMsg(id,'الكود لا يمكن أن يكون فارغاً','bad'); inp.focus(); return; }
+      }
+      statusMsg(id,'جاري الحفظ…','');
+      try{
+        // عند تعديل الكود: تحديث الرصيد في STATE.stock الجديد والقديم
+        if(field==='code' && entry.code && oldVal !== val){
+          const oldStock = STATE.stock[oldVal];
+          const newStock = STATE.stock[val];
+          if(oldStock){
+            oldStock.total_quantity -= (entry.type==='RECEIVED' ? entry.qty : 0);
+            oldStock.issued_quantity -= (entry.type==='ISSUED' ? entry.qty : 0);
+            if(oldStock.total_quantity <= 0 && oldStock.issued_quantity <= 0 && !(oldStock.tags&&oldStock.tags.length)){
+              delete STATE.stock[oldVal];
+            }
+          }
+          if(!newStock){
+            STATE.stock[val] = {code:val, description:entry.description||val, total_quantity:0, issued_quantity:0, tags:[], first_seen:todayStr()};
+          }
+          if(newStock){
+            newStock.total_quantity += (entry.type==='RECEIVED' ? entry.qty : 0);
+            newStock.issued_quantity += (entry.type==='ISSUED' ? entry.qty : 0);
+          }
+          entry.code = val;
+        }
+        // عند تعديل الكمية: تحديث رصيد STATE.stock بنفس الاختلاف
+        else if(field==='qty'){
+          const diff = val - entry.qty;
+          const stockEntry = STATE.stock[entry.code];
+          if(stockEntry){
+            if(entry.type==='RECEIVED') stockEntry.total_quantity += diff;
+            else if(entry.type==='ISSUED') stockEntry.issued_quantity += diff;
+          }
+          entry.qty = val;
+        }
+        else if(field==='type'){
+          const oldType = entry.type;
+          const stockEntry = STATE.stock[entry.code];
+          if(stockEntry && oldType!==val){
+            if(oldType==='RECEIVED') stockEntry.total_quantity -= entry.qty;
+            if(oldType==='ISSUED') stockEntry.issued_quantity -= entry.qty;
+            if(val==='RECEIVED') stockEntry.total_quantity += entry.qty;
+            if(val==='ISSUED') stockEntry.issued_quantity += entry.qty;
+          }
+          entry.type = val;
+        }
+        else {
+          entry[field] = val;
+        }
+        // تحديث حقل source يخزّن أيضاً في site (للتوافق مع السلوك القديم)
+        if(field==='source'){ entry.source = val; entry.site = val; }
+        await saveState(['ledger','stock']);
+        statusMsg(id,'✓ تم الحفظ','ok');
+        setTimeout(()=> { // تحديث عمود الرصيد في نفس الصف
+          const balCell = el.querySelector(`[data-bal-for="${id}"]`);
+          if(balCell){
+            const st = STATE.stock[entry.code];
+            balCell.textContent = st ? (st.total_quantity - st.issued_quantity) : '—';
+          }
+        }, 300);
+      }catch(err){
+        statusMsg(id,'خطأ في الحفظ','bad');
+        console.error(err);
+      }
+    });
+  });
+  function statusMsg(id, text, kind){
+    const cell = document.getElementById('movStatus_'+id);
+    if(!cell) return;
+    cell.innerHTML = text;
+    cell.className = 'mov-save-status';
+    if(kind==='ok') cell.classList.add('ok');
+    if(kind==='bad') cell.classList.add('bad');
+    setTimeout(()=>{ if(cell) cell.innerHTML=''; }, 3000);
+  }
+}
+
+function openModal(title, bodyContent, opts){
+  closeModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'activeModalOverlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  if(opts && opts.maxWidth) box.style.maxWidth = opts.maxWidth;
+  box.innerHTML = `<div class="modal-head"><h2>${title}</h2><button class="modal-close" id="modalCloseBtn" type="button">✕</button></div><div class="modal-body" id="modalBodyEl"></div>`;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  const bodyEl = box.querySelector('#modalBodyEl');
+  if(typeof bodyContent === 'function'){ bodyContent(bodyEl); }
+  else { bodyEl.innerHTML = bodyContent; }
+  box.querySelector('#modalCloseBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
+  document.addEventListener('keydown', modalEscHandler);
+}
+function closeModal(){
+  const ov = document.getElementById('activeModalOverlay');
+  if(ov) ov.remove();
+  document.removeEventListener('keydown', modalEscHandler);
+}
+function modalEscHandler(e){ if(e.key==='Escape') closeModal(); }
+function wireModalQuickFilter(bodyEl, tableSelector){
+  const inp = bodyEl.querySelector('.modal-filter');
+  const table = bodyEl.querySelector(tableSelector || '.data');
+  if(!inp || !table) return;
+  inp.addEventListener('input', ()=>{
+    const q = inp.value.trim().toLowerCase();
+    table.querySelectorAll('tbody tr').forEach(tr=>{
+      tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+}
+function openRecordsModal(title, renderFn, tableSelector){
+  openModal(title, (bodyEl)=>{
+    const filterInp = document.createElement('input');
+    filterInp.type = 'text';
+    filterInp.className = 'modal-filter';
+    filterInp.placeholder = 'فلترة سريعة داخل هذا السجل...';
+    bodyEl.appendChild(filterInp);
+    const contentWrap = document.createElement('div');
+    bodyEl.appendChild(contentWrap);
+    renderFn(contentWrap);
+    wireModalQuickFilter(bodyEl, tableSelector || '.data');
+  });
+}
+function issuesCountByTypes(types){
+  return STATE.issues.filter(i=>types.includes(i.type)).length;
+}
+function renderIssuesInlineBanner(types, sectionLabel){
+  const n = issuesCountByTypes(types);
+  if(!n) return '';
+  return `<div class="msg warn" style="cursor:pointer;" id="issuesInlineBanner_${sectionLabel}">⚠️ ${n} مشكلة مسجلة في هذا القسم — اضغط للعرض</div>`;
+}
+function wireIssuesInlineBanner(el, sectionLabel){
+  const b = el.querySelector(`#issuesInlineBanner_${sectionLabel}`) || document.getElementById(`issuesInlineBanner_${sectionLabel}`);
+  if(b) b.addEventListener('click', ()=>{ openModal('⚠️ '+L('tab_issues'), (bodyEl)=>{ renderIssuesTab(bodyEl); }); });
+}
+function renderGoodsLedgerModalContent(el){
+  const ledger = STATE.goodsLedger.slice().reverse();
+  el.innerHTML = `<div class="tablewrap"><table class="data">
+    <thead><tr><th>${L('goods_ledger_th_date')}</th><th>${L('goods_ledger_th_type')}</th><th>${L('goods_ledger_th_name')}</th><th>${L('goods_ledger_th_qty')}</th><th>${L('goods_ledger_th_note')}</th><th>${L('goods_ledger_th_source')}</th><th>${L('goods_ledger_th_action')}</th></tr></thead>
+    <tbody>
+      ${ledger.map(e=>`<tr>
+        <td>${e.date}</td>
+        <td>${e.direction==='IN'?'<span class="pill ok">إدخال</span>':'<span class="pill warn">إخراج</span>'}</td>
+        <td>${esc(e.name)}</td>
+        <td>${e.qty}</td>
+        <td>${esc(e.note)}${e.site?` <span style="color:var(--muted);font-size:11.5px;">— الموقع: ${esc(e.site)}</span>`:''}</td>
+        <td>${esc(e.source)}</td>
+        <td><button class="danger" data-delgoods="${e.id}">حذف</button></td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد حركات بعد</td></tr>'}
+    </tbody>
+  </table></div>`;
+  el.querySelectorAll('[data-delgoods]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!confirm('هل تريد حذف هذه الحركة؟ سيُعاد احتساب الرصيد فوراً.')) return;
+      const res = await deleteGoodsEntry(btn.dataset.delgoods);
+      if(res.ok){ closeModal(); renderApp(); } else alert(res.msg);
+    });
   });
 }
 
@@ -3183,8 +3963,9 @@ let BATCH_SIDS = []; // [{filename, site, items:[{code,description,category,qty}
 
 function renderSidTab(el){
   el.innerHTML = `
+    ${renderIssuesInlineBanner(['UNMATCHED_MATERIAL'], 'sid')}
     <div class="panel">
-      <h2>رفع ملف أو عدة ملفات SID</h2>
+      <h2>${L('sid_heading')}<button class="records-btn" id="btnRecordsSidHistory" type="button">📋 سجل SID المنفّذة</button></h2>
       <div class="desc">يمكنك اختيار أكثر من ملف SID دفعة واحدة — كل ملف يمثّل موقعاً واحداً ويُعالَج على حدة، ثم يمكنك مراجعة/تعديل الكميات لكل موقع قبل التأكيد النهائي، وستحصل على تقرير مجمَّع واحد لكل المواقع المنفَّذة.</div>
       <div class="filebox">
         <label class="flabel">ملف/ملفات SID (.xlsx)</label>
@@ -3195,6 +3976,10 @@ function renderSidTab(el){
     </div>
     <div id="sidPreviewArea"></div>
   `;
+  wireIssuesInlineBanner(el, 'sid');
+  document.getElementById('btnRecordsSidHistory').addEventListener('click', ()=>{
+    openRecordsModal('📋 '+L('tab_sidhistory'), renderSidHistoryTab);
+  });
   document.getElementById('btnParseSid').addEventListener('click', async ()=>{
     const inp = document.getElementById('sidFile');
     if(!inp.files.length){ showMsg('sidMsg','warn','اختر ملف SID واحد أو أكثر أولاً.'); return; }
@@ -3247,7 +4032,7 @@ function renderBatchPreview(){
 
   area.innerHTML = `
     <div class="panel">
-      <h2>ملخص الدفعة (${BATCH_SIDS.length} ملف)</h2>
+      <h2>${L('sid_batch_summary_heading')} (${BATCH_SIDS.length} ملف)</h2>
       <div class="kpi-grid">
         <div class="kpi"><div class="num">${grand.sites}</div><div class="lbl">مواقع جاهزة للتنفيذ</div></div>
         <div class="kpi"><div class="num">${grand.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
@@ -3351,16 +4136,17 @@ function renderStockTab(el){
   const rows = allRows.filter(s => !STOCK_HIDE_ZERO || (s.total_quantity - s.issued_quantity) !== 0);
   el.innerHTML = `
     <div class="panel">
-      <h2>مواد 4G المتوفرة</h2>
-      <div class="desc">الرصيد التراكمي لكل صنف بعد كل عمليات الاستلام والصرف.</div>
+      <h2>${L('stock_heading')}</h2>
+      <div class="desc">${L('stock_desc')}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
           <input type="checkbox" id="stockHideZeroToggle" ${STOCK_HIDE_ZERO?'checked':''}> إخفاء المواد ذات الرصيد صفر
         </label>
         <button class="secondary" id="btnExportStock" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button>
+        ${CURRENT_ROLE==='admin' ? `<button class="col-mgmt-btn" id="btnColMgmt_stock">⚙️ إدارة الأعمدة</button>` : ''}
       </div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>الكود</th><th>الوصف</th><th>إجمالي مستلم</th><th>مصروف</th><th>المتبقي</th><th>تاجات متوفرة</th></tr></thead>
+        <thead><tr><th>${L('stock_th_code')}</th><th>${L('stock_th_desc')}</th><th>${L('stock_th_received')}</th><th>${L('stock_th_issued')}</th><th>${L('stock_th_remaining')}</th><th>${L('stock_th_tags')}</th>${renderCustomColHeaders('stock')}</tr></thead>
         <tbody>
           ${rows.map(s=>{
             const remaining = s.total_quantity - s.issued_quantity;
@@ -3372,8 +4158,9 @@ function renderStockTab(el){
               <td>${s.issued_quantity}</td>
               <td class="${cls}">${remaining}</td>
               <td>${s.tags.filter(t=>t.status==='available').length}</td>
+              ${renderCustomColCells('stock', s.code)}
             </tr>`;
-          }).join('') || `<tr><td colspan="6" class="empty">${STOCK_HIDE_ZERO?'لا توجد مواد برصيد غير صفري':'لا توجد بيانات بعد — ابدأ من تبويب استلام مواد 4G'}</td></tr>`}
+          }).join('') || `<tr>          <td colspan="${6 + getCustomCols('stock').length}" class="empty">${STOCK_HIDE_ZERO?'لا توجد مواد برصيد غير صفري':'لا توجد بيانات بعد — ابدأ من تبويب استلام مواد 4G'}</td></tr>`}
         </tbody>
       </table></div>
     </div>
@@ -3387,6 +4174,10 @@ function renderStockTab(el){
     const exportRows = rows.map(s=>[s.code, s.description, s.total_quantity, s.issued_quantity, s.total_quantity-s.issued_quantity, s.tags.filter(t=>t.status==='available').length]);
     exportSectionToExcel(headers, exportRows, 'مواد 4G المتوفرة', [18,40,16,12,14,16]);
   });
+  const btnMgmt = document.getElementById('btnColMgmt_stock');
+  if(btnMgmt) btnMgmt.addEventListener('click', ()=>{
+    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
+  });
 }
 
 /* ---- تبويب: مواد ارجاع ---- */
@@ -3394,11 +4185,11 @@ function renderDismantledTab(el){
   const rows = STATE.dismantled.slice().reverse();
   el.innerHTML = `
     <div class="panel">
-      <h2>مواد ارجاع (تُرجَع بالكامل للمورد)</h2>
+      <h2>${L('dismantled_heading')}</h2>
       <div class="desc">هذا السجل معلوماتي فقط — لا يُستخدم أبداً لتلبية أي SID.</div>
       <div class="btnrow"><button class="secondary" id="btnExportDismantled" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاج</th><th>المادة</th><th>من</th><th>إلى</th><th>ملاحظة</th><th>التاريخ</th></tr></thead>
+        <thead><tr><th>${L('dismantled_th_tag')}</th><th>${L('dismantled_th_material')}</th><th>${L('dismantled_th_from')}</th><th>${L('dismantled_th_to')}</th><th>${L('dismantled_th_note')}</th><th>${L('dismantled_th_date')}</th>${renderCustomColHeaders('dismantled')}</tr></thead>
         <tbody>
           ${rows.map(d=>`<tr>
             <td class="code-cell">${esc(d.tag_display)}</td>
@@ -3407,6 +4198,7 @@ function renderDismantledTab(el){
             <td>${esc(d.to)}</td>
             <td>${esc(d.note)}</td>
             <td>${d.date_added}</td>
+            ${renderCustomColCells('dismantled', d.id)}
           </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد بيانات بعد</td></tr>'}
         </tbody>
       </table></div>
@@ -3429,8 +4221,9 @@ function renderGoodsTab(el){
   const catalogCount = Object.keys(STATE.goodsCatalog).length;
   const ledger = STATE.goodsLedger.slice().reverse();
   el.innerHTML = `
+    ${renderIssuesInlineBanner(['UNMATCHED_GOODS_ITEM'], 'goods')}
     <div class="panel">
-      <h2>كتالوج الأصناف</h2>
+      <h2>${L('goods_heading')}</h2>
       <div class="desc">استورد ملف يحتوي أسماء الأصناف (كود/الاسم/التصنيف/الوحدة) — يصبح هذا الكتالوج هو المرجع الوحيد لمطابقة أي إدخال أو إخراج بالاسم. الاستيراد إضافي فقط: لا يحذف أي صنف موجود مسبقاً. عدد الأصناف المسجَّلة حالياً: <b>${catalogCount}</b>.</div>
       <div class="filebox">
         <label class="flabel">ملف الكتالوج (.xlsx)</label>
@@ -3438,7 +4231,7 @@ function renderGoodsTab(el){
       </div>
       <div id="catalogMsg"></div>
       <div class="btnrow"><button class="primary" id="btnImportCatalog">استيراد/تحديث الكتالوج</button></div>
-      <h3>إضافة صنف جديد يدوياً (إذا لم يكن موجوداً في القائمة)</h3>
+      <h3>${L('goods_add_heading')}</h3>
       <div class="grid2">
         <div><label class="flabel">اسم الصنف *</label><input type="text" id="newItemName" placeholder="مثال: مرابط شبك كبير 40/80"></div>
         <div><label class="flabel">كود (اختياري)</label><input type="text" id="newItemCode"></div>
@@ -3451,14 +4244,14 @@ function renderGoodsTab(el){
     </div>
 
     <div class="panel">
-      <h2>البحث في الكتالوج</h2>
+      <h2>${L('goods_search_heading')}</h2>
       <div class="desc">اكتب جزءاً من اسم الصنف لعرض النتائج المطابقة فوراً، مع إجمالي ما تم شراؤه وإخراجه والمتبقي.</div>
       <input type="text" id="goodsSearchInput" placeholder="اكتب للبحث... مثال: براغي">
       <div id="goodsSearchResults" style="margin-top:14px;"></div>
     </div>
 
     <div class="panel">
-      <h2>تسجيل حركة سريعة (صنف واحد)</h2>
+      <h2>${L('goods_quick_heading')}</h2>
       <div class="grid2">
         <div>
           <label class="flabel">ابحث واختر الصنف</label>
@@ -3494,7 +4287,7 @@ function renderGoodsTab(el){
     </div>
 
     <div class="panel">
-      <h2>رفع ملف كميات (دفعة) — شراء أو إخراج لجوال</h2>
+      <h2>${L('goods_batch_heading')}</h2>
       <div class="desc">ارفع أي ملف بنفس شكل ملفات الشركة (اسم الصنف في العمود الثاني، الكمية في العمود الخامس). سيُطابَق كل صنف بالاسم مع الكتالوج، وتقدر تعدّل أي كمية وتراجع النتيجة قبل التأكيد النهائي.</div>
       <div class="grid2">
         <div class="filebox">
@@ -3515,7 +4308,7 @@ function renderGoodsTab(el){
     <div id="goodsBatchPreviewArea"></div>
 
     <div class="panel">
-      <h2>ملخص الأصناف والرصيد المتبقي</h2>
+      <h2>${L('goods_summary_heading')}</h2>
       <div class="desc">هذا الجدول هو مرجعك لمعرفة المواد الموجودة عندك فعلياً الآن.</div>
       <div style="margin-bottom:12px;">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
@@ -3526,7 +4319,7 @@ function renderGoodsTab(el){
       <div class="msg warn">⚠ ${lowStockItems().length} صنف وصل أو تجاوز حد التنبيه: ${lowStockItems().map(it=>`${esc(it.name)} (${it.totalIn-it.totalOut})`).join('، ')}</div>
       ` : ''}
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>كود</th><th>اسم الصنف</th><th>التصنيف</th><th>الوحدة</th><th>إجمالي مُدخَل</th><th>إجمالي مُخرَج</th><th>المتبقي</th><th>حد التنبيه</th></tr></thead>
+        <thead><tr><th>${L('goods_th_code')}</th><th>${L('goods_th_name')}</th><th>${L('goods_th_category')}</th><th>${L('goods_th_unit')}</th><th>${L('goods_th_in')}</th><th>${L('goods_th_out')}</th><th>${L('goods_th_remaining')}</th><th>${L('goods_th_threshold')}</th>${renderCustomColHeaders('goods')}</tr></thead>
         <tbody>
           ${Object.values(STATE.goodsCatalog)
             .filter(it => !GOODS_SHOW_AVAILABLE_ONLY || (it.totalIn-it.totalOut)>0)
@@ -3544,24 +4337,28 @@ function renderGoodsTab(el){
               <td>${it.totalOut}</td>
               <td class="${cls}">${remaining}</td>
               <td><input type="text" inputmode="numeric" class="mono thresholdInput" data-key="${esc(key)}" value="${it.lowStockThreshold||''}" placeholder="—" style="width:64px;padding:4px 6px;"></td>
+              ${renderCustomColCells('goods', key)}
             </tr>`;
           }).join('') || `<tr><td colspan="8" class="empty">${GOODS_SHOW_AVAILABLE_ONLY?'لا يوجد أصناف برصيد متوفر حالياً':'لا يوجد كتالوج مستورَد بعد'}</td></tr>`}
         </tbody>
       </table></div>
-      <div class="btnrow"><button class="secondary" id="btnDownloadGoods">تنزيل تقرير البضاعة (Excel)</button></div>
+      <div class="btnrow">
+        <button class="secondary" id="btnDownloadGoods">تنزيل تقرير البضاعة (Excel)</button>
+        ${APP_MODE==='admin'?`<button class="secondary" id="btnColMgmt_goods" style="font-size:12.5px;padding:8px 16px;">⚙️ إدارة الأعمدة</button>`:''}
+      </div>
     </div>
 
     <div class="panel">
-      <h2>سجل الحركات</h2>
+      <h2>${L('goods_ledger_heading')}</h2>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاريخ</th><th>النوع</th><th>الصنف</th><th>الكمية</th><th>ملاحظة</th><th>المصدر</th><th></th></tr></thead>
+        <thead><tr><th>${L('goods_ledger_th_date')}</th><th>${L('goods_ledger_th_type')}</th><th>${L('goods_ledger_th_name')}</th><th>${L('goods_ledger_th_qty')}</th><th>${L('goods_ledger_th_note')}</th><th>${L('goods_ledger_th_source')}</th><th>${L('goods_ledger_th_action')}</th></tr></thead>
         <tbody>
           ${ledger.map(e=>`<tr>
             <td>${e.date}</td>
             <td>${e.direction==='IN'?'<span class="pill ok">إدخال</span>':'<span class="pill warn">إخراج</span>'}</td>
             <td>${esc(e.name)}</td>
             <td>${e.qty}</td>
-            <td>${esc(e.note)}</td>
+            <td>${esc(e.note)}${e.site?` <span style="color:var(--muted);font-size:11.5px;">— الموقع: ${esc(e.site)}</span>`:''}</td>
             <td>${esc(e.source)}</td>
             <td><button class="danger" data-delgoods="${e.id}">حذف</button></td>
           </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد حركات بعد</td></tr>'}
@@ -3570,6 +4367,7 @@ function renderGoodsTab(el){
     </div>
   `;
 
+  wireIssuesInlineBanner(el, 'goods');
   document.getElementById('btnImportCatalog').addEventListener('click', async ()=>{
     const inp = document.getElementById('catalogFile');
     if(!inp.files[0]){ showMsg('catalogMsg','warn','اختر ملف الكتالوج أولاً.'); return; }
@@ -3679,6 +4477,10 @@ function renderGoodsTab(el){
   });
 
   document.getElementById('btnDownloadGoods').addEventListener('click', downloadGoodsReport);
+  const btnMgmtGoods = document.getElementById('btnColMgmt_goods');
+  if(btnMgmtGoods) btnMgmtGoods.addEventListener('click', ()=>{
+    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
+  });
   el.querySelectorAll('[data-delgoods]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('هل تريد حذف هذه الحركة؟ سيُعاد احتساب الرصيد فوراً.')) return;
@@ -3703,7 +4505,7 @@ function renderGoodsBatchPreview(){
   };
   area.innerHTML = `
     <div class="panel">
-      <h2>معاينة ملف: ${esc(filename)} — ${direction==='OUT'?'إخراج لجوال':'إدخال (شراء)'}</h2>
+      <h2>${L('goods_batch_preview_heading')}: ${esc(filename)} — ${direction==='OUT'?'إخراج لجوال':'إدخال (شراء)'}</h2>
       <div class="kpi-grid">
         <div class="kpi"><div class="num">${rows.length}</div><div class="lbl">أصناف</div></div>
         <div class="kpi"><div class="num">${totals.requested}</div><div class="lbl">إجمالي الكمية</div></div>
@@ -3776,10 +4578,10 @@ function renderSidHistoryTab(el){
   const entries = Object.entries(STATE.processedSids).sort((a,b)=>b[1].date.localeCompare(a[1].date));
   el.innerHTML = `
     <div class="panel">
-      <h2>سجل SID المنفَّذة</h2>
+      <h2>${L('sidhistory_heading')}</h2>
       <div class="desc">كل SID يُنفَّذ مرة واحدة فقط. من هنا يمكنك تنزيل تقرير أي SID سابق مجدداً، أو تنزيل شيت "Daily report" وحده، أو إلغاء تنفيذ SID بالخطأ لإعادة رفعه.</div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>الموقع</th><th>التاريخ</th><th>الملف</th><th>أصناف</th><th>مطلوب</th><th>مصروف</th><th>نقص</th><th></th><th></th><th></th></tr></thead>
+        <thead><tr><th>${L('sidhistory_th_site')}</th><th>${L('sidhistory_th_date')}</th><th>${L('sidhistory_th_file')}</th><th>${L('sidhistory_th_items')}</th><th>${L('sidhistory_th_requested')}</th><th>${L('sidhistory_th_issued')}</th><th>${L('sidhistory_th_shortage')}</th><th></th><th></th><th></th></tr></thead>
         <tbody>
           ${entries.map(([site,r])=>`<tr>
             <td class="code-cell">${esc(site)}</td>
@@ -3818,7 +4620,7 @@ function renderSidHistoryTab(el){
 function renderSearchTab(el){
   el.innerHTML = `
     <div class="panel">
-      <h2>البحث</h2>
+      <h2>${L('search_heading')}</h2>
       <div class="desc">ابحث بالكود، اسم المادة، رقم التاج، اسم الموقع، أو معرّف SID.</div>
       <input type="text" id="searchInput" placeholder="اكتب للبحث...">
       <div id="searchResults" style="margin-top:16px;"></div>
@@ -3844,20 +4646,20 @@ function doSearch(q){
   const sidHits = Object.entries(STATE.processedSids).filter(([site])=>site.toLowerCase().includes(ql));
 
   out.innerHTML = `
-    <h3>أصناف مطابقة (${stockHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>الكود</th><th>الوصف</th><th>المتبقي</th></tr></thead>
+    <h3>${L('search_hits_stock')} (${stockHits.length})</h3>
+    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_th_code')}</th><th>${L('search_th_desc')}</th><th>${L('search_th_remaining')}</th></tr></thead>
     <tbody>${stockHits.map(s=>`<tr><td class="code-cell">${esc(s.code)}</td><td>${esc(s.description)}</td><td>${s.total_quantity-s.issued_quantity}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
 
-    <h3>تاجات مطابقة (${tagHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>التاج</th><th>الكود</th><th>الوصف</th><th>الحالة</th><th>صُرف لـ SID</th></tr></thead>
+    <h3>${L('search_hits_tags')} (${tagHits.length})</h3>
+    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_th_tag')}</th><th>${L('search_th_code')}</th><th>${L('search_th_desc')}</th><th>${L('search_th_status')}</th><th>${L('search_th_sid')}</th></tr></thead>
     <tbody>${tagHits.map(t=>`<tr><td class="code-cell">${esc(t.tag)}</td><td class="code-cell">${esc(t.code)}</td><td>${esc(t.description)}</td><td>${t.status==='available'?'<span class="pill ok">متوفر</span>':'<span class="pill warn">مصروف</span>'}</td><td>${esc(t.issued_to_sid||'—')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
 
-    <h3>مواد مفكوكة مطابقة (${dismHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>التاج</th><th>المادة</th><th>من</th></tr></thead>
+    <h3>${L('search_hits_dismantled')} (${dismHits.length})</h3>
+    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_dism_th_tag')}</th><th>${L('search_dism_th_material')}</th><th>${L('search_dism_th_from')}</th></tr></thead>
     <tbody>${dismHits.map(d=>`<tr><td class="code-cell">${esc(d.tag_display)}</td><td>${esc(d.material)}</td><td>${esc(d.from)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
 
-    <h3>مواقع/SID مطابقة (${sidHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>الموقع</th><th>التاريخ</th><th>مصروف</th><th>نقص</th></tr></thead>
+    <h3>${L('search_hits_sids')} (${sidHits.length})</h3>
+    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_sid_th_site')}</th><th>${L('search_sid_th_date')}</th><th>${L('search_sid_th_issued')}</th><th>${L('search_sid_th_shortage')}</th></tr></thead>
     <tbody>${sidHits.map(([site,r])=>`<tr><td class="code-cell">${esc(site)}</td><td>${r.date}</td><td>${r.issued_units}</td><td>${r.shortage_units}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
   `;
 }
@@ -3867,11 +4669,11 @@ function renderIssuesTab(el){
   const rows = STATE.issues.slice().reverse();
   el.innerHTML = `
     <div class="panel">
-      <h2>المشاكل والتكرارات المسجَّلة</h2>
+      <h2>${L('issues_heading')}</h2>
       <div class="desc">هذه المشاكل تُعرض للمراجعة فقط، ولا يقوم النظام بتصحيحها تلقائياً.</div>
       <div class="btnrow"><button class="secondary" id="btnExportIssues" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>النوع</th><th>الكود</th><th>اسم المادة</th><th>التفاصيل</th><th>التاريخ</th></tr></thead>
+        <thead><tr><th>${L('issues_th_type')}</th><th>${L('issues_th_code')}</th><th>${L('issues_th_name')}</th><th>${L('issues_th_detail')}</th><th>${L('issues_th_date')}</th></tr></thead>
         <tbody>
           ${rows.map(i=>`<tr><td><span class="pill warn">${esc(i.type)}</span></td><td class="code-cell">${esc(i.code)}</td><td>${esc(i.material||'')}</td><td>${esc(i.detail)}</td><td>${i.date}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد مشاكل مسجَّلة</td></tr>'}
         </tbody>
@@ -3889,16 +4691,174 @@ function renderIssuesTab(el){
 function renderReportsTab(el){
   el.innerHTML = `
     <div class="panel">
-      <h2>تقرير شامل</h2>
-      <div class="desc">يشمل: لوحة المؤشرات، مواد 4G المتوفرة، سجل الحركات الكامل، سجل SID المنفَّذة، مواد ارجاع، والمشاكل.</div>
+      <h2>${L('reports_heading')}</h2>
+      <div class="desc">${L('reports_desc')}</div>
       <div class="btnrow"><button class="primary" id="btnFullReport">تنزيل التقرير الشامل (Excel)</button></div>
     </div>
     <div class="panel">
-      <h2>تقارير SID فردية</h2>
-      <div class="desc">لتنزيل تقرير SID محدد بعد تنفيذه، اذهب لتبويب "سجل SID المنفَّذة".</div>
+      <h2>${L('reports_sid_heading')}</h2>
+      <div class="desc">${L('reports_sid_desc')}</div>
     </div>
   `;
   document.getElementById('btnFullReport').addEventListener('click', downloadFullReport);
+}
+
+/* ---- تبويب: تخصيص الأعمدة والتسميات ---- */
+const SECTIONS_FOR_COLS = [
+  {key:'stock', title:'مواد 4G المتوفرة', builtIn:['stock_th_code','stock_th_desc','stock_th_received','stock_th_issued','stock_th_remaining','stock_th_tags']},
+  {key:'goods', title:'بضاعة المستودع', builtIn:['goods_th_code','goods_th_name','goods_th_category','goods_th_unit','goods_th_in','goods_th_out','goods_th_remaining','goods_th_threshold']},
+  {key:'dismantled', title:'مواد ارجاع', builtIn:['dismantled_th_tag','dismantled_th_material','dismantled_th_from','dismantled_th_to','dismantled_th_note','dismantled_th_date']},
+  {key:'receipts', title:'سجل الاستلام', builtIn:['receipts_th_number','receipts_th_date','receipts_th_file','receipts_th_items','receipts_th_total']},
+  {key:'movements', title:'سجل الحركات', builtIn:['movements_th_date','movements_th_type','movements_th_name','movements_th_code','movements_th_qty','movements_th_balance','movements_th_source','movements_th_receipt','movements_th_notes']},
+  {key:'sidhistory', title:'سجل SID', builtIn:['sidhistory_th_site','sidhistory_th_date','sidhistory_th_file','sidhistory_th_items','sidhistory_th_requested','sidhistory_th_issued','sidhistory_th_shortage']},
+  {key:'issues', title:'المشاكل', builtIn:['issues_th_type','issues_th_code','issues_th_name','issues_th_detail','issues_th_date']},
+];
+function renderCustomizeTab(el){
+  el.innerHTML = `
+    <div class="panel">
+      <h2>${L('customize_labels_heading')}</h2>
+      <div class="desc">تعديل أسماء الأقسام وأعمدة الجداول. اكتب الاسم الجديد ثم اضغط حفظ. اترك الحقل فارغاً للاحتفاظ بالاسم الافتراضي.</div>
+      <div class="grid2" style="margin-bottom:12px;">
+        <select id="labelSectionFilter">
+          <option value="all">كل الأقسام</option>
+          ${SECTIONS_FOR_COLS.map(s=>`<option value="${s.key}">${s.title}</option>`).join('')}
+          <option value="headings">عناوين الأقسام</option>
+        </select>
+        <button class="primary" id="btnSaveLabels" style="padding:8px 20px;">💾 حفظ التسميات</button>
+      </div>
+      <div id="labelResetAll" style="margin-bottom:12px;">
+        <button class="danger" id="btnResetAllLabels" style="padding:6px 14px;font-size:12px;">🔄 إعادة كل التسميات للوضع الافتراضي</button>
+      </div>
+      <div id="labelsList"></div>
+    </div>
+    <div class="panel">
+      <h2>${L('customize_columns_heading')}</h2>
+      <div class="desc">إظهار/إخفاء أعمدة موجودة، إعادة تسميتها، أو إضافة أعمدة مخصصة جديدة بقيم لكل صنف.</div>
+      <div id="columnsList"></div>
+    </div>
+  `;
+  renderLabelsList();
+  renderColumnsMgmtList();
+  document.getElementById('labelSectionFilter').addEventListener('change', renderLabelsList);
+  document.getElementById('btnSaveLabels').addEventListener('click', ()=>{
+    const inputs = document.querySelectorAll('.label-edit-input');
+    inputs.forEach(inp=>{
+      const key = inp.dataset.labelKey;
+      const val = inp.value.trim();
+      if(!STATE.customLabels) STATE.customLabels = {};
+      if(val && val !== LABELS[key]) STATE.customLabels[key] = val;
+      else delete STATE.customLabels[key];
+    });
+    saveState(['customLabels']);
+    alert('تم حفظ التسميات!');
+    renderApp();
+  });
+  document.getElementById('btnResetAllLabels').addEventListener('click', ()=>{
+    if(!confirm('هل تريد إعادة كل التسميات للوضع الافتراضي؟')) return;
+    STATE.customLabels = {};
+    saveState(['customLabels']);
+    renderApp();
+  });
+}
+function renderLabelsList(){
+  const filter = document.getElementById('labelSectionFilter').value;
+  const container = document.getElementById('labelsList');
+  let keys = Object.keys(LABELS);
+  if(filter !== 'all'){
+    if(filter === 'headings') keys = keys.filter(k=>k.endsWith('_heading') || k.endsWith('_desc'));
+    else keys = keys.filter(k=>k.startsWith(filter+'_'));
+  }
+  container.innerHTML = keys.map(k=>{
+    const defaultVal = LABELS[k];
+    const current = (STATE.customLabels && STATE.customLabels[k]) || '';
+    return `<div class="label-item">
+      <span class="lbl-key">${k}</span>
+      <input type="text" class="label-edit-input" data-label-key="${k}" value="${esc(current)}" placeholder="${esc(defaultVal)}">
+      ${current ? `<button class="reset-btn" data-resetlabel="${k}" title="إعادة للefault">↩</button>` : ''}
+    </div>`;
+  }).join('') || '<div class="empty">لا توجد تسميات在这个 القسم</div>';
+  container.querySelectorAll('[data-resetlabel]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      delete STATE.customLabels[btn.dataset.resetlabel];
+      renderLabelsList();
+    });
+  });
+}
+function renderColumnsMgmtList(){
+  const container = document.getElementById('columnsList');
+  container.innerHTML = SECTIONS_FOR_COLS.map(s=>{
+    const hidden = (STATE.hiddenColumns && STATE.hiddenColumns[s.key]) || [];
+    const custom = getCustomCols(s.key);
+    return `
+      <div style="margin-bottom:20px;">
+        <h3 style="margin:0 0 8px 0;font-size:14px;color:var(--text);">${s.title}</h3>
+        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+          ${s.builtIn.map(bk=>{
+            const isHidden = hidden.includes(bk);
+            const defaultName = LABELS[bk] || bk;
+            const customName = (STATE.customLabels && STATE.customLabels[bk]) || '';
+            return `<div class="col-list-item">
+              <label style="flex:1;">
+                <input type="checkbox" ${!isHidden?'checked':''} data-togglecol="${s.key}:${bk}">
+                <input type="text" class="label-edit-input" data-label-key="${bk}" value="${esc(customName)}" placeholder="${esc(defaultName)}" style="margin-inline-start:6px;">
+              </label>
+            </div>`;
+          }).join('')}
+          ${custom.map(c=>`<div class="col-list-item">
+            <label style="flex:1;">
+              <input type="checkbox" checked data-togglecol="${s.key}:${c.id}">
+              <input type="text" class="label-edit-input" data-label-key="${c.id}" value="${esc(c.name)}" style="margin-inline-start:6px;">
+            </label>
+            <button class="col-del-btn" data-rmccol="${s.key}:${c.id}" title="حذف العمود المخصص">✕</button>
+          </div>`).join('')}
+        </div>
+        <div class="add-col-row">
+          <input type="text" id="newColName_${s.key}" placeholder="اسم العمود الجديد">
+          <select id="newColType_${s.key}"><option value="text">نص</option><option value="number">رقم</option></select>
+          <button class="secondary" data-addccol="${s.key}" style="padding:6px 14px;font-size:12px;">+ إضافة عمود</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  container.querySelectorAll('[data-togglecol]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const [section, colId] = inp.dataset.togglecol.split(':');
+      toggleColumnHidden(section, colId);
+      saveState(['hiddenColumns']);
+    });
+  });
+  container.querySelectorAll('[data-rmccol]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const [section, colId] = btn.dataset.rmccol.split(':');
+      if(!confirm('هل تريد حذف هذا العمود المخصص؟')) return;
+      removeCustomColumn(section, colId);
+      renderColumnsMgmtList();
+    });
+  });
+  container.querySelectorAll('[data-addccol]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const section = btn.dataset.addccol;
+      const nameInput = document.getElementById('newColName_'+section);
+      const typeSelect = document.getElementById('newColType_'+section);
+      const name = nameInput.value.trim();
+      if(!name){ alert('اكتب اسم العمود أولاً.'); return; }
+      addCustomColumn(section, name, typeSelect.value);
+      nameInput.value = '';
+      renderColumnsMgmtList();
+    });
+  });
+  // Bind custom column name edits (live update name in customColumns)
+  container.querySelectorAll('.label-edit-input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const key = inp.dataset.labelKey;
+      // Check if this key is a custom column ID
+      SECTIONS_FOR_COLS.forEach(s=>{
+        const custom = getCustomCols(s.key);
+        const col = custom.find(c=>c.id === key);
+        if(col){ col.name = inp.value.trim() || col.name; saveState(['customColumns']); }
+      });
+    });
+  });
 }
 
 /* ---- تبويب: النسخ الاحتياطي والاستعادة ---- */
@@ -3916,7 +4876,7 @@ function renderBackupTab(el){
   const status = backupAgeMsg();
   const dbPanel = SUPABASE_ENABLED ? `
     <div class="panel">
-      <h2>🗄️ قاعدة البيانات المشتركة (Supabase)</h2>
+      <h2>${L('backup_db_heading')}</h2>
       <div class="desc">كل من يفتح هذا الملف بمفتاح الاتصال نفسه يرى نفس البيانات مباشرة، وأي حركة يسجّلها أي شخص تصل للجميع (يتحقق النظام من وجود تحديثات كل ${SUPABASE_POLL_INTERVAL_MS/1000} ثانية تلقائياً).</div>
       <div class="msg ${SUPABASE_ONLINE===true?'ok':SUPABASE_ONLINE===false?'bad':'info'}">
         ${SUPABASE_ONLINE===true?`🟢 متصل${SUPABASE_LAST_SYNC_TIME?' — آخر مزامنة: '+SUPABASE_LAST_SYNC_TIME:''}`:
@@ -3927,7 +4887,7 @@ function renderBackupTab(el){
       <div id="syncMsg"></div>
     </div>
     <div class="panel">
-      <h2>🗓️ سجل النسخ الاحتياطية على الخادم (تلقائية كل ساعة)</h2>
+      <h2>${L('backup_server_heading')}</h2>
       <div class="desc">تعمل بشكل مستقل عن هذا المتصفح تماماً (مهمة مجدولة داخل قاعدة البيانات نفسها) — تستمر حتى لو كان الموقع مغلقاً عند الجميع.</div>
       <div class="btnrow"><button class="secondary" id="btnServerBackupNow">▶️ تشغيل نسخة احتياطية فورية على الخادم</button></div>
       <div id="serverBackupMsg"></div>
@@ -3935,13 +4895,13 @@ function renderBackupTab(el){
     </div>
   ` : `
     <div class="panel">
-      <h2>🗄️ قاعدة البيانات المشتركة (Supabase)</h2>
+      <h2>${L('backup_db_heading')}</h2>
       <div class="desc">غير مُفعَّلة بعد — النظام يعمل محلياً على هذا الجهاز فقط. لتفعيلها مع نظام صلاحيات آمن (Admin/Viewer عبر Supabase Auth + RLS)، راجع تعليمات SQL الكاملة التي أُرسلت لك بشكل منفصل، ثم ضع رابط المشروع والمفتاح في أعلى ملف الكود (SUPABASE_URL و SUPABASE_ANON_KEY).</div>
     </div>
   `;
   el.innerHTML = dbPanel + `
     <div class="panel">
-      <h2>💾 النسخ الاحتياطي والاستعادة</h2>
+      <h2>${L('backup_heading')}</h2>
       <div class="desc">نسخة كاملة قابلة للاستعادة لكل بيانات النظام (الرصيد، السجل، SID، مواد ارجاع، المشاكل، مخزون المستودع) بصيغة JSON منظّمة — منفصلة تماماً عن تصدير Excel (الذي يبقى للتقارير فقط وليس للاستعادة).</div>
       <div class="msg ${status.kind}">${status.text}</div>
       <div class="btnrow"><button class="primary" id="btnDownloadBackup">💾 تنزيل نسخة احتياطية الآن</button></div>
@@ -3949,14 +4909,14 @@ function renderBackupTab(el){
     </div>
 
     <div class="panel">
-      <h2>📦 إرسال التطبيق مع بياناته لشخص آخر</h2>
+      <h2>${L('backup_bundle_heading')}</h2>
       <div class="desc">يُنشئ ملف HTML واحد فقط = نفس هذا التطبيق + كل بياناتك الحالية مضمَّنة بداخله. الشخص الذي يستلمه يفتحه مباشرة ويجد كل شيء جاهزاً — بدون أي خطوة استعادة يدوية. آمن تماماً: لن يمسح أي بيانات موجودة فعلاً عند من يستلمه، ويُطبَّق فقط لو كان جهازه فارغاً تماماً.</div>
       <div class="btnrow"><button class="secondary" id="btnExportBundle">📦 تصدير نسخة كاملة (تطبيق + بيانات) لإرسالها</button></div>
       <div id="bundleMsg"></div>
     </div>
 
     <div class="panel">
-      <h2>♻️ استعادة نسخة احتياطية</h2>
+      <h2>${L('backup_restore_heading')}</h2>
       <div class="desc">قبل أي استعادة، يأخذ النظام نسخة أمان تلقائية من حالتك الحالية أولاً — بحيث لو فشل أي شيء، تبقى بياناتك الحالية سليمة وقابلة للاسترجاع.</div>
       <div class="filebox">
         <label class="flabel">ملف النسخة الاحتياطية (.json)</label>
@@ -4054,7 +5014,7 @@ function renderRestorePreview(res){
   const d = s.timestamp ? new Date(s.timestamp).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'غير معروف';
   area.innerHTML = `
     <div class="panel">
-      <h2>ملخص النسخة الاحتياطية قبل الاستعادة</h2>
+      <h2>${L('backup_preview_heading')}</h2>
       <div class="kpi-grid">
         <div class="kpi"><div class="num">${s.materials}</div><div class="lbl">مادة/صنف</div></div>
         <div class="kpi"><div class="num">${s.transactions}</div><div class="lbl">حركة</div></div>
@@ -4083,7 +5043,8 @@ function renderRestorePreview(res){
         return;
       }
       RESTORE_PENDING = null;
-      ACTIVE_TAB = 'backup';
+      ACTIVE_TAB = 'setup';
+      closeModal();
       renderApp();
       setTimeout(()=>{ alert('تمت الاستعادة بنجاح. تم أيضاً تنزيل نسخة أمان من حالتك السابقة تحسّباً.'); },50);
     }catch(e){
