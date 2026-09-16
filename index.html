@@ -328,6 +328,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .qm-barcode-btn:hover{background:var(--paper);}
   .qm-video-wrap{position:relative;margin-top:10px;border-radius:8px;overflow:hidden;background:#000;}
   .qm-video-wrap video{width:100%;display:block;}
+  .label-scan-photo{max-width:100%;border-radius:8px;margin:10px 0;border:1px solid var(--line);}
   .qm-video-close{
     position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fff;border:none;
     border-radius:6px;padding:6px 12px;cursor:pointer;font-family:'Cairo',sans-serif;
@@ -3365,12 +3366,280 @@ function qmStopBarcodeScanner(){
   if(area) area.innerHTML='';
 }
 
+/* =====================================================================
+   قراءة ملصق مادة 4G بالكاميرا (OCR) — يستخرج اسم المادة و Tag من ملصق
+   ثابت الشكل (JAWAL / اسم المادة / رقم التاج)، مع تصحيح اتجاه تلقائي.
+   لا يُنشئ نظاماً منفصلاً: يكتب مباشرة في STATE.stock وSTATE.ledger
+   بنفس الشكل الذي يستخدمه استلام ملف Excel (code=description، tags[]).
+   ===================================================================== */
+let LABEL_SCAN_STREAM = null;
+let TESSERACT_LOAD_PROMISE = null;
+
+function loadTesseractLib(){
+  if(window.Tesseract) return Promise.resolve();
+  if(TESSERACT_LOAD_PROMISE) return TESSERACT_LOAD_PROMISE;
+  TESSERACT_LOAD_PROMISE = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>{ TESSERACT_LOAD_PROMISE = null; reject(new Error('تعذّر تحميل مكتبة قراءة النصوص. تأكد من الاتصال بالإنترنت.')); };
+    document.head.appendChild(s);
+  });
+  return TESSERACT_LOAD_PROMISE;
+}
+
+function isJawalLikeLine(s){
+  const t = (s||'').toUpperCase().replace(/[^A-Z]/g,'');
+  if(!t) return false;
+  if(t==='JAWAL' || t==='JAWWAL' || t==='JAWALL' || t==='JAWWALL') return true;
+  if(t.length<=8 && t.startsWith('JAW')) return true;
+  return false;
+}
+function isTagLikeLine(s){
+  const t = (s||'').replace(/\s+/g,'');
+  if(t.length<4) return false;
+  const digits = (t.match(/[0-9]/g)||[]).length;
+  return (digits/t.length) >= 0.6;
+}
+/* يفكك أسطر الملصق بعد ترتيبها من الأعلى للأسفل حسب موضعها الفعلي (bbox)، وليس بترتيب خروج OCR الخام،
+   ويتجاهل سطر JAWAL أينما وقع ضمن الأسطر — لا يفترض أبداً أن أول سطر = اسم المادة. */
+function parseLabelLines(rawLines){
+  const lines = (rawLines||[]).map(l=>({text:(l.text||'').trim(), y:(l.y||0), conf:(l.conf||0)})).filter(l=>l.text.length>0);
+  lines.sort((a,b)=>a.y-b.y);
+  const jawalIdx = lines.findIndex(l=>isJawalLikeLine(l.text));
+  const rest = lines.filter((_,i)=>i!==jawalIdx);
+  let materialName = '', tag = '';
+  if(rest.length>=2){
+    const tagIdx = rest.findIndex(l=>isTagLikeLine(l.text));
+    if(tagIdx!==-1){
+      tag = rest[tagIdx].text.replace(/\s+/g,'');
+      materialName = rest.filter((_,i)=>i!==tagIdx).map(l=>l.text).join(' ').trim();
+    } else {
+      materialName = rest[0].text;
+      tag = rest[rest.length-1].text.replace(/\s+/g,'');
+    }
+  } else if(rest.length===1){
+    materialName = rest[0].text;
+  }
+  return {materialName, tag, jawalFound: jawalIdx!==-1, lineCount: lines.length};
+}
+function scoreParsedLabel(parsed){
+  let score = 0;
+  if(parsed.jawalFound) score += 100;
+  if(parsed.materialName) score += 30;
+  if(isTagLikeLine(parsed.tag)) score += 100;
+  if(parsed.lineCount>=3) score += 30;
+  return score;
+}
+function rotateCanvasDeg(srcCanvas, deg){
+  if(deg===0) return srcCanvas;
+  const w = srcCanvas.width, h = srcCanvas.height;
+  const out = document.createElement('canvas');
+  const swap = (deg===90 || deg===270);
+  out.width = swap ? h : w;
+  out.height = swap ? w : h;
+  const ctx = out.getContext('2d');
+  ctx.save();
+  ctx.translate(out.width/2, out.height/2);
+  ctx.rotate(deg*Math.PI/180);
+  ctx.drawImage(srcCanvas, -w/2, -h/2);
+  ctx.restore();
+  return out;
+}
+async function ocrCanvasLines(canvas){
+  const { data } = await window.__labelScanWorker.recognize(canvas);
+  return (data.lines||[]).map(l=>({text:l.text, y:(l.bbox?l.bbox.y0:0), conf:l.confidence||0}));
+}
+/* يجرّب 4 اتجاهات (0/90/180/270) بدل الاعتماد على قراءة واحدة أو افتراض أن الملصق مستقيم،
+   ويختار الاتجاه الذي أعطى أفضل تطابق (وجود JAWAL + تاج رقمي + 3 أسطر). */
+async function bestOrientationLabelRead(photoCanvas, onProgress){
+  const rotations = [0, 90, 180, 270];
+  let best = null;
+  for(const deg of rotations){
+    if(onProgress) onProgress(deg);
+    const rc = rotateCanvasDeg(photoCanvas, deg);
+    let lines = [];
+    try{ lines = await ocrCanvasLines(rc); }catch(e){ continue; }
+    const parsed = parseLabelLines(lines);
+    const score = scoreParsedLabel(parsed);
+    if(!best || score > best.score) best = {deg, score, parsed};
+    if(score >= 260) break;
+  }
+  return best;
+}
+
+function openLabelScanTool(){
+  openModal('📷 قراءة ملصق مادة 4G', (bodyEl)=>{ renderLabelScanCamera(bodyEl); }, {maxWidth:'520px'});
+}
+function stopLabelScanCamera(){
+  if(LABEL_SCAN_STREAM){ LABEL_SCAN_STREAM.getTracks().forEach(t=>t.stop()); LABEL_SCAN_STREAM = null; }
+}
+async function renderLabelScanCamera(bodyEl){
+  stopLabelScanCamera();
+  bodyEl.innerHTML = `
+    <div class="desc">وجّه الكاميرا نحو ملصق المادة (JAWAL) بحيث تظهر الأسطر الثلاثة، ثم اضغط "التقاط الصورة". يمكن أن يكون الملصق مائلاً أو مقلوباً — سيُحاول النظام تصحيح الاتجاه تلقائياً.</div>
+    <div class="qm-video-wrap" id="labelScanVideoWrap"><video id="labelScanVideo" autoplay playsinline muted></video></div>
+    <div id="labelScanMsg"></div>
+    <div class="btnrow"><button class="primary" id="btnLabelCapture">📸 التقاط الصورة</button></div>
+  `;
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    LABEL_SCAN_STREAM = stream;
+    const video = document.getElementById('labelScanVideo');
+    video.srcObject = stream;
+    const btn = document.getElementById('btnLabelCapture');
+    if(btn) btn.addEventListener('click', ()=>captureLabelScanPhoto(bodyEl));
+  }catch(e){
+    showMsg('labelScanMsg','bad','تعذّر تشغيل الكاميرا ('+esc(e.message||'')+'). تأكد من منح إذن الكاميرا للمتصفح.');
+  }
+}
+async function captureLabelScanPhoto(bodyEl){
+  const video = document.getElementById('labelScanVideo');
+  if(!video || !video.videoWidth){ showMsg('labelScanMsg','warn','الكاميرا لم تجهز بعد، حاول ثانية.'); return; }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  stopLabelScanCamera();
+  bodyEl.innerHTML = `<img class="label-scan-photo" src="${canvas.toDataURL('image/jpeg',0.85)}"><div class="msg" id="labelScanMsg">⏳ جاري تحميل أداة القراءة...</div>`;
+  try{
+    await loadTesseractLib();
+    if(!window.__labelScanWorker){
+      showMsg('labelScanMsg','','⏳ جاري تجهيز أداة القراءة (أول مرة فقط، قد يستغرق بضع ثوانٍ)...');
+      window.__labelScanWorker = await window.Tesseract.createWorker('eng');
+    }
+    const best = await bestOrientationLabelRead(canvas, (deg)=>{ showMsg('labelScanMsg','', `⏳ جاري تجربة اتجاه الصورة (${deg}°)...`); });
+    if(!best || (!best.parsed.materialName && !best.parsed.tag)){
+      renderLabelScanFailure(bodyEl, 'تعذّرت قراءة الملصق. تأكد من الإضاءة ووضوح الصورة وحاول مجدداً، أو استخدم "تعديل" لإدخال البيانات يدوياً.');
+      return;
+    }
+    renderLabelScanResult(bodyEl, best.parsed.materialName, best.parsed.tag);
+  }catch(e){
+    renderLabelScanFailure(bodyEl, 'خطأ أثناء القراءة: '+(e.message||''));
+  }
+}
+function renderLabelScanFailure(bodyEl, msg){
+  bodyEl.innerHTML = `
+    <div class="msg bad">${esc(msg)}</div>
+    <div class="btnrow">
+      <button class="primary" id="btnLabelRetry">🔁 إعادة القراءة</button>
+      <button class="secondary" id="btnLabelManual">✎ إدخال يدوي</button>
+    </div>
+  `;
+  document.getElementById('btnLabelRetry').addEventListener('click', ()=>renderLabelScanCamera(bodyEl));
+  document.getElementById('btnLabelManual').addEventListener('click', ()=>renderLabelScanResult(bodyEl, '', '', true));
+}
+function renderLabelScanResult(bodyEl, materialName, tag, editMode){
+  bodyEl.innerHTML = `
+    <div class="msg ok">${editMode? 'أدخل/صحّح البيانات ثم اضغط تأكيد:' : 'تم استخراج البيانات من الملصق — راجعها قبل التأكيد:'}</div>
+    ${editMode ? `
+      <div style="margin-bottom:10px;"><label class="flabel">اسم المادة</label><input type="text" id="labelEditName" value="${esc(materialName)}"></div>
+      <div style="margin-bottom:10px;"><label class="flabel">Tag</label><input type="text" id="labelEditTag" value="${esc(tag)}"></div>
+    ` : `
+      <div style="margin-bottom:8px;font-size:15px;"><b>اسم المادة:</b> ${materialName?esc(materialName):'<span style="color:var(--muted)">— لم يُستخرج —</span>'}</div>
+      <div style="margin-bottom:14px;font-size:15px;"><b>Tag:</b> ${tag?esc(tag):'<span style="color:var(--muted)">— لم يُستخرج —</span>'}</div>
+    `}
+    <div class="btnrow">
+      <button class="primary" id="btnLabelConfirm">✅ تأكيد</button>
+      <button class="secondary" id="btnLabelEdit">✎ تعديل</button>
+      <button class="secondary" id="btnLabelRetry">🔁 إعادة القراءة</button>
+    </div>
+    <div id="labelScanMsg"></div>
+  `;
+  document.getElementById('btnLabelRetry').addEventListener('click', ()=>renderLabelScanCamera(bodyEl));
+  document.getElementById('btnLabelEdit').addEventListener('click', ()=>renderLabelScanResult(bodyEl, materialName, tag, true));
+  document.getElementById('btnLabelConfirm').addEventListener('click', ()=>{
+    const finalName = (editMode ? document.getElementById('labelEditName').value : materialName).trim();
+    const finalTag = (editMode ? document.getElementById('labelEditTag').value : tag).trim();
+    if(!finalName || !finalTag){ showMsg('labelScanMsg','warn','اسم المادة والـ Tag مطلوبان — استخدم "تعديل" لإدخالهما إن لم تتم قراءتهما بدقة.'); return; }
+    renderLabelScanMatch(bodyEl, finalName, finalTag);
+  });
+}
+function findStockMatchByName(name){
+  const norm = (s)=> (s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const n = norm(name);
+  const all = Object.values(STATE.stock);
+  const exact = all.find(s=> norm(s.code)===n || norm(s.description)===n);
+  if(exact) return [exact];
+  return all.filter(s=> (norm(s.description) && (norm(s.description).includes(n) || n.includes(norm(s.description)))) || norm(s.code).includes(n));
+}
+function renderLabelScanMatch(bodyEl, materialName, tag){
+  const matches = findStockMatchByName(materialName);
+  if(matches.length===1){
+    renderLabelScanConfirmCommit(bodyEl, matches[0].code, matches[0].description, materialName, tag, false);
+    return;
+  }
+  bodyEl.innerHTML = `
+    <div class="msg ${matches.length? 'warn':'bad'}">${matches.length? 'يوجد أكثر من مادة مشابهة — اختر الصحيحة من القائمة، أو أنشئ مادة جديدة:' : 'لم يتم العثور على مادة مطابقة في الرصيد الحالي — اختر مادة موجودة أو أنشئ مادة جديدة:'}</div>
+    <div class="qm-search-wrap"><input type="text" id="labelMatchSearch" class="qm-search-input" placeholder="ابحث عن اسم المادة..." value="${esc(materialName)}"></div>
+    <div id="labelMatchList" style="max-height:220px;overflow:auto;margin:10px 0;border:1px solid var(--line);border-radius:8px;"></div>
+    <div class="btnrow"><button class="secondary" id="btnLabelCreateNew">➕ إنشاء مادة جديدة باسم: "${esc(materialName)}"</button></div>
+    <div class="btnrow"><button class="secondary" id="btnLabelBack">↩ رجوع</button></div>
+  `;
+  const listEl = document.getElementById('labelMatchList');
+  function renderList(q){
+    const qq = (q||'').trim().toLowerCase();
+    const items = Object.values(STATE.stock).filter(s=> !qq || (s.description||'').toLowerCase().includes(qq) || (s.code||'').toLowerCase().includes(qq)).slice(0,30);
+    listEl.innerHTML = items.map(s=>`<div class="qm-dropdown-item" data-pick="${esc(s.code)}"><span>${esc(s.description||s.code)}</span><span class="rem">${esc(s.code)}</span></div>`).join('') || '<div class="qm-dropdown-empty">لا توجد نتائج</div>';
+    listEl.querySelectorAll('[data-pick]').forEach(row=>{
+      row.addEventListener('click', ()=>{
+        const s = STATE.stock[row.dataset.pick];
+        renderLabelScanConfirmCommit(bodyEl, s.code, s.description, materialName, tag, false);
+      });
+    });
+  }
+  renderList(materialName);
+  document.getElementById('labelMatchSearch').addEventListener('input', (e)=>renderList(e.target.value));
+  document.getElementById('btnLabelCreateNew').addEventListener('click', ()=>{
+    renderLabelScanConfirmCommit(bodyEl, materialName, materialName, materialName, tag, true);
+  });
+  document.getElementById('btnLabelBack').addEventListener('click', ()=>renderLabelScanResult(bodyEl, materialName, tag, true));
+}
+function renderLabelScanConfirmCommit(bodyEl, code, description, originalName, tag, isNew){
+  bodyEl.innerHTML = `
+    <div class="msg ok">${isNew? 'سيتم إنشاء مادة جديدة باسم: ' : 'سيتم إضافة التاج إلى: '}<b>${esc(description||code)}</b></div>
+    <div style="margin-bottom:10px;">Tag: <b>${esc(tag)}</b></div>
+    <div class="btnrow">
+      <button class="primary" id="btnLabelFinalConfirm">✅ تأكيد الإضافة</button>
+      <button class="secondary" id="btnLabelBack2">↩ رجوع</button>
+    </div>
+    <div id="labelScanMsg"></div>
+  `;
+  document.getElementById('btnLabelBack2').addEventListener('click', ()=>renderLabelScanMatch(bodyEl, originalName, tag));
+  document.getElementById('btnLabelFinalConfirm').addEventListener('click', async ()=>{
+    setBusy('btnLabelFinalConfirm', true, 'جارِ الحفظ...');
+    const res = await commitLabelScanTag(code, description, tag);
+    setBusy('btnLabelFinalConfirm', false, '✅ تأكيد الإضافة');
+    if(!res.ok){ showMsg('labelScanMsg','bad',res.msg); return; }
+    bodyEl.innerHTML = `<div class="msg ok">✅ ${esc(res.msg)}</div><div class="btnrow"><button class="primary" id="btnLabelNext">📷 قراءة الملصق التالي</button></div>`;
+    document.getElementById('btnLabelNext').addEventListener('click', ()=>renderLabelScanCamera(bodyEl));
+    setTimeout(()=>{ if(document.body.contains(bodyEl) && document.getElementById('btnLabelNext')) renderLabelScanCamera(bodyEl); }, 1800);
+  });
+}
+/* يمنع تكرار نفس التاج عبر كل مواد المستودع (وليس فقط نفس المادة) تماماً كمنع التكرار عند الاستلام عبر Excel */
+async function commitLabelScanTag(code, description, tag){
+  code = trim(code); tag = trim(tag);
+  if(!code || !tag) return {ok:false, msg:'اسم المادة أو التاج فارغ.'};
+  const dupOwner = Object.values(STATE.stock).find(s=> (s.tags||[]).some(t=>t.tag===tag));
+  if(dupOwner){
+    return {ok:false, msg:`هذا التاج (${tag}) مسجل مسبقاً على مادة: ${dupOwner.description||dupOwner.code}. لا يمكن إضافته مرة أخرى.`};
+  }
+  const date = todayStr();
+  if(!STATE.stock[code]){
+    STATE.stock[code] = {code, description: description||code, total_quantity:0, issued_quantity:0, tags:[], first_seen:date};
+  }
+  STATE.stock[code].total_quantity += 1;
+  STATE.stock[code].tags.push({tag, status:'available', issued_to_sid:null, issued_date:null});
+  STATE.ledger.push({id:nextId(), date, type:'RECEIVED', sid:'', site:'JRE', code, description:STATE.stock[code].description, tag, qty:1, source:'قراءة ملصق (كاميرا)', notes:'أُضيف عبر قراءة ملصق بالكاميرا'});
+  await saveState(['stock','ledger']);
+  return {ok:true, msg:`تم إضافة التاج ${tag} إلى "${STATE.stock[code].description}". الرصيد الحالي: ${STATE.stock[code].total_quantity - STATE.stock[code].issued_quantity}.`};
+}
+
 /* ---- تبويب: استلام مواد 4G ---- */
 function renderSetupTab(el){
   el.innerHTML = `
     ${renderIssuesInlineBanner(['DUPLICATE_TAG_IN_RECEIPT','TAG_QTY_MISMATCH','DUPLICATE_TAG_DISMANTLED'], 'setup')}
     <div class="panel">
-      <h2>${L('setup_heading')}<button class="records-btn" id="btnRecordsReceipts" type="button">📋 السجل</button></h2>
+      <h2>${L('setup_heading')}<button class="records-btn" id="btnRecordsReceipts" type="button">📋 السجل</button><button class="records-btn" id="btnOpenLabelScan" type="button">📷 قراءة ملصق</button></h2>
       <div class="desc">ارفع ملف الاستلام (شيت "Consolidated Materials" وشيت "Tags" اختياري). يُضاف تلقائياً إلى مواد 4G المتوفرة — إن كان الكود موجوداً سلفاً تُزاد كميته، وإن كان جديداً يُنشأ صنف جديد.</div>
       <div class="filebox">
         <label class="flabel">ملف المواد المستلمة (.xlsx)</label>
@@ -3424,6 +3693,7 @@ function renderSetupTab(el){
   document.getElementById('btnRecordsReceipts').addEventListener('click', ()=>{
     openRecordsModal('📋 '+L('tab_receipts'), renderReceiptsTab);
   });
+  document.getElementById('btnOpenLabelScan').addEventListener('click', ()=>{ openLabelScanTool(); });
   document.getElementById('btnRecordsDismantled').addEventListener('click', ()=>{
     openRecordsModal('📋 '+L('tab_dismantled'), renderDismantledTab);
   });
