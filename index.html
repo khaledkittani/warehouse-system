@@ -2388,12 +2388,13 @@ function renderApp(roleFetchError, roleResult){
     <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">${L('app_footer')}</footer>
   `;
   if(isAdmin){
-    document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ APP_MODE='quick'; renderApp(); });
-    document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ APP_MODE='admin'; renderApp(); });
+    document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='quick'; renderApp(); });
+    document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='admin'; renderApp(); });
   }
   if(CURRENT_SESSION){
     document.getElementById('btnSignOut').addEventListener('click', ()=>{
       if(!confirm('تسجيل الخروج؟')) return;
+      taglogStopBarcodeScanner();
       authSignOut();
       renderApp();
     });
@@ -2608,6 +2609,7 @@ function renderAdminMode(root){
   `;
   root.querySelectorAll('nav.tabs button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(ACTIVE_TAB==='tagcapture') taglogStopBarcodeScanner(); // أوقف كاميرا رصد التاجات عند الانتقال لقسم آخر
       ACTIVE_TAB = btn.dataset.tab;
       renderAdminMode(root);
     });
@@ -3692,6 +3694,7 @@ let TAGLOG_SELECTED_MATERIAL = null;
 let TAGLOG_FLASH_MSG = null;
 let TAGLOG_REPORT_SITE = '';
 let TAGLOG_REPORT_MSG = null;
+let TAGLOG_BARCODE_STREAM = null; // بديل كاميرا الهاتف عن جهاز Scanner الفيزيائي — نفس أسلوب qmToggleBarcodeScanner أعلاه (BarcodeDetector)
 
 function taglogNormTag(t){ return trim(t).toLowerCase(); }
 function taglogIsDuplicate(tag){
@@ -3754,6 +3757,7 @@ function taglogSelectMaterial(name){
   if(tagInp) tagInp.focus();
 }
 function taglogChangeMaterial(){
+  taglogStopBarcodeScanner();
   TAGLOG_SELECTED_MATERIAL = null;
   renderTagCaptureTab(document.getElementById('tabContent'));
   const s = document.getElementById('tlMaterialSearch');
@@ -3773,16 +3777,66 @@ async function taglogHandleSave(){
     if(tagInp){ tagInp.focus(); tagInp.select(); }
     return;
   }
-  TAGLOG_SELECTED_MATERIAL = null; // العودة فوراً للبحث عن مادة جديدة — بدون Refresh وبدون مسح اسم الموقع
+  // المادة المختارة تبقى كما هي عمداً بعد الحفظ (لا تُصفَّر) — حتى يسجّل المستخدم عدة تاجات
+  // متتالية لنفس المادة بدون إعادة البحث في كل مرة؛ فقط خانة التاج تُصفَّر وتُعاد إليها الكتابة.
   TAGLOG_FLASH_MSG = `تم تسجيل التاج "${trim(tagVal)}" بنجاح.`;
   renderTagCaptureTab(document.getElementById('tabContent'));
-  const s = document.getElementById('tlMaterialSearch');
-  if(s){ s.value=''; s.focus({preventScroll:true}); }
+  const t2 = document.getElementById('tlTagInput');
+  if(t2) t2.focus({preventScroll:true});
   setTimeout(()=>{
     TAGLOG_FLASH_MSG = null;
     const el = document.getElementById('tlFlash');
     if(el) el.remove();
   }, 3500);
+}
+
+/* ---- قراءة التاج بكاميرا الهاتف (بديل اختياري لجهاز Scanner الفيزيائي) ----
+   نفس آلية qmToggleBarcodeScanner أعلاه بالضبط (BarcodeDetector المدمجة في المتصفح،
+   بدون أي مكتبة خارجية) — عند اكتشاف باركود تُملأ خانة التاج تلقائياً ويُسجَّل التاج فوراً،
+   تماماً كما لو كتبه جهاز Scanner فيزيائي ثم Enter. */
+async function taglogToggleBarcodeScanner(){
+  const area = document.getElementById('tlBarcodeArea');
+  if(!area) return;
+  if(TAGLOG_BARCODE_STREAM){ taglogStopBarcodeScanner(); return; }
+  if(!('BarcodeDetector' in window)){
+    area.innerHTML = `<div class="msg bad">متصفحك لا يدعم قراءة الباركود مباشرة بالكاميرا (مدعومة عادة في Chrome/Edge على أندرويد أو الحاسوب). استخدم جهاز Scanner الفيزيائي أو اكتب التاج يدوياً.</div>`;
+    return;
+  }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    TAGLOG_BARCODE_STREAM = stream;
+    area.innerHTML = `<div class="qm-video-wrap"><video id="tlVideo" autoplay playsinline muted></video><button type="button" class="qm-video-close" id="tlVideoClose">إغلاق</button></div>`;
+    const video = document.getElementById('tlVideo');
+    video.srcObject = stream;
+    document.getElementById('tlVideoClose').addEventListener('click', taglogStopBarcodeScanner);
+    const detector = new window.BarcodeDetector();
+    const scanLoop = async ()=>{
+      if(!TAGLOG_BARCODE_STREAM) return;
+      try{
+        const codes = await detector.detect(video);
+        if(codes && codes.length){
+          const value = codes[0].rawValue;
+          taglogStopBarcodeScanner();
+          const tagInp = document.getElementById('tlTagInput');
+          if(tagInp) tagInp.value = value;
+          taglogHandleSave();
+          return;
+        }
+      }catch(e){ /* استمر بالمحاولة */ }
+      if(TAGLOG_BARCODE_STREAM) requestAnimationFrame(scanLoop);
+    };
+    requestAnimationFrame(scanLoop);
+  }catch(e){
+    area.innerHTML = `<div class="msg bad">تعذّر تشغيل الكاميرا (${esc(e.message||'')}). تأكد من منح إذن الكاميرا للمتصفح.</div>`;
+  }
+}
+function taglogStopBarcodeScanner(){
+  if(TAGLOG_BARCODE_STREAM){
+    TAGLOG_BARCODE_STREAM.getTracks().forEach(t=>t.stop());
+    TAGLOG_BARCODE_STREAM = null;
+  }
+  const area = document.getElementById('tlBarcodeArea');
+  if(area) area.innerHTML = '';
 }
 
 /* ---- قالب Excel (إدارة) ---- */
@@ -3999,8 +4053,12 @@ function renderTagCaptureTab(el){
       ${TAGLOG_SELECTED_MATERIAL ? `
         <div class="qm-selected-name">${esc(TAGLOG_SELECTED_MATERIAL)} <button type="button" id="btnTlChangeMaterial" class="records-btn" style="font-size:11px;">✕ تغيير</button></div>
         <label class="flabel">Tag</label>
-        <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter" autocomplete="off">
-        <div class="btnrow"><button class="primary" id="btnTlSave">✅ تسجيل</button></div>
+        <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter، أو استخدم الكاميرا" autocomplete="off">
+        <div class="btnrow">
+          <button class="primary" id="btnTlSave">✅ تسجيل</button>
+          <button type="button" class="qm-barcode-btn" id="btnTlBarcodeScan">📷 مسح بالكاميرا</button>
+        </div>
+        <div id="tlBarcodeArea"></div>
       ` : `<div class="msg info" style="margin-top:14px;">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`}
     </div>
 
@@ -4052,6 +4110,7 @@ function renderTagCaptureTab(el){
     tagInp.focus();
     bindEnterSubmit(['tlTagInput'], 'btnTlSave');
     document.getElementById('btnTlSave').addEventListener('click', taglogHandleSave);
+    document.getElementById('btnTlBarcodeScan').addEventListener('click', taglogToggleBarcodeScanner);
   }
 
   document.getElementById('btnTlTemplate').addEventListener('click', openTagLogTemplateModal);
