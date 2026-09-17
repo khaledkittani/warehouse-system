@@ -340,6 +340,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     border-radius:6px;padding:6px 12px;cursor:pointer;font-family:'Cairo',sans-serif;
   }
 
+  /* ===== قسم قارئ التاجات (مستقل تماماً — أصناف CSS خاصة به فقط) ===== */
+  .tagr-video-wrap{position:relative;margin-top:10px;border-radius:8px;overflow:hidden;background:#000;}
+  .tagr-video-wrap video{width:100%;display:block;}
+  .tagr-scan-frame{
+    position:absolute;left:8%;top:30%;width:84%;height:40%;
+    border:2px solid #ffcf4a;border-radius:10px;pointer-events:none;
+    box-shadow:0 0 0 2000px rgba(0,0,0,.35);
+  }
+  .tagr-readout{
+    margin:10px 0;padding:12px 14px;border:1.5px solid var(--line);border-radius:8px;
+    background:#faf8f2;display:flex;gap:16px;flex-wrap:wrap;
+  }
+  .tagr-field{flex:1;min-width:180px;}
+  .tagr-field b{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:700;}
+  .tagr-readout.tagr-stable{border-color:#2ecc71;box-shadow:0 0 0 1px #2ecc71 inset;background:#f2fbf3;}
+  .tagr-input{font-size:17px;font-weight:600;}
+
   /* ===== شاشة تسجيل الدخول ===== */
   .login-page{
     min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -553,6 +570,7 @@ const LABELS = {
   tab_customize: '🎨 تخصيص الأعمدة',
   tab_backup: '💾 نسخ احتياطي',
   tab_tags: 'تاجات المواد المتوفرة',
+  tab_tagreader: '🏷️ قارئ التاجات',
 
   // عناوين فرعية / أقسام داخلية
   tags_heading: 'تاجات المواد المتوفرة',
@@ -2335,8 +2353,9 @@ const TABS = [
   {id:'sid', lk:'tab_sid', group:'4g'},
   {id:'stock', lk:'tab_stock', group:'4g'},
   {id:'goods', lk:'tab_goods', group:'wh'},
+  {id:'tagreader', lk:'tab_tagreader', group:'tools'},
 ];
-const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع'};
+const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات'};
 
 function esc(s){
   return String(s===null||s===undefined?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -2371,12 +2390,13 @@ function renderApp(roleFetchError, roleResult){
     <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">${L('app_footer')}</footer>
   `;
   if(isAdmin){
-    document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ APP_MODE='quick'; renderApp(); });
-    document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ APP_MODE='admin'; renderApp(); });
+    document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ stopTagReaderStream(); APP_MODE='quick'; renderApp(); });
+    document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ stopTagReaderStream(); APP_MODE='admin'; renderApp(); });
   }
   if(CURRENT_SESSION){
     document.getElementById('btnSignOut').addEventListener('click', ()=>{
       if(!confirm('تسجيل الخروج؟')) return;
+      stopTagReaderStream();
       authSignOut();
       renderApp();
     });
@@ -2590,7 +2610,11 @@ function renderAdminMode(root){
     <div class="footer-note">يُحفظ كل شيء تلقائياً في متصفحك بعد كل عملية — لا حاجة لأي زر حفظ يدوي. لا تُحذف أي حركة من السجل، أي تصحيح يُسجَّل كحركة جديدة.</div>
   `;
   root.querySelectorAll('nav.tabs button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ ACTIVE_TAB = btn.dataset.tab; renderAdminMode(root); });
+    btn.addEventListener('click', ()=>{
+      if(ACTIVE_TAB==='tagreader') stopTagReaderStream(); // أوقف كاميرا قارئ التاجات عند الانتقال لقسم آخر
+      ACTIVE_TAB = btn.dataset.tab;
+      renderAdminMode(root);
+    });
   });
   document.getElementById('btnOpenIssuesModal').addEventListener('click', ()=>{
     openModal('⚠️ '+L('tab_issues'), (bodyEl)=>{ renderIssuesTab(bodyEl); });
@@ -2611,6 +2635,7 @@ function renderTabContent(){
   if(ACTIVE_TAB==='sid') return renderSidTab(el);
   if(ACTIVE_TAB==='stock') return renderStockTab(el);
   if(ACTIVE_TAB==='goods') return renderGoodsTab(el);
+  if(ACTIVE_TAB==='tagreader') return renderTagReaderTab(el);
 }
 
 /* ============================================================
@@ -3642,6 +3667,289 @@ async function commitLabelScanTag(code, description, tag){
   STATE.ledger.push({id:nextId(), date, type:'RECEIVED', sid:'', site:'JRE', code, description:STATE.stock[code].description, tag, qty:1, source:'قراءة ملصق (كاميرا Live)', notes:'أُضيف عبر قراءة ملصق مباشرة بالكاميرا'});
   await saveState(['stock','ledger']);
   return {ok:true, msg:`تم إضافة التاج ${tag} إلى "${STATE.stock[code].description}". الرصيد الحالي: ${STATE.stock[code].total_quantity - STATE.stock[code].issued_quantity}.`};
+}
+
+/* =====================================================================
+   قسم مستقل: "قارئ التاجات" — تبويب رئيسي مستقل (وليس نافذة منبثقة داخل
+   استلام مواد 4G). يقرأ ملصقات مواد Jawwal بالكاميرا (Live OCR مستمر بلا
+   زر تصوير) ويجمع القراءات (اسم المادة + Tag) في جدول محلي داخل هذا القسم
+   فقط، مع تعديل قبل التأكيد، منع تكرار التاج، تصدير Excel، ومسح الجدول.
+
+   مهم: هذا القسم لا يكتب إطلاقاً في STATE.stock أو STATE.ledger أو أي جزء
+   آخر من النظام — الجدول محلي (بالمتصفح) فقط ولا يُحفظ في Supabase، تماماً
+   كأداة عرض/تصدير بلا أي أثر على الرصيد أو الصلاحيات. وهو مستقل تماماً عن
+   أداة "📷 قراءة ملصق" الموجودة داخل استلام مواد 4G أعلاه (STATE-writing) —
+   تلك الأداة وكل دوالها (LIVE_SCAN_*, commitLabelScanTag, ...) لم تُلمَس
+   ولم تتغيّر بأي شكل. يُعاد استخدام محرك OCR ذاته فقط (loadTesseractLib،
+   rotateCanvasDeg، ocrCanvasLines، window.__labelScanWorker) لتفادي تحميل/
+   تشغيل نسختين من Tesseract في نفس الصفحة.
+
+   فحص محرك OCR الحالي قبل البناء (كما طُلب): المحرك هو Tesseract.js (WASM)
+   يعمل بالكامل في المتصفح بدون خادم أو مفتاح API — وهو الخيار العملي الوحيد
+   لموقع GitHub Pages ثابت بدون أي backend. الأداة الأصلية كانت تُصغِّر
+   الإطار الكامل من الكاميرا إلى 480px عرضاً ثم تُشغِّل OCR عليه — أي أن نص
+   الملصق (الذي يشغل جزءاً صغيراً فقط من الشاشة) يصل بدقة منخفضة جداً لمحرك
+   القراءة، وهذا السبب الأكبر لضعف النتائج. لذلك هنا: يتم اقتصاص منطقة
+   الإطار الأصفر فقط من الفيديو بدقته الأصلية (بدل تصغير الشاشة كاملة)،
+   ثم تحسين تباين بسيط، ثم تجربة الاتجاهات الأربعة عند الحاجة — وهذا يرفع
+   نسبة النص إلى حجم الصورة بشكل كبير ويحسّن دقة القراءة بدون تغيير المحرك.
+   ===================================================================== */
+let TAGR_STREAM = null;
+let TAGR_ROWS = [];              // {materialName, tag} بترتيب القراءة تماماً — جدول محلي مستقل تماماً عن STATE
+let TAGR_LOCKED_DEG = null;
+let TAGR_MISS_COUNT = 0;
+let TAGR_HISTORY = [];
+let TAGR_MANUAL = false;         // true بعد أول تعديل يدوي من المستخدم — يوقف الاستبدال التلقائي للحقول من الكاميرا
+let TAGR_PAUSED = false;
+let TAGR_BUSY = false;
+const TAGR_CONF_THRESHOLD = 45;  // نفس حد الثقة المستخدم في أداة الاستلام (ثقة OCR نفسه، لا تخمين للنص)
+const TAGR_TICK_MS = 700;        // أسرع من أداة الاستلام (900ms) لأن الاقتصاص أصغر من الإطار الكامل فتكون المعالجة أخف
+const TAGR_STABLE_NEEDED = 2;    // قراءتان متتاليتان متطابقتان تكفيان لاعتبار القراءة "مستقرة" بسبب دقة الاقتصاص الأعلى
+// إطار القراءة كنسبة من مساحة الفيديو المعروضة (مستطيل عريض يناسب 3 أسطر نص) — يُعالَج هذا الجزء فقط
+const TAGR_FRAME = {x:0.08, y:0.30, w:0.84, h:0.40};
+
+function stopTagReaderStream(){
+  TAGR_PAUSED = true;
+  if(TAGR_STREAM){ TAGR_STREAM.getTracks().forEach(t=>t.stop()); TAGR_STREAM = null; }
+}
+function tagrFuzzyContainsJawal(s){
+  const t = (s||'').toUpperCase().replace(/[^A-Z]/g,'');
+  if(!t) return false;
+  return t.includes('JAWAL') || t.includes('JAWWAL') || /J.?A.?W.?A.?L/.test(t);
+}
+function tagrDigitRatio(s){
+  const t = (s||'').replace(/[^A-Za-z0-9]/g,'');
+  if(!t) return 0;
+  return (t.match(/\d/g)||[]).length / t.length;
+}
+/* يقتصّ فقط منطقة الإطار الأصفر (TAGR_FRAME) من الفيديو بدقته الأصلية — بدل تصغير الشاشة
+   كاملة كما في أداة الاستلام — ثم يُكبِّر/يُصغِّر الاقتصاص إلى نطاق 640-900px عرضاً فقط (لا
+   يُصغَّر أبداً تحت 640 حتى لا يفقد النص وضوحه، ولا يُكبَّر فوق 900 حفاظاً على السرعة). */
+function tagrCropFrame(video){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const fx = Math.round(vw*TAGR_FRAME.x), fy = Math.round(vh*TAGR_FRAME.y);
+  const fw = Math.max(1, Math.round(vw*TAGR_FRAME.w)), fh = Math.max(1, Math.round(vh*TAGR_FRAME.h));
+  const targetW = fw < 640 ? 640 : Math.min(fw, 900);
+  const scale = targetW / fw;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(fw*scale));
+  canvas.height = Math.max(1, Math.round(fh*scale));
+  canvas.getContext('2d').drawImage(video, fx, fy, fw, fh, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+/* تحسين تباين بسيط (تمديد حول المتوسط بدل عتبة ثنائية صارمة قد تُفسد نصاً فاتح التباين) —
+   يساعد Tesseract على ملصقات ذات خلفية فاتحة ونص غامق دون خطر أخطاء العتبة. */
+function tagrBoostContrast(canvas){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    const g = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    const v = g<128 ? Math.max(0,g-22) : Math.min(255,g+22);
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+  return canvas;
+}
+/* يفكك أسطر الملصق حسب الترتيب الثابت (JAWAL / اسم المادة / Tag) فقط — بلا أي تخمين أو
+   مطابقة تقريبية لاختيار "أي سطر هو اسم المادة": يُعتمَد فقط على وجود 3 أسطر بالضبط، مرتّبة
+   من الأعلى للأسفل حسب موضعها الفعلي (bbox). السطر الأول (JAWAL) لا يُحفظ إطلاقاً — يُستخدم
+   فقط كمؤشّر مساعد (jawalLike) لاختيار أفضل اتجاه دوران عند تعدد الاحتمالات. */
+function tagrParseLabel(rawLines){
+  const lines = (rawLines||[]).map(l=>({text:(l.text||'').trim(), y:(l.y||0), conf:(l.conf||0)})).filter(l=>l.text.length>0);
+  if(lines.length !== 3) return null;
+  lines.sort((a,b)=>a.y-b.y);
+  const materialName = lines[1].text;
+  const tag = lines[2].text.replace(/\s+/g,'');
+  const avgConf = (lines[0].conf + lines[1].conf + lines[2].conf) / 3;
+  return { materialName, tag, avgConf, digitRatio: tagrDigitRatio(tag), jawalLike: tagrFuzzyContainsJawal(lines[0].text) };
+}
+async function startTagReaderCamera(){
+  TAGR_LOCKED_DEG = null; TAGR_MISS_COUNT = 0; TAGR_HISTORY = []; TAGR_PAUSED = false; TAGR_BUSY = false;
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    TAGR_STREAM = stream;
+    const video = document.getElementById('tagrVideo');
+    if(!video){ stream.getTracks().forEach(t=>t.stop()); TAGR_STREAM = null; return; } // أُغلق القسم قبل جهوزية الكاميرا
+    video.srcObject = stream;
+    tagrSetStatus('⏳ جارِ تجهيز أداة القراءة...', '');
+    await loadTesseractLib();
+    if(!window.__labelScanWorker){ window.__labelScanWorker = await window.Tesseract.createWorker('eng'); }
+    tagrSetStatus('📡 قراءة مباشرة — وجّه الكاميرا نحو الملصق داخل الإطار', '');
+    tagrTick();
+  }catch(e){
+    tagrSetStatus('تعذّر تشغيل الكاميرا أو أداة القراءة ('+esc(e.message||'')+'). تأكد من منح إذن الكاميرا والاتصال بالإنترنت.', 'bad');
+  }
+}
+function tagrSetStatus(text, kind){
+  const el = document.getElementById('tagrStatus');
+  if(el) el.innerHTML = text ? `<div class="msg ${kind||''}">${text}</div>` : '';
+}
+/* حلقة القراءة المباشرة (تعمل كل TAGR_TICK_MS بدل كل Frame لتفادي تجميد الواجهة). تُثبِّت على
+   آخر اتجاه دوران ناجح لسرعة القراءة، وتعيد تجربة الاتجاهات الأربعة فقط بعد عدة محاولات فاشلة
+   متتالية على الاتجاه المثبَّت (إشارة إلى أن المستخدم/الملصق تحرّك). */
+async function tagrTick(){
+  const video = document.getElementById('tagrVideo');
+  if(!video || !document.body.contains(video)){ stopTagReaderStream(); return; } // القسم أُغلق/تم الانتقال لقسم آخر
+  if(TAGR_PAUSED || TAGR_BUSY || !video.videoWidth){
+    setTimeout(tagrTick, TAGR_TICK_MS);
+    return;
+  }
+  TAGR_BUSY = true;
+  try{
+    const base = tagrBoostContrast(tagrCropFrame(video));
+    const degsToTry = TAGR_LOCKED_DEG!=null ? [TAGR_LOCKED_DEG] : [0,90,180,270];
+    let best = null;
+    for(const deg of degsToTry){
+      const rc = rotateCanvasDeg(base, deg);
+      let lines = [];
+      try{ lines = await ocrCanvasLines(rc); }catch(e){ continue; }
+      const parsed = tagrParseLabel(lines);
+      if(!parsed) continue;
+      if(parsed.avgConf < TAGR_CONF_THRESHOLD || parsed.digitRatio < 0.6 || parsed.tag.length < 4) continue; // Tag يجب أن يكون غالبه أرقاماً
+      const score = parsed.avgConf + parsed.digitRatio*10 + (parsed.jawalLike?15:0);
+      if(!best || score > best.score) best = {deg, parsed, score};
+      if(TAGR_LOCKED_DEG!=null) break; // الاتجاه مثبَّت فعلاً — لا حاجة لتجربة الاتجاهات الأخرى
+    }
+    if(best){
+      TAGR_LOCKED_DEG = best.deg;
+      TAGR_MISS_COUNT = 0;
+      tagrUpdateReading(best.parsed.materialName, best.parsed.tag);
+    } else {
+      TAGR_MISS_COUNT++;
+      if(TAGR_MISS_COUNT >= 3) TAGR_LOCKED_DEG = null;
+      const nameEl = document.getElementById('tagrMaterialInput');
+      if(!TAGR_MANUAL && nameEl && !nameEl.value) tagrSetStatus('🔎 جارِ البحث عن الملصق داخل الإطار... وجّه الكاميرا بثبات.', '');
+    }
+  } finally {
+    TAGR_BUSY = false;
+  }
+  if(!TAGR_PAUSED) setTimeout(tagrTick, TAGR_TICK_MS);
+}
+/* تُحدَّث القراءة المعروضة باستمرار مع كل Frame ناجح — بلا أي تجميد على نتيجة قديمة، حتى لو
+   تحرّك المستخدم لملصق آخر مختلف كلياً قبل التأكيد (كما هو مطلوب تماماً). التعديل اليدوي فقط
+   (TAGR_MANUAL) يوقف استبدال الحقلين تلقائياً — والقيمة المعروضة حالياً في الحقلين (بعد أي
+   تعديل يدوي) هي ما يُحفَظ فعلياً عند الضغط على "تأكيد". */
+function tagrUpdateReading(materialName, tag){
+  TAGR_HISTORY.push(materialName+'␟'+tag);
+  if(TAGR_HISTORY.length > TAGR_STABLE_NEEDED) TAGR_HISTORY.shift();
+  const stable = TAGR_HISTORY.length===TAGR_STABLE_NEEDED && TAGR_HISTORY.every(v=>v===TAGR_HISTORY[0]);
+  const readoutEl = document.getElementById('tagrReadout');
+  if(readoutEl) readoutEl.classList.toggle('tagr-stable', stable);
+  tagrSetStatus(stable ? '✅ القراءة مستقرة' : '📡 قراءة مباشرة — يتم التحديث باستمرار', stable?'ok':'');
+  if(TAGR_MANUAL) return; // المستخدم يعدّل يدوياً الآن — لا نستبدل ما كتبه بقراءة الكاميرا
+  const nameEl = document.getElementById('tagrMaterialInput');
+  const tagEl = document.getElementById('tagrTagInput');
+  if(nameEl) nameEl.value = materialName;
+  if(tagEl) tagEl.value = tag;
+}
+function tagrResetReading(){
+  TAGR_HISTORY = [];
+  TAGR_MANUAL = false;
+  const nameEl = document.getElementById('tagrMaterialInput');
+  const tagEl = document.getElementById('tagrTagInput');
+  const readoutEl = document.getElementById('tagrReadout');
+  const note = document.getElementById('tagrManualNote');
+  if(nameEl) nameEl.value = '';
+  if(tagEl) tagEl.value = '';
+  if(readoutEl) readoutEl.classList.remove('tagr-stable');
+  if(note) note.style.display = 'none';
+}
+function tagrRenderTable(){
+  const wrap = document.getElementById('tagrTableWrap');
+  const countEl = document.getElementById('tagrCount');
+  if(countEl) countEl.textContent = String(TAGR_ROWS.length);
+  if(!wrap) return;
+  wrap.innerHTML = `<table class="data">
+    <thead><tr><th>#</th><th>Material Name</th><th>Tag</th></tr></thead>
+    <tbody>
+      ${TAGR_ROWS.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.materialName)}</td><td class="code-cell">${esc(r.tag)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">لا توجد قراءات مؤكَّدة بعد</td></tr>'}
+    </tbody>
+  </table>`;
+}
+function tagrExportExcel(){
+  if(!TAGR_ROWS.length){ alert('لا توجد قراءات لتصديرها بعد.'); return; }
+  const headers = ['No.','Material Name','Tag'];
+  const rows = TAGR_ROWS.map((r,i)=>[i+1, r.materialName, r.tag]);
+  exportSectionToExcel(headers, rows, 'قارئ_التاجات', [8,40,20]);
+}
+function tagrClearRows(){
+  if(!TAGR_ROWS.length) return;
+  if(!confirm('هل أنت متأكد من مسح كل القراءات الحالية في هذا الجدول؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+  TAGR_ROWS = [];
+  tagrRenderTable();
+}
+function tagrShowDuplicateWarning(onProceed){
+  openModal('⚠️ تكرار في التاج', (bodyEl)=>{
+    bodyEl.innerHTML = `
+      <div class="msg warn">هذا التاج تمت قراءته مسبقاً.</div>
+      <div class="btnrow">
+        <button class="secondary" id="btnTagrDupCancel">إلغاء</button>
+        <button class="danger" id="btnTagrDupProceed">إضافة رغم التكرار</button>
+      </div>`;
+    document.getElementById('btnTagrDupProceed').addEventListener('click', ()=>{ closeModal(); onProceed(); });
+    document.getElementById('btnTagrDupCancel').addEventListener('click', closeModal);
+  }, {maxWidth:'380px'});
+}
+function tagrHandleConfirm(){
+  const nameEl = document.getElementById('tagrMaterialInput');
+  const tagEl = document.getElementById('tagrTagInput');
+  const materialName = trim(nameEl ? nameEl.value : '');
+  const tag = trim(tagEl ? tagEl.value : '');
+  if(!materialName || !tag){ tagrSetStatus('أدخل اسم المادة والـ Tag قبل التأكيد.', 'warn'); return; }
+  const isDup = TAGR_ROWS.some(r=> r.tag.toLowerCase()===tag.toLowerCase());
+  const doAdd = ()=>{
+    TAGR_ROWS.push({materialName, tag});
+    tagrRenderTable();
+    tagrResetReading();
+    tagrSetStatus('✅ تمت الإضافة — جارِ القراءة المباشرة...', 'ok');
+  };
+  if(isDup) tagrShowDuplicateWarning(doAdd); else doAdd();
+}
+/* ---- تبويب: قارئ التاجات (قسم مستقل تماماً — لا يكتب في STATE إطلاقاً) ---- */
+function renderTagReaderTab(el){
+  el.innerHTML = `
+    <div class="panel">
+      <h2>${L('tab_tagreader')}</h2>
+      <div class="desc">وجّه كاميرا الهاتف نحو ملصق المادة داخل الإطار الأصفر — بدون التقاط صورة، القراءة تظهر مباشرة أثناء التوجيه. عدّل الحقلين أدناه عند الحاجة، ثم اضغط "تأكيد" لإضافة القراءة للجدول.</div>
+      <div class="tagr-video-wrap" id="tagrVideoWrap">
+        <video id="tagrVideo" autoplay playsinline muted></video>
+        <div class="tagr-scan-frame"></div>
+      </div>
+      <div id="tagrStatus"></div>
+      <div class="tagr-readout" id="tagrReadout">
+        <div class="tagr-field"><b>اسم المادة</b><input type="text" id="tagrMaterialInput" class="tagr-input" placeholder="—" autocomplete="off"></div>
+        <div class="tagr-field"><b>Tag</b><input type="text" id="tagrTagInput" class="tagr-input" placeholder="—" autocomplete="off"></div>
+      </div>
+      <div class="btnrow">
+        <button class="primary" id="btnTagrConfirm">✅ تأكيد</button>
+        <span id="tagrManualNote" style="display:none;font-size:12px;color:var(--muted);align-self:center;">✏️ تعديل يدوي نشط — <a href="#" id="linkTagrResumeLive">استئناف القراءة المباشرة</a></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>القراءات المسجَّلة (<span id="tagrCount">0</span>)</h2>
+      <div class="btnrow">
+        <button class="secondary" id="btnTagrExport">📥 تصدير Excel</button>
+        <button class="danger" id="btnTagrClear">🗑️ مسح القراءات</button>
+      </div>
+      <div class="tablewrap" id="tagrTableWrap"></div>
+    </div>
+  `;
+  tagrRenderTable();
+  ['tagrMaterialInput','tagrTagInput'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', ()=>{
+      TAGR_MANUAL = true;
+      const note = document.getElementById('tagrManualNote');
+      if(note) note.style.display = '';
+    });
+  });
+  bindEnterSubmit(['tagrMaterialInput','tagrTagInput'], 'btnTagrConfirm');
+  document.getElementById('btnTagrConfirm').addEventListener('click', tagrHandleConfirm);
+  document.getElementById('btnTagrExport').addEventListener('click', tagrExportExcel);
+  document.getElementById('btnTagrClear').addEventListener('click', tagrClearRows);
+  document.getElementById('linkTagrResumeLive').addEventListener('click', (e)=>{ e.preventDefault(); tagrResetReading(); });
+  startTagReaderCamera();
 }
 
 /* ---- تبويب: استلام مواد 4G ---- */
