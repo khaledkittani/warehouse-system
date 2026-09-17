@@ -3688,6 +3688,7 @@ async function commitLabelScanTag(code, description, tag){
    ===================================================================== */
 const TAGLOG_SOURCE_DEFAULT = 'Rawabi Macoco';
 let TAGLOG_SITE = (function(){ try{ return localStorage.getItem('wms_taglog_last_site')||''; }catch(e){ return ''; } })();
+let TAGLOG_TYPE = (function(){ try{ return localStorage.getItem('wms_taglog_last_type')==='Dismantled' ? 'Dismantled' : 'Installed'; }catch(e){ return 'Installed'; } })(); // ثابت أثناء العمل، يتغيّر فقط عند اختيار المستخدم يدوياً
 let TAGLOG_SEARCH_RESULTS = [];
 let TAGLOG_HL_INDEX = -1;
 let TAGLOG_SELECTED_MATERIAL = null;
@@ -3706,7 +3707,12 @@ function taglogRowsForSite(site){
   const n = trim(site).toLowerCase();
   return STATE.tagLog.filter(r=>trim(r.siteName).toLowerCase()===n);
 }
-async function taglogAddRow(tag, materialName){
+function taglogSetType(type){
+  TAGLOG_TYPE = (type==='Dismantled') ? 'Dismantled' : 'Installed';
+  try{ localStorage.setItem('wms_taglog_last_type', TAGLOG_TYPE); }catch(e){}
+  renderTagCaptureTab(document.getElementById('tabContent'));
+}
+async function taglogAddRow(tag, materialName, type){
   const site = trim(TAGLOG_SITE);
   const tagVal = trim(tag);
   if(!site) return {ok:false, msg:'اكتب اسم الموقع أولاً.'};
@@ -3719,6 +3725,7 @@ async function taglogAddRow(tag, materialName){
     materialName: materialName,
     source: TAGLOG_SOURCE_DEFAULT,
     siteName: site,
+    type: (type==='Dismantled') ? 'Dismantled' : 'Installed',
     installDate: todayStr(),
     createdAt: Date.now(),
   };
@@ -3727,9 +3734,28 @@ async function taglogAddRow(tag, materialName){
   return {ok:true, row};
 }
 
-/* ---- بحث/اختيار المادة (من مواد 4G المتوفرة فقط) — نفس منطق qmRunSearch/qmRenderDropdown أعلاه ---- */
+/* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
+   المصدر مباشرة من بيانات النظام الحالية (STATE.stock + STATE.dismantled) دون أي قائمة ثابتة
+   منفصلة، ودون أي تعديل على منطق المخزون أو الكميات. نفس منطق qmRunSearch/qmRenderDropdown أعلاه. ---- */
+function taglogAllMaterialNames(){
+  const seen = new Map(); // مفتاح: الاسم بحروف صغيرة (لمنع التكرار) → القيمة: الاسم كما ظهر أول مرة
+  Object.values(STATE.stock).forEach(s=>{
+    const name = trim(s.description||'');
+    if(name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  });
+  STATE.dismantled.forEach(d=>{
+    const name = trim(d.material||'');
+    if(name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  });
+  return Array.from(seen.values());
+}
+function taglogSearchAllMaterials(q){
+  const ql = trim(q).toLowerCase();
+  if(!ql) return [];
+  return taglogAllMaterialNames().filter(n=>n.toLowerCase().includes(ql)).map(n=>({description:n}));
+}
 function taglogRunSearch(q){
-  TAGLOG_SEARCH_RESULTS = searchStockCatalog(q).slice(0,8);
+  TAGLOG_SEARCH_RESULTS = taglogSearchAllMaterials(q).slice(0,8);
   TAGLOG_HL_INDEX = TAGLOG_SEARCH_RESULTS.length ? 0 : -1;
   taglogRenderDropdown();
 }
@@ -3739,7 +3765,7 @@ function taglogRenderDropdown(){
   if(!dd || !inp) return;
   if(!inp.value.trim()){ dd.innerHTML=''; return; }
   if(!TAGLOG_SEARCH_RESULTS.length){
-    dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا توجد مادة مطابقة في "مواد 4G المتوفرة"</div></div>`;
+    dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا توجد مادة مطابقة</div></div>`;
     return;
   }
   dd.innerHTML = `<div class="qm-dropdown">${TAGLOG_SEARCH_RESULTS.map((it,i)=>`
@@ -3770,7 +3796,7 @@ async function taglogHandleSave(){
   const btn = document.getElementById('btnTlSave');
   const tagVal = tagInp ? tagInp.value : '';
   if(btn) btn.disabled = true;
-  const res = await taglogAddRow(tagVal, TAGLOG_SELECTED_MATERIAL);
+  const res = await taglogAddRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
   if(!res.ok){
     alert(res.msg);
     if(btn) btn.disabled = false;
@@ -3977,9 +4003,22 @@ function buildTagLogReportBlob(rows){
   cols.forEach(col=>{ styleByCol[col] = taglogExtractCellStyle(row2Xml, col, 2); });
   const hasAnyStyle = Object.keys(styleByCol).some(c=>!!styleByCol[c]);
 
+  /* ترتيب الصفوف: كل سجلات Installed أولاً (بترتيب تسجيلها)، ثم — فقط إن وُجدت سجلات
+     من كلا النوعين — سطر فارغ واحد فاصل، ثم كل سجلات Dismantled. السجلات القديمة التي لا
+     تحمل حقل type (أُضيفت قبل هذا التحديث) تُعامَل كـ Installed افتراضياً. null = صف فارغ. */
+  const installedRows = rows.filter(r=>r.type!=='Dismantled');
+  const dismantledRows = rows.filter(r=>r.type==='Dismantled');
+  const orderedRows = installedRows.slice();
+  if(installedRows.length && dismantledRows.length) orderedRows.push(null);
+  dismantledRows.forEach(r=>orderedRows.push(r));
+
   let newRowsXml = '';
-  rows.forEach((rec, idx)=>{
+  orderedRows.forEach((rec, idx)=>{
     const rnum = idx+2;
+    if(rec === null){
+      newRowsXml += `<row r="${rnum}"/>`;
+      return;
+    }
     const values = [rec.tag, rec.materialName, rec.source, rec.siteName, taglogFormatDateForReport(rec.installDate)];
     let cellsXml = '';
     cols.forEach((col, ci)=>{
@@ -3993,7 +4032,7 @@ function buildTagLogReportBlob(rows){
 
   const newInner = headerRowXml + newRowsXml;
   let newSheetTxt = taglogReplaceSheetDataInner(sheetTxt, newInner);
-  newSheetTxt = taglogReplaceDimension(newSheetTxt, `${cols[0]}1:${cols[cols.length-1]}${rows.length+1}`);
+  newSheetTxt = taglogReplaceDimension(newSheetTxt, `${cols[0]}1:${cols[cols.length-1]}${orderedRows.length+1}`);
   zipObj[sheetPath] = fflate.strToU8(newSheetTxt);
 
   if(!hasAnyStyle){
@@ -4043,7 +4082,15 @@ function renderTagCaptureTab(el){
       <input type="text" id="tlSite" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}">
 
       <div style="margin-top:16px;">
-        <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة)</label>
+        <label class="flabel">نوع التاج</label>
+        <div class="btnrow" style="gap:8px;">
+          <button type="button" id="btnTlTypeInstalled" class="${TAGLOG_TYPE==='Installed'?'primary':'secondary'}" style="flex:1;">Installed</button>
+          <button type="button" id="btnTlTypeDismantled" class="${TAGLOG_TYPE==='Dismantled'?'primary':'secondary'}" style="flex:1;">Dismantled</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة + مواد الإرجاع)</label>
         <div class="qm-search-wrap">
           <input type="text" id="tlMaterialSearch" class="qm-search-input" placeholder="اكتب جزءاً من اسم المادة..." autocomplete="off">
           <div id="tlMaterialDropdown"></div>
@@ -4065,9 +4112,9 @@ function renderTagCaptureTab(el){
     <div class="panel">
       <h2>آخر التاجات المسجَّلة</h2>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>اسم الموقع</th><th>تاريخ التركيب</th></tr></thead>
+        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th></tr></thead>
         <tbody>
-          ${STATE.tagLog.slice(-10).reverse().map(r=>`<tr><td>${esc(r.tag)}</td><td>${esc(r.materialName)}</td><td>${esc(r.siteName)}</td><td>${esc(r.installDate)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">لا توجد تاجات مسجَّلة بعد</td></tr>'}
+          ${STATE.tagLog.slice(-10).reverse().map(r=>`<tr><td>${esc(r.tag)}</td><td>${esc(r.materialName)}</td><td>${esc(r.type==='Dismantled'?'Dismantled':'Installed')}</td><td>${esc(r.siteName)}</td><td>${esc(r.installDate)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد تاجات مسجَّلة بعد</td></tr>'}
         </tbody>
       </table></div>
     </div>
@@ -4086,6 +4133,9 @@ function renderTagCaptureTab(el){
     TAGLOG_SITE = siteInp.value;
     try{ localStorage.setItem('wms_taglog_last_site', TAGLOG_SITE); }catch(e){}
   });
+
+  document.getElementById('btnTlTypeInstalled').addEventListener('click', ()=>taglogSetType('Installed'));
+  document.getElementById('btnTlTypeDismantled').addEventListener('click', ()=>taglogSetType('Dismantled'));
 
   const searchInp = document.getElementById('tlMaterialSearch');
   searchInp.addEventListener('input', ()=>{ taglogRunSearch(searchInp.value); });
