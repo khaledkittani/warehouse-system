@@ -3712,6 +3712,21 @@ function taglogSetType(type){
   try{ localStorage.setItem('wms_taglog_last_type', TAGLOG_TYPE); }catch(e){}
   renderTagCaptureTab(document.getElementById('tabContent'));
 }
+/* لتاجات نوع Dismantled: بدل تاريخ اليوم (وقت المسح الميداني)، يُستخدم تاريخ رصد مواد الإرجاع
+   الفعلي لنفس المادة كما هو مسجَّل مسبقاً في "مواد الإرجاع" (STATE.dismantled[].date_added) —
+   إن وُجد أكثر من سجل إرجاع بنفس اسم المادة، يُؤخذ أحدث تاريخ. إن لم يوجد أي تطابق (المادة من
+   مواد 4G المتوفرة مثلاً)، يبقى تاريخ اليوم كما كان. */
+function taglogDismantledDateForMaterial(materialName){
+  const n = trim(materialName).toLowerCase();
+  if(!n) return null;
+  let latest = null;
+  STATE.dismantled.forEach(d=>{
+    if(trim(d.material||'').toLowerCase()===n){
+      if(!latest || (d.date_added||'') > (latest||'')) latest = d.date_added||null;
+    }
+  });
+  return latest;
+}
 async function taglogAddRow(tag, materialName, type){
   const site = trim(TAGLOG_SITE);
   const tagVal = trim(tag);
@@ -3719,14 +3734,20 @@ async function taglogAddRow(tag, materialName, type){
   if(!materialName) return {ok:false, msg:'اختر المادة أولاً من نتائج البحث.'};
   if(!tagVal) return {ok:false, msg:'أدخل أو امسح رقم التاج أولاً.'};
   if(taglogIsDuplicate(tagVal)) return {ok:false, msg:`التاج "${tagVal}" مسجَّل مسبقاً في رصد التاجات — لا يمكن تسجيله مرة أخرى.`};
+  const rowType = (type==='Dismantled') ? 'Dismantled' : 'Installed';
+  let installDate = todayStr();
+  if(rowType==='Dismantled'){
+    const dDate = taglogDismantledDateForMaterial(materialName);
+    if(dDate) installDate = dDate;
+  }
   const row = {
     id: 'TL'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
     tag: tagVal,
     materialName: materialName,
     source: TAGLOG_SOURCE_DEFAULT,
     siteName: site,
-    type: (type==='Dismantled') ? 'Dismantled' : 'Installed',
-    installDate: todayStr(),
+    type: rowType,
+    installDate,
     createdAt: Date.now(),
   };
   STATE.tagLog.push(row);
