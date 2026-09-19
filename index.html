@@ -3734,6 +3734,114 @@ async function taglogAddRow(tag, materialName, type){
   return {ok:true, row};
 }
 
+/* ---- تعديل/حذف سجل مسجَّل مسبقاً (المواد المسجَّلة في رصد التاجات قابلة للتعديل والحذف) ---- */
+async function taglogUpdateRow(id, updates){
+  const row = STATE.tagLog.find(r=>r.id===id);
+  if(!row) return {ok:false, msg:'السجل غير موجود (ربما حُذف مسبقاً).'};
+  const tagVal = trim(updates.tag);
+  const materialVal = trim(updates.materialName);
+  const siteVal = trim(updates.siteName);
+  const dateVal = trim(updates.installDate);
+  if(!tagVal) return {ok:false, msg:'أدخل رقم التاج.'};
+  if(!materialVal) return {ok:false, msg:'أدخل اسم القطعة.'};
+  if(!siteVal) return {ok:false, msg:'أدخل اسم الموقع.'};
+  const n = taglogNormTag(tagVal);
+  const dupExists = STATE.tagLog.some(r=>r.id!==id && taglogNormTag(r.tag)===n);
+  if(dupExists) return {ok:false, msg:`التاج "${tagVal}" مستخدم بالفعل في سجل آخر — لا يمكن تكراره.`};
+  row.tag = tagVal;
+  row.materialName = materialVal;
+  row.type = (updates.type==='Dismantled') ? 'Dismantled' : 'Installed';
+  row.siteName = siteVal;
+  if(dateVal) row.installDate = dateVal;
+  await saveState(['tagLog']);
+  return {ok:true, row};
+}
+async function taglogDeleteRow(id){
+  const idx = STATE.tagLog.findIndex(r=>r.id===id);
+  if(idx===-1) return {ok:false, msg:'السجل غير موجود (ربما حُذف مسبقاً).'};
+  STATE.tagLog.splice(idx,1);
+  await saveState(['tagLog']);
+  return {ok:true};
+}
+/* عناصر جدول موحّدة (تُستخدم في جدول "آخر التاجات المسجَّلة" وفي نافذة "السجل الكامل" معاً) مع أزرار تعديل/حذف لكل سجل */
+function taglogRenderRowsHtml(rows){
+  return rows.map(r=>`<tr>
+    <td>${esc(r.tag)}</td>
+    <td>${esc(r.materialName)}</td>
+    <td>${esc(r.type==='Dismantled'?'Dismantled':'Installed')}</td>
+    <td>${esc(r.siteName)}</td>
+    <td>${esc(r.installDate)}</td>
+    <td style="white-space:nowrap;">
+      <button type="button" class="secondary" data-tledit="${esc(r.id)}" style="padding:3px 10px;font-size:11px;">✏️ تعديل</button>
+      <button type="button" class="danger" data-tldel="${esc(r.id)}" style="padding:3px 10px;font-size:11px;margin-inline-start:4px;">🗑 حذف</button>
+    </td>
+  </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد تاجات مسجَّلة بعد</td></tr>';
+}
+function taglogWireRowActions(container, refreshInPlace, reopenAfterEdit){
+  reopenAfterEdit = reopenAfterEdit || refreshInPlace;
+  container.querySelectorAll('[data-tledit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>taglogOpenEditModal(btn.dataset.tledit, reopenAfterEdit));
+  });
+  container.querySelectorAll('[data-tldel]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!confirm('هل تريد حذف هذا التسجيل نهائياً من رصد التاجات؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+      await taglogDeleteRow(btn.dataset.tldel);
+      refreshInPlace();
+    });
+  });
+}
+function taglogOpenEditModal(id, onChanged){
+  const row = STATE.tagLog.find(r=>r.id===id);
+  if(!row) return;
+  openModal('✏️ تعديل تسجيل تاج', (bodyEl)=>{
+    bodyEl.innerHTML = `
+      <label class="flabel">Tag</label>
+      <input type="text" id="tlEditTag" value="${esc(row.tag)}">
+      <label class="flabel">اسم القطعة</label>
+      <input type="text" id="tlEditMaterial" value="${esc(row.materialName)}">
+      <label class="flabel">نوع التاج</label>
+      <select id="tlEditType">
+        <option value="Installed" ${row.type!=='Dismantled'?'selected':''}>Installed</option>
+        <option value="Dismantled" ${row.type==='Dismantled'?'selected':''}>Dismantled</option>
+      </select>
+      <label class="flabel">اسم الموقع</label>
+      <input type="text" id="tlEditSite" value="${esc(row.siteName)}">
+      <label class="flabel">تاريخ التركيب</label>
+      <input type="date" id="tlEditDate" value="${esc(row.installDate)}">
+      <div id="tlEditMsg"></div>
+      <div class="btnrow"><button class="primary" id="btnTlEditSave">💾 حفظ التعديلات</button></div>
+    `;
+    document.getElementById('btnTlEditSave').addEventListener('click', async ()=>{
+      const updates = {
+        tag: document.getElementById('tlEditTag').value,
+        materialName: document.getElementById('tlEditMaterial').value,
+        type: document.getElementById('tlEditType').value,
+        siteName: document.getElementById('tlEditSite').value,
+        installDate: document.getElementById('tlEditDate').value,
+      };
+      const res = await taglogUpdateRow(id, updates);
+      if(!res.ok){
+        const msgEl = document.getElementById('tlEditMsg');
+        if(msgEl) msgEl.innerHTML = `<div class="msg bad">${esc(res.msg)}</div>`;
+        return;
+      }
+      closeModal();
+      onChanged();
+    });
+  });
+}
+function taglogOpenFullRecordsModal(){
+  openRecordsModal('📋 كل التاجات المسجَّلة — رصد التاجات', renderTagLogFullRecordsTab);
+}
+function renderTagLogFullRecordsTab(el){
+  const rows = STATE.tagLog.slice().reverse();
+  el.innerHTML = `<div class="tablewrap"><table class="data">
+    <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th><th>إجراءات</th></tr></thead>
+    <tbody>${taglogRenderRowsHtml(rows)}</tbody>
+  </table></div>`;
+  taglogWireRowActions(el, ()=>renderTagLogFullRecordsTab(el), taglogOpenFullRecordsModal);
+}
+
 /* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
    المصدر مباشرة من بيانات النظام الحالية (STATE.stock + STATE.dismantled) دون أي قائمة ثابتة
    منفصلة، ودون أي تعديل على منطق المخزون أو الكميات. نفس منطق qmRunSearch/qmRenderDropdown أعلاه. ---- */
@@ -4110,11 +4218,14 @@ function renderTagCaptureTab(el){
     </div>
 
     <div class="panel">
-      <h2>آخر التاجات المسجَّلة</h2>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th></tr></thead>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <h2 style="margin:0;">آخر التاجات المسجَّلة</h2>
+        <button class="records-btn" id="btnTlFullRecords" type="button">📋 السجل الكامل</button>
+      </div>
+      <div class="tablewrap"><table class="data" id="tlRecentTable">
+        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th><th>إجراءات</th></tr></thead>
         <tbody>
-          ${STATE.tagLog.slice(-10).reverse().map(r=>`<tr><td>${esc(r.tag)}</td><td>${esc(r.materialName)}</td><td>${esc(r.type==='Dismantled'?'Dismantled':'Installed')}</td><td>${esc(r.siteName)}</td><td>${esc(r.installDate)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد تاجات مسجَّلة بعد</td></tr>'}
+          ${taglogRenderRowsHtml(STATE.tagLog.slice(-10).reverse())}
         </tbody>
       </table></div>
     </div>
@@ -4136,6 +4247,9 @@ function renderTagCaptureTab(el){
 
   document.getElementById('btnTlTypeInstalled').addEventListener('click', ()=>taglogSetType('Installed'));
   document.getElementById('btnTlTypeDismantled').addEventListener('click', ()=>taglogSetType('Dismantled'));
+
+  document.getElementById('btnTlFullRecords').addEventListener('click', taglogOpenFullRecordsModal);
+  taglogWireRowActions(document.getElementById('tlRecentTable'), ()=>renderTagCaptureTab(document.getElementById('tabContent')));
 
   const searchInp = document.getElementById('tlMaterialSearch');
   searchInp.addEventListener('input', ()=>{ taglogRunSearch(searchInp.value); });
