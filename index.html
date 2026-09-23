@@ -3883,6 +3883,22 @@ function taglogSearchAllMaterials(q){
   if(!ql) return [];
   return taglogAllMaterialNames().filter(n=>n.toLowerCase().includes(ql)).map(n=>({description:n}));
 }
+/* ---- إضافة مادة جديدة غير موجودة أصلاً (لا في مواد 4G المتوفرة ولا في مواد الإرجاع) ----
+   تُنشأ كصنف جديد فعلي في "مواد 4G المتوفرة" (STATE.stock) بكمية 0 (لا تمثّل استلاماً فعلياً،
+   فقط تسجّل اسم المادة ليصبح متاحاً للاختيار لاحقاً من نفس القائمة المدموجة)، بنفس شكل الصنف
+   المستخدم فعلاً في بقية النظام. إن كان الاسم (بتجاهل حالة الأحرف/المسافات الزائدة) موجوداً
+   أصلاً، يُعاد استخدامه كما هو بدل إنشاء نسخة مكرَّرة. skipSave=true تُستخدم فقط من الاستيراد
+   الدفعي (رفع Excel) لتجميع الحفظ في نهاية الدفعة بدل حفظ منفصل لكل صف. ---- */
+async function taglogAddNewMaterial(name, skipSave){
+  const clean = trim(name).replace(/\s+/g,' ');
+  if(!clean) return {ok:false, msg:'اكتب اسم المادة أولاً.'};
+  const existing = taglogAllMaterialNames().find(n=>n.toLowerCase()===clean.toLowerCase());
+  if(existing) return {ok:true, name: existing, created:false};
+  const code = 'MANUAL-'+nextId();
+  STATE.stock[code] = {code, description: clean, total_quantity:0, issued_quantity:0, tags:[], first_seen: todayStr()};
+  if(!skipSave) await saveState(['stock']);
+  return {ok:true, name: clean, created:true};
+}
 function taglogRunSearch(q){
   TAGLOG_SEARCH_RESULTS = taglogSearchAllMaterials(q).slice(0,8);
   TAGLOG_HL_INDEX = TAGLOG_SEARCH_RESULTS.length ? 0 : -1;
@@ -3892,16 +3908,25 @@ function taglogRenderDropdown(){
   const dd = document.getElementById('tlMaterialDropdown');
   const inp = document.getElementById('tlMaterialSearch');
   if(!dd || !inp) return;
-  if(!inp.value.trim()){ dd.innerHTML=''; return; }
+  const q = trim(inp.value);
+  if(!q){ dd.innerHTML=''; return; }
+  const exactExists = taglogAllMaterialNames().some(n=>n.toLowerCase()===q.toLowerCase());
+  const addNewHtml = exactExists ? '' : `<div class="qm-dropdown-item" data-addnew="1" style="color:var(--accent);font-weight:600;">➕ إضافة "${esc(q)}" كمادة جديدة</div>`;
   if(!TAGLOG_SEARCH_RESULTS.length){
-    dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا توجد مادة مطابقة</div></div>`;
-    return;
+    dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا توجد مادة مطابقة</div>${addNewHtml}</div>`;
+  } else {
+    dd.innerHTML = `<div class="qm-dropdown">${TAGLOG_SEARCH_RESULTS.map((it,i)=>`
+      <div class="qm-dropdown-item ${i===TAGLOG_HL_INDEX?'hl':''}" data-pick="${esc(it.description)}"><span>${esc(it.description)}</span></div>
+    `).join('')}${addNewHtml}</div>`;
   }
-  dd.innerHTML = `<div class="qm-dropdown">${TAGLOG_SEARCH_RESULTS.map((it,i)=>`
-    <div class="qm-dropdown-item ${i===TAGLOG_HL_INDEX?'hl':''}" data-pick="${esc(it.description)}"><span>${esc(it.description)}</span></div>
-  `).join('')}</div>`;
   dd.querySelectorAll('[data-pick]').forEach(row=>{
     row.addEventListener('click', ()=>taglogSelectMaterial(row.dataset.pick));
+  });
+  const addBtn = dd.querySelector('[data-addnew]');
+  if(addBtn) addBtn.addEventListener('click', async ()=>{
+    const res = await taglogAddNewMaterial(q);
+    if(!res.ok){ alert(res.msg); return; }
+    taglogSelectMaterial(res.name);
   });
 }
 function taglogSelectMaterial(name){
@@ -4226,6 +4251,7 @@ function taglogImportParse(wb){
   const range = XLSX.utils.decode_range(ws['!ref']);
   const nameMap = new Map();
   taglogAllMaterialNames().forEach(n=>{ const k = taglogImportNormName(n); if(!nameMap.has(k)) nameMap.set(k, n); });
+  const newNamesSeen = new Map(); // مواد جديدة غير موجودة أصلاً اكتُشفت أثناء قراءة هذا الملف نفسه — لتوحيد نفس الاسم إن تكرر بحروف/مسافات مختلفة داخل الملف نفسه
   const rows = [];
   for(let r=range.s.r; r<=range.e.r; r++){
     const a = taglogImportCellText(ws, r, range.s.c);
@@ -4233,7 +4259,15 @@ function taglogImportParse(wb){
     const c = taglogImportCellText(ws, r, range.s.c+2);
     if(!a && !b && !c) continue;
     if(!rows.length && r===range.s.r && taglogImportIsHeader(a, b, c)) continue; // الصف الأول عناوين
-    rows.push({excelRow: r+1, materialRaw: a, material: nameMap.get(taglogImportNormName(a)) || null, tag: b, site: c, type: TAGLOG_TYPE, status:'ok', note:''});
+    const key = taglogImportNormName(a);
+    let material = nameMap.get(key) || null;
+    let isNewMaterial = false;
+    if(!material && a){
+      material = newNamesSeen.get(key) || trim(a).replace(/\s+/g,' ');
+      if(!newNamesSeen.has(key)) newNamesSeen.set(key, material);
+      isNewMaterial = true;
+    }
+    rows.push({excelRow: r+1, materialRaw: a, material, isNewMaterial, tag: b, site: c, type: TAGLOG_TYPE, status:'ok', note:''});
   }
   taglogImportValidate(rows);
   return rows;
@@ -4246,7 +4280,9 @@ function taglogImportValidate(rows){
     if(!x.tag) miss.push('التاج');
     if(!x.site) miss.push('اسم الموقع');
     if(miss.length){ x.status='error'; x.note='حقل فارغ: '+miss.join('، '); return; }
-    if(!x.material){ x.status='error'; x.note='اسم القطعة غير موجود في مواد 4G المتوفرة أو مواد الإرجاع'; return; }
+    // اسم قطعة غير موجود في مواد 4G المتوفرة أو مواد الإرجاع: يُقبل ويُستورد، وتُضاف المادة تلقائياً
+    // كصنف جديد في "مواد 4G المتوفرة" عند التأكيد (بدل رفضه كخطأ كما كان سابقاً).
+    if(x.isNewMaterial){ x.note = '🆕 مادة جديدة — ستُضاف تلقائياً إلى "مواد 4G المتوفرة"'; }
     if(taglogIsDuplicate(x.tag)){ x.status='skip'; x.note='التاج مسجَّل مسبقاً في النظام — لن يُكرَّر'; }
   });
   // تكرار داخل نفس الملف: إن تطابقت المادة والموقع يُستورد أول صف فقط، وإن اختلفت فكلها أخطاء (لا تخمين)
@@ -4274,9 +4310,9 @@ function taglogOpenImportModal(){
 function renderTagLogImportBody(bodyEl){
   const imp = TAGLOG_IMPORT;
   const counts = imp ? {ok: imp.rows.filter(x=>x.status==='ok').length, skip: imp.rows.filter(x=>x.status==='skip').length, error: imp.rows.filter(x=>x.status==='error').length} : null;
-  const statusPill = x=> x.status==='ok' ? '<span class="pill ok">جاهز</span>' : (x.status==='skip' ? '<span class="pill warn">مكرر — تجاهل</span>' : '<span class="pill bad">خطأ</span>');
+  const statusPill = x=> x.status==='ok' ? (x.isNewMaterial ? '<span class="pill warn">🆕 مادة جديدة</span>' : '<span class="pill ok">جاهز</span>') : (x.status==='skip' ? '<span class="pill warn">مكرر — تجاهل</span>' : '<span class="pill bad">خطأ</span>');
   bodyEl.innerHTML = `
-    <div class="desc">ملف Excel بثلاثة أعمدة بالترتيب: <b>اسم القطعة</b>، <b>التاج</b>، <b>اسم الموقع</b> (الشيت الأول فقط، والصف الأول يُعتبر عناوين إن احتوى أسماء الأعمدة). باقي بيانات السجل (المصدر، النوع، تاريخ التركيب) تُكمَّل تلقائياً بنفس منطق التسجيل اليدوي.</div>
+    <div class="desc">ملف Excel بثلاثة أعمدة بالترتيب: <b>اسم القطعة</b>، <b>التاج</b>، <b>اسم الموقع</b> (الشيت الأول فقط، والصف الأول يُعتبر عناوين إن احتوى أسماء الأعمدة). باقي بيانات السجل (المصدر، النوع، تاريخ التركيب) تُكمَّل تلقائياً بنفس منطق التسجيل اليدوي. اسم قطعة غير موجود في القائمة الحالية يُضاف تلقائياً كصنف جديد في "مواد 4G المتوفرة" عند التأكيد.</div>
     <div class="filebox">
       <label class="flabel">ملف Excel (.xlsx / .xls)</label>
       <input type="file" id="tlImportFile" accept=".xlsx,.xls">
@@ -4329,15 +4365,22 @@ function renderTagLogImportBody(bodyEl){
   if(btn) btn.addEventListener('click', async ()=>{
     btn.disabled = true;
     taglogImportValidate(imp.rows); // إعادة فحص التكرار مقابل آخر حالة للسجل قبل الإدخال
-    let added = 0; const failed = []; const sites = new Set();
+    let added = 0; let newMaterialsCreated = 0; const failed = []; const sites = new Set();
     for(const x of imp.rows){
       if(x.status!=='ok') continue;
+      if(x.isNewMaterial){
+        // taglogAddNewMaterial تتحقق داخلياً من عدم التكرار مقابل STATE.stock الحالية (المحدَّثة فوراً
+        // بأي مادة أُنشئت من صف سابق في نفس هذه الدفعة)، فلا تُنشأ نفس المادة الجديدة أكثر من مرة.
+        const mres = await taglogAddNewMaterial(x.material, true);
+        if(mres.ok){ x.material = mres.name; if(mres.created) newMaterialsCreated++; }
+      }
       const res = await taglogAddRow(x.tag, x.material, x.type, x.site, true);
       if(res.ok){ added++; sites.add(res.row.siteName); } else failed.push(`صف ${x.excelRow}: ${res.msg}`);
     }
     if(added) await saveState(['tagLog']);
+    if(newMaterialsCreated) await saveState(['stock']);
     const skipped = imp.rows.length - added - failed.length;
-    TAGLOG_FLASH_MSG = `تم استيراد ${added} تاج من "${imp.fileName}"` + (skipped?` — ${skipped} صف لم يُستورد (مكرر/خطأ)`:'') + (failed.length?` — فشل ${failed.length}`:'') + '.';
+    TAGLOG_FLASH_MSG = `تم استيراد ${added} تاج من "${imp.fileName}"` + (newMaterialsCreated?` — أُضيفت ${newMaterialsCreated} مادة جديدة إلى مواد 4G المتوفرة`:'') + (skipped?` — ${skipped} صف لم يُستورد (مكرر/خطأ)`:'') + (failed.length?` — فشل ${failed.length}`:'') + '.';
     if(sites.size===1) TAGLOG_REPORT_SITE = Array.from(sites)[0];
     TAGLOG_IMPORT = null;
     closeModal();
