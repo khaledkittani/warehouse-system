@@ -3696,6 +3696,9 @@ let TAGLOG_FLASH_MSG = null;
 let TAGLOG_REPORT_SITE = '';
 let TAGLOG_REPORT_MSG = null;
 let TAGLOG_BARCODE_STREAM = null; // بديل كاميرا الهاتف عن جهاز Scanner الفيزيائي — نفس أسلوب qmToggleBarcodeScanner أعلاه (BarcodeDetector)
+let TAGLOG_FILTER_QUERY = ''; // بحث حي داخل جدول كل التاجات المسجَّلة المعروض كاملاً في نفس الصفحة
+let TAGLOG_SORT_COL = null;   // null = الترتيب الافتراضي (الأحدث إدخالاً أولاً)؛ وإلا اسم عمود مضغوط عليه للفرز
+let TAGLOG_SORT_DIR = 'asc';
 
 function taglogNormTag(t){ return trim(t).toLowerCase(); }
 function taglogIsDuplicate(tag){
@@ -3784,8 +3787,8 @@ async function taglogDeleteRow(id){
   await saveState(['tagLog']);
   return {ok:true};
 }
-/* عناصر جدول موحّدة (تُستخدم في جدول "آخر التاجات المسجَّلة" وفي نافذة "السجل الكامل" معاً) مع أزرار تعديل/حذف لكل سجل */
-function taglogRenderRowsHtml(rows){
+/* عناصر جدول موحّدة (السجل الكامل المعروض في نفس الصفحة) مع أزرار تعديل/حذف لكل سجل */
+function taglogRenderRowsHtml(rows, emptyMsg){
   return rows.map(r=>`<tr>
     <td>${esc(r.tag)}</td>
     <td>${esc(r.materialName)}</td>
@@ -3796,7 +3799,41 @@ function taglogRenderRowsHtml(rows){
       <button type="button" class="secondary" data-tledit="${esc(r.id)}" style="padding:3px 10px;font-size:11px;">✏️ تعديل</button>
       <button type="button" class="danger" data-tldel="${esc(r.id)}" style="padding:3px 10px;font-size:11px;margin-inline-start:4px;">🗑 حذف</button>
     </td>
-  </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد تاجات مسجَّلة بعد</td></tr>';
+  </tr>`).join('') || `<tr><td colspan="6" class="empty">${emptyMsg || 'لا توجد تاجات مسجَّلة بعد'}</td></tr>`;
+}
+/* فلترة (بحث حي في كل الأعمدة) وفرز (بالضغط على عنوان أي عمود) لجدول كل التاجات المسجَّلة —
+   الترتيب الافتراضي (بدون فرز مُختار) هو نفس ترتيب السابق: الأحدث إدخالاً أولاً. */
+const TAGLOG_SORT_FIELDS = {tag:'tag', material:'materialName', type:'type', site:'siteName', date:'installDate'};
+function taglogFilteredSortedRows(){
+  const q = trim(TAGLOG_FILTER_QUERY).toLowerCase();
+  let rows = STATE.tagLog.slice();
+  if(q){
+    rows = rows.filter(r=>
+      trim(r.tag).toLowerCase().includes(q) ||
+      trim(r.materialName).toLowerCase().includes(q) ||
+      (r.type==='Dismantled'?'dismantled':'installed').includes(q) ||
+      trim(r.siteName).toLowerCase().includes(q) ||
+      trim(r.installDate).toLowerCase().includes(q)
+    );
+  }
+  if(TAGLOG_SORT_COL && TAGLOG_SORT_FIELDS[TAGLOG_SORT_COL]){
+    const field = TAGLOG_SORT_FIELDS[TAGLOG_SORT_COL];
+    rows.sort((a,b)=>{
+      const va = String(a[field]||'').toLowerCase();
+      const vb = String(b[field]||'').toLowerCase();
+      if(va<vb) return TAGLOG_SORT_DIR==='asc' ? -1 : 1;
+      if(va>vb) return TAGLOG_SORT_DIR==='asc' ? 1 : -1;
+      return 0;
+    });
+  } else {
+    rows.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); // الأحدث إدخالاً أولاً (نفس الترتيب السابق)
+  }
+  return rows;
+}
+function taglogSetSort(col){
+  if(TAGLOG_SORT_COL===col){ TAGLOG_SORT_DIR = TAGLOG_SORT_DIR==='asc' ? 'desc' : 'asc'; }
+  else { TAGLOG_SORT_COL = col; TAGLOG_SORT_DIR = 'asc'; }
+  renderTagLogRecordsPanel();
 }
 function taglogWireRowActions(container, refreshInPlace, reopenAfterEdit){
   reopenAfterEdit = reopenAfterEdit || refreshInPlace;
@@ -3851,16 +3888,41 @@ function taglogOpenEditModal(id, onChanged){
     });
   });
 }
-function taglogOpenFullRecordsModal(){
-  openRecordsModal('📋 كل التاجات المسجَّلة — رصد التاجات', renderTagLogFullRecordsTab);
-}
-function renderTagLogFullRecordsTab(el){
-  const rows = STATE.tagLog.slice().reverse();
-  el.innerHTML = `<div class="tablewrap"><table class="data">
-    <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th><th>إجراءات</th></tr></thead>
-    <tbody>${taglogRenderRowsHtml(rows)}</tbody>
-  </table></div>`;
-  taglogWireRowActions(el, ()=>renderTagLogFullRecordsTab(el), taglogOpenFullRecordsModal);
+/* ---- كل التاجات المسجَّلة، معروضة كاملة في نفس الصفحة (بدون فتح نافذة منفصلة) مع بحث حي وفرز بالأعمدة ---- */
+function renderTagLogRecordsPanel(){
+  const panel = document.getElementById('tlRecordsPanel');
+  if(!panel) return;
+  const rows = taglogFilteredSortedRows();
+  const total = STATE.tagLog.length;
+  const sortArrow = col => TAGLOG_SORT_COL===col ? (TAGLOG_SORT_DIR==='asc' ? ' ▲' : ' ▼') : '';
+  const emptyMsg = (total && !rows.length) ? 'لا توجد نتائج مطابقة للبحث' : undefined;
+  panel.innerHTML = `
+    <h2 style="margin:0 0 10px;">📋 كل التاجات المسجَّلة (${rows.length}${rows.length!==total?` من ${total}`:''})</h2>
+    <input type="text" id="tlRecordsFilter" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TAGLOG_FILTER_QUERY)}" style="margin-bottom:10px;">
+    <div class="tablewrap"><table class="data" id="tlRecentTable">
+      <thead><tr>
+        <th data-sort="tag" style="cursor:pointer;user-select:none;">التاج${sortArrow('tag')}</th>
+        <th data-sort="material" style="cursor:pointer;user-select:none;">اسم القطعة${sortArrow('material')}</th>
+        <th data-sort="type" style="cursor:pointer;user-select:none;">النوع${sortArrow('type')}</th>
+        <th data-sort="site" style="cursor:pointer;user-select:none;">اسم الموقع${sortArrow('site')}</th>
+        <th data-sort="date" style="cursor:pointer;user-select:none;">تاريخ التركيب${sortArrow('date')}</th>
+        <th>إجراءات</th>
+      </tr></thead>
+      <tbody>${taglogRenderRowsHtml(rows, emptyMsg)}</tbody>
+    </table></div>
+  `;
+  const filterInp = document.getElementById('tlRecordsFilter');
+  filterInp.addEventListener('input', ()=>{
+    const pos = filterInp.selectionStart;
+    TAGLOG_FILTER_QUERY = filterInp.value;
+    renderTagLogRecordsPanel();
+    const f2 = document.getElementById('tlRecordsFilter');
+    if(f2){ f2.focus(); try{ f2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  panel.querySelectorAll('[data-sort]').forEach(th=>{
+    th.addEventListener('click', ()=>taglogSetSort(th.dataset.sort));
+  });
+  taglogWireRowActions(document.getElementById('tlRecentTable'), renderTagLogRecordsPanel);
 }
 
 /* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
@@ -4436,18 +4498,7 @@ function renderTagCaptureTab(el){
       ` : `<div class="msg info" style="margin-top:14px;">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`}
     </div>
 
-    <div class="panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <h2 style="margin:0;">آخر التاجات المسجَّلة</h2>
-        <button class="records-btn" id="btnTlFullRecords" type="button">📋 السجل الكامل</button>
-      </div>
-      <div class="tablewrap"><table class="data" id="tlRecentTable">
-        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th><th>إجراءات</th></tr></thead>
-        <tbody>
-          ${taglogRenderRowsHtml(STATE.tagLog.slice(-10).reverse())}
-        </tbody>
-      </table></div>
-    </div>
+    <div class="panel" id="tlRecordsPanel"></div>
 
     <div class="panel">
       <h2>استخراج تقرير حسب الموقع</h2>
@@ -4467,8 +4518,7 @@ function renderTagCaptureTab(el){
   document.getElementById('btnTlTypeInstalled').addEventListener('click', ()=>taglogSetType('Installed'));
   document.getElementById('btnTlTypeDismantled').addEventListener('click', ()=>taglogSetType('Dismantled'));
 
-  document.getElementById('btnTlFullRecords').addEventListener('click', taglogOpenFullRecordsModal);
-  taglogWireRowActions(document.getElementById('tlRecentTable'), ()=>renderTagCaptureTab(document.getElementById('tabContent')));
+  renderTagLogRecordsPanel();
 
   const searchInp = document.getElementById('tlMaterialSearch');
   searchInp.addEventListener('input', ()=>{ taglogRunSearch(searchInp.value); });
