@@ -3727,8 +3727,8 @@ function taglogDismantledDateForMaterial(materialName){
   });
   return latest;
 }
-async function taglogAddRow(tag, materialName, type){
-  const site = trim(TAGLOG_SITE);
+async function taglogAddRow(tag, materialName, type, siteOverride, skipSave){
+  const site = trim(siteOverride!==undefined ? siteOverride : TAGLOG_SITE); // siteOverride/skipSave: يُستخدمان فقط من "رفع Excel" — الاستدعاء اليدوي لم يتغيّر
   const tagVal = trim(tag);
   if(!site) return {ok:false, msg:'اكتب اسم الموقع أولاً.'};
   if(!materialName) return {ok:false, msg:'اختر المادة أولاً من نتائج البحث.'};
@@ -3751,7 +3751,7 @@ async function taglogAddRow(tag, materialName, type){
     createdAt: Date.now(),
   };
   STATE.tagLog.push(row);
-  await saveState(['tagLog']);
+  if(!skipSave) await saveState(['tagLog']);
   return {ok:true, row};
 }
 
@@ -4194,6 +4194,158 @@ function taglogHandleExtract(){
   renderTagCaptureTab(document.getElementById('tabContent'));
 }
 
+/* ---- رفع Excel: استيراد تاجات دفعة واحدة (أعمدة: اسم القطعة، التاج، اسم الموقع) ----
+   لا منطق جديد للحفظ: كل صف صالح يُمرَّر إلى taglogAddRow نفسها (نفس المصدر الافتراضي، نفس
+   قاعدة تاريخ Dismantled، نفس منع تكرار التاج)، ثم حفظ واحد لـ STATE.tagLog في النهاية.
+   اسم القطعة يجب أن يطابق حرفياً (بتجاهل حالة الأحرف والمسافات الزائدة) اسماً من
+   taglogAllMaterialNames (مواد 4G المتوفرة + مواد الإرجاع) — لا تخمين لأي اسم غير مطابق. ---- */
+let TAGLOG_IMPORT = null; // {fileName, rows:[{excelRow, materialRaw, material, tag, site, type, status, note}]}
+function taglogImportNormName(v){ return trim(v).replace(/\s+/g,' ').toLowerCase(); }
+function taglogImportCellText(ws, r, c){
+  const cell = ws[XLSX.utils.encode_cell({r, c})];
+  if(!cell || cell.v===null || cell.v===undefined) return '';
+  if(cell.t==='n'){
+    // الحفاظ على التاج كما يظهر في الإكسل (أصفار بادئة عبر تنسيق الخلية) وبدون صيغة علمية
+    const w = trim(cell.w);
+    if(/^\d+$/.test(w)) return w;
+    if(Number.isInteger(cell.v)) return cell.v.toLocaleString('fullwide', {useGrouping:false});
+    return String(cell.v);
+  }
+  return trim(cell.v);
+}
+function taglogImportIsHeader(a, b, c){
+  let hits = 0;
+  if(/اسم\s*القطعة|القطعة|المادة|material|item|description|part/i.test(a)) hits++;
+  if(/التاج|تاج|^tag|serial/i.test(b)) hits++;
+  if(/الموقع|موقع|site/i.test(c)) hits++;
+  return hits >= 2;
+}
+function taglogImportParse(wb){
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if(!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const nameMap = new Map();
+  taglogAllMaterialNames().forEach(n=>{ const k = taglogImportNormName(n); if(!nameMap.has(k)) nameMap.set(k, n); });
+  const rows = [];
+  for(let r=range.s.r; r<=range.e.r; r++){
+    const a = taglogImportCellText(ws, r, range.s.c);
+    const b = taglogImportCellText(ws, r, range.s.c+1);
+    const c = taglogImportCellText(ws, r, range.s.c+2);
+    if(!a && !b && !c) continue;
+    if(!rows.length && r===range.s.r && taglogImportIsHeader(a, b, c)) continue; // الصف الأول عناوين
+    rows.push({excelRow: r+1, materialRaw: a, material: nameMap.get(taglogImportNormName(a)) || null, tag: b, site: c, type: TAGLOG_TYPE, status:'ok', note:''});
+  }
+  taglogImportValidate(rows);
+  return rows;
+}
+function taglogImportValidate(rows){
+  rows.forEach(x=>{ x.status='ok'; x.note=''; });
+  rows.forEach(x=>{
+    const miss = [];
+    if(!x.materialRaw) miss.push('اسم القطعة');
+    if(!x.tag) miss.push('التاج');
+    if(!x.site) miss.push('اسم الموقع');
+    if(miss.length){ x.status='error'; x.note='حقل فارغ: '+miss.join('، '); return; }
+    if(!x.material){ x.status='error'; x.note='اسم القطعة غير موجود في مواد 4G المتوفرة أو مواد الإرجاع'; return; }
+    if(taglogIsDuplicate(x.tag)){ x.status='skip'; x.note='التاج مسجَّل مسبقاً في النظام — لن يُكرَّر'; }
+  });
+  // تكرار داخل نفس الملف: إن تطابقت المادة والموقع يُستورد أول صف فقط، وإن اختلفت فكلها أخطاء (لا تخمين)
+  const groups = new Map();
+  rows.forEach(x=>{ if(x.tag){ const k = taglogNormTag(x.tag); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(x); } });
+  groups.forEach(list=>{
+    if(list.length<2) return;
+    const rowsTxt = list.map(x=>x.excelRow).join('، ');
+    const same = list.every(x=>taglogImportNormName(x.materialRaw)===taglogImportNormName(list[0].materialRaw) && taglogImportNormName(x.site)===taglogImportNormName(list[0].site));
+    list.forEach((x,i)=>{
+      if(x.status!=='ok') return;
+      if(!same){ x.status='error'; x.note=`تاج مكرر في الملف ببيانات مختلفة (الصفوف ${rowsTxt})`; }
+      else if(i>0){ x.status='skip'; x.note=`تاج مكرر في الملف (الصفوف ${rowsTxt}) — يُستورد مرة واحدة`; }
+    });
+  });
+}
+function taglogImportPreviewDate(x){
+  if(x.type==='Dismantled' && x.material){ const d = taglogDismantledDateForMaterial(x.material); if(d) return d; }
+  return todayStr();
+}
+function taglogOpenImportModal(){
+  TAGLOG_IMPORT = null;
+  openModal('📤 رفع Excel — رصد التاجات', (bodyEl)=>renderTagLogImportBody(bodyEl), {maxWidth:'1100px'});
+}
+function renderTagLogImportBody(bodyEl){
+  const imp = TAGLOG_IMPORT;
+  const counts = imp ? {ok: imp.rows.filter(x=>x.status==='ok').length, skip: imp.rows.filter(x=>x.status==='skip').length, error: imp.rows.filter(x=>x.status==='error').length} : null;
+  const statusPill = x=> x.status==='ok' ? '<span class="pill ok">جاهز</span>' : (x.status==='skip' ? '<span class="pill warn">مكرر — تجاهل</span>' : '<span class="pill bad">خطأ</span>');
+  bodyEl.innerHTML = `
+    <div class="desc">ملف Excel بثلاثة أعمدة بالترتيب: <b>اسم القطعة</b>، <b>التاج</b>، <b>اسم الموقع</b> (الشيت الأول فقط، والصف الأول يُعتبر عناوين إن احتوى أسماء الأعمدة). باقي بيانات السجل (المصدر، النوع، تاريخ التركيب) تُكمَّل تلقائياً بنفس منطق التسجيل اليدوي.</div>
+    <div class="filebox">
+      <label class="flabel">ملف Excel (.xlsx / .xls)</label>
+      <input type="file" id="tlImportFile" accept=".xlsx,.xls">
+    </div>
+    <div id="tlImportMsg"></div>
+    ${imp ? `
+      <div class="msg info">الملف: <b>${esc(imp.fileName)}</b> — ${imp.rows.length} صف: ✅ ${counts.ok} جاهز للاستيراد · ⏭️ ${counts.skip} مكرر (سيُتجاهل) · ⚠️ ${counts.error} خطأ (لن يُستورد)</div>
+      <label class="flabel">نوع التاج لكل الصفوف</label>
+      <div class="btnrow" style="gap:8px;">
+        <button type="button" id="btnTlImpAllInstalled" class="secondary" style="flex:1;">الكل Installed</button>
+        <button type="button" id="btnTlImpAllDismantled" class="secondary" style="flex:1;">الكل Dismantled</button>
+      </div>
+      <div class="tablewrap" style="max-height:50vh;overflow:auto;"><table class="data">
+        <thead><tr><th>صف</th><th>اسم القطعة</th><th>التاج</th><th>اسم الموقع</th><th>النوع</th><th>المصدر</th><th>تاريخ التركيب</th><th>الحالة</th></tr></thead>
+        <tbody>${imp.rows.map((x,i)=>`<tr>
+          <td>${x.excelRow}</td>
+          <td>${esc(x.material || x.materialRaw)}</td>
+          <td style="direction:ltr;">${esc(x.tag)}</td>
+          <td>${esc(x.site)}</td>
+          <td><select data-tlimptype="${i}" style="min-width:110px;"><option value="Installed" ${x.type!=='Dismantled'?'selected':''}>Installed</option><option value="Dismantled" ${x.type==='Dismantled'?'selected':''}>Dismantled</option></select></td>
+          <td>${esc(TAGLOG_SOURCE_DEFAULT)}</td>
+          <td>${esc(taglogFormatDateForReport(taglogImportPreviewDate(x)))}</td>
+          <td>${statusPill(x)}${x.note?`<div style="font-size:11px;margin-top:3px;">${esc(x.note)}</div>`:''}</td>
+        </tr>`).join('') || '<tr><td colspan="8" class="empty">لا توجد صفوف بيانات في الملف</td></tr>'}</tbody>
+      </table></div>
+      <div class="btnrow"><button class="primary" id="btnTlImportConfirm" ${counts.ok?'':'disabled'}>✅ تأكيد الاستيراد (${counts.ok})</button></div>
+    ` : ''}
+  `;
+  const fileInp = document.getElementById('tlImportFile');
+  fileInp.addEventListener('change', async ()=>{
+    const file = fileInp.files[0];
+    if(!file) return;
+    try{
+      const wb = await readWorkbook(file);
+      TAGLOG_IMPORT = {fileName: file.name, rows: taglogImportParse(wb)};
+      renderTagLogImportBody(bodyEl);
+    }catch(e){
+      const m = document.getElementById('tlImportMsg');
+      if(m) m.innerHTML = `<div class="msg bad">تعذّرت قراءة الملف: ${esc(e.message||'')}</div>`;
+    }
+  });
+  if(!imp) return;
+  const setAll = t=>{ imp.rows.forEach(x=>x.type=t); renderTagLogImportBody(bodyEl); };
+  document.getElementById('btnTlImpAllInstalled').addEventListener('click', ()=>setAll('Installed'));
+  document.getElementById('btnTlImpAllDismantled').addEventListener('click', ()=>setAll('Dismantled'));
+  bodyEl.querySelectorAll('[data-tlimptype]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ imp.rows[+sel.dataset.tlimptype].type = sel.value; renderTagLogImportBody(bodyEl); });
+  });
+  const btn = document.getElementById('btnTlImportConfirm');
+  if(btn) btn.addEventListener('click', async ()=>{
+    btn.disabled = true;
+    taglogImportValidate(imp.rows); // إعادة فحص التكرار مقابل آخر حالة للسجل قبل الإدخال
+    let added = 0; const failed = []; const sites = new Set();
+    for(const x of imp.rows){
+      if(x.status!=='ok') continue;
+      const res = await taglogAddRow(x.tag, x.material, x.type, x.site, true);
+      if(res.ok){ added++; sites.add(res.row.siteName); } else failed.push(`صف ${x.excelRow}: ${res.msg}`);
+    }
+    if(added) await saveState(['tagLog']);
+    const skipped = imp.rows.length - added - failed.length;
+    TAGLOG_FLASH_MSG = `تم استيراد ${added} تاج من "${imp.fileName}"` + (skipped?` — ${skipped} صف لم يُستورد (مكرر/خطأ)`:'') + (failed.length?` — فشل ${failed.length}`:'') + '.';
+    if(sites.size===1) TAGLOG_REPORT_SITE = Array.from(sites)[0];
+    TAGLOG_IMPORT = null;
+    closeModal();
+    if(failed.length) alert('صفوف لم تُستورد:\n'+failed.join('\n'));
+    renderTagCaptureTab(document.getElementById('tabContent'));
+  });
+}
+
 /* ---- الواجهة ---- */
 function renderTagCaptureTab(el){
   if(!el) return;
@@ -4201,7 +4353,10 @@ function renderTagCaptureTab(el){
     <div class="panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <h2 style="margin:0;">${L('tab_tagcapture')}</h2>
-        <button class="secondary" id="btnTlTemplate" style="font-size:12px;padding:7px 14px;">⚙️ قالب الإكسل</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="secondary" id="btnTlImportExcel" style="font-size:12px;padding:7px 14px;">📤 رفع Excel</button>
+          <button class="secondary" id="btnTlTemplate" style="font-size:12px;padding:7px 14px;">⚙️ قالب الإكسل</button>
+        </div>
       </div>
       <div class="desc">اكتب اسم الموقع مرة واحدة، ابحث عن المادة واخترها، ثم امسح التاج — يُحفظ السجل فوراً وتنتقل تلقائياً لمادة جديدة بنفس الموقع.</div>
 
@@ -4299,6 +4454,7 @@ function renderTagCaptureTab(el){
   }
 
   document.getElementById('btnTlTemplate').addEventListener('click', openTagLogTemplateModal);
+  document.getElementById('btnTlImportExcel').addEventListener('click', taglogOpenImportModal);
 
   const reportSiteInp = document.getElementById('tlReportSite');
   reportSiteInp.addEventListener('input', ()=>{ TAGLOG_REPORT_SITE = reportSiteInp.value; });
