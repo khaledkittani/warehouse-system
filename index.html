@@ -561,6 +561,7 @@ const LABELS = {
   tab_stock: 'مواد 4G المتوفرة',
   tab_dismantled: 'مواد ارجاع',
   tab_goods: 'مخزون المستودع',
+  tab_goods_viewer: 'مواد المستودع المتوفرة',
   tab_sidhistory: 'سجل SID المنفَّذة',
   tab_search: 'البحث',
   tab_issues: 'المشاكل',
@@ -569,6 +570,7 @@ const LABELS = {
   tab_backup: '💾 نسخ احتياطي',
   tab_tags: 'تاجات المواد المتوفرة',
   tab_tagcapture: '🏷️ رصد التاجات',
+  tab_taglog_viewer: 'رصد التاجات',
 
   // عناوين فرعية / أقسام داخلية
   tags_heading: 'تاجات المواد المتوفرة',
@@ -2637,20 +2639,16 @@ function renderTabContent(){
 }
 
 /* ============================================================
-   👁️ وضع القراءة فقط (Viewer) — لا يعرض أي عنصر يُمكن أن يُعدِّل بيانات؛
+   👁️ وضع القراءة فقط (Viewer) — إعادة تصميم مبسَّطة: 3 أقسام فقط للعرض والتقارير،
+   بدون أي زر إضافة/تعديل/حذف/استلام/إخراج/نقل/تغيير حالة. كل قسم = عنوان + بحث موحّد
+   على كل الأعمدة + جدول + تصدير Excel. البيانات تُقرأ مباشرة من نفس مصادر الوضع الإداري
+   (STATE.stock / STATE.goodsCatalog / STATE.tagLog) دون أي نسخ أو Mock Data.
    الحماية الحقيقية هي RLS على مستوى Supabase، وهذا فقط لتجربة استخدام مريحة ومتّسقة معها.
    ============================================================ */
 const VIEWER_TABS = [
   {id:'stock', lk:'tab_stock'},
-  {id:'receipts', lk:'tab_receipts'},
-  {id:'movements', lk:'tab_movements'},
-  {id:'tags', lk:'tab_tags'},
-  {id:'goods', lk:'tab_goods'},
-  {id:'dismantled', lk:'tab_dismantled'},
-  {id:'sidhistory', lk:'tab_sidhistory'},
-  {id:'issues', lk:'tab_issues'},
-  {id:'search', lk:'tab_search'},
-  {id:'reports', lk:'tab_reports'},
+  {id:'goods', lk:'tab_goods_viewer'},
+  {id:'taglog', lk:'tab_taglog_viewer'},
 ];
 let VIEWER_ACTIVE_TAB = 'stock';
 function renderViewerMode(root){
@@ -2658,7 +2656,7 @@ function renderViewerMode(root){
     <header class="topbar">
       <div class="title-block">
         <h1>${L('app_viewer_chip')}</h1>
-        <div class="sub">استعراض بيانات المستودع — لا صلاحية تعديل أو حذف</div>
+        <div class="sub">استعراض بيانات المستودع واستخراج التقارير — لا صلاحية إضافة أو تعديل أو حذف</div>
       </div>
     </header>
     <nav class="tabs">
@@ -2674,186 +2672,36 @@ function renderViewerMode(root){
 function renderViewerTabContent(){
   const el = document.getElementById('viewerTabContent');
   if(VIEWER_ACTIVE_TAB==='stock') return renderStockTab(el);
-  if(VIEWER_ACTIVE_TAB==='receipts') return renderReceiptsViewerTab(el);
-  if(VIEWER_ACTIVE_TAB==='movements') return renderMovementsTab(el);
-  if(VIEWER_ACTIVE_TAB==='tags') return renderAvailableTagsTab(el);
   if(VIEWER_ACTIVE_TAB==='goods') return renderGoodsViewerTab(el);
-  if(VIEWER_ACTIVE_TAB==='dismantled') return renderDismantledTab(el);
-  if(VIEWER_ACTIVE_TAB==='sidhistory') return renderSidHistoryViewerTab(el);
-  if(VIEWER_ACTIVE_TAB==='issues') return renderIssuesTab(el);
-  if(VIEWER_ACTIVE_TAB==='search') return renderSearchTab(el);
-  if(VIEWER_ACTIVE_TAB==='reports') return renderReportsTab(el);
+  if(VIEWER_ACTIVE_TAB==='taglog') return renderTagLogViewerTab(el);
 }
-/* نسخة قراءة فقط من سجل الاستلامات — بحث + عرض تفاصيل، بدون تعديل كمية أو حذف */
-let RECEIPTS_VIEWER_SELECTED_SIG = null;
-function renderReceiptsViewerTab(el){
-  let rows = getReceiptRows();
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('receipts_heading')}</h2>
-      <div class="btnrow"><button class="secondary" id="btnExportReceiptsViewer">📥 تصدير إلى Excel</button></div>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>رقم الاستلام</th><th>التاريخ</th><th>اسم الملف</th><th>عدد الأصناف</th><th>إجمالي الكميات</th><th></th></tr></thead>
-        <tbody>
-          ${rows.map(f=>`<tr>
-            <td class="code-cell">#${String(f.receiptNumber||0).padStart(3,'0')}</td>
-            <td>${f.date}</td><td>${esc(f.name)}</td>
-            <td>${receiptItemCount(f)}</td><td>${receiptTotalQty(f)}</td>
-            <td><button class="secondary" data-viewrv="${esc(f.sig)}" style="padding:6px 14px;font-size:12px;">عرض التفاصيل</button></td>
-          </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد عمليات استلام بعد</td></tr>'}
-        </tbody>
-      </table></div>
-    </div>
-    <div id="receiptViewerDetailArea"></div>
-  `;
-  document.getElementById('btnExportReceiptsViewer').addEventListener('click', ()=>{
-    const headers = ['رقم الاستلام','التاريخ','اسم الملف','اسم المادة','الكود','الكمية المستلمة'];
-    const exportRows = [];
-    rows.forEach(f=> Object.entries(f.contributions||{}).forEach(([code,c])=>{
-      const desc = c.description || (STATE.stock[code]?STATE.stock[code].description:'');
-      exportRows.push([`#${String(f.receiptNumber||0).padStart(3,'0')}`, f.date, f.name, desc, code, c.qtyAdded]);
-    }));
-    exportSectionToExcel(headers, exportRows, 'سجل استلام مواد 4G', [14,14,26,30,16,16]);
-  });
-  el.querySelectorAll('[data-viewrv]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ RECEIPTS_VIEWER_SELECTED_SIG = btn.dataset.viewrv; renderReceiptViewerDetail(); });
-  });
-  if(RECEIPTS_VIEWER_SELECTED_SIG) renderReceiptViewerDetail();
-}
-function renderReceiptViewerDetail(){
-  const area = document.getElementById('receiptViewerDetailArea');
-  if(!area) return;
-  const fileRec = STATE.processedFiles.find(f=>f.sig===RECEIPTS_VIEWER_SELECTED_SIG && f.kind==='RECEIPT');
-  if(!fileRec || fileRec.deleted){ area.innerHTML=''; RECEIPTS_VIEWER_SELECTED_SIG=null; return; }
-  const items = Object.entries(fileRec.contributions||{});
-  area.innerHTML = `
-    <div class="panel">
-      <h2>${L('receipt_detail_heading')} #${String(fileRec.receiptNumber||0).padStart(3,'0')}</h2>
-      <div class="desc">التاريخ: ${fileRec.date} — الملف: ${esc(fileRec.name)}</div>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>اسم المادة</th><th>الكود</th><th>الكمية المستلمة</th><th>الرصيد الحالي الإجمالي</th></tr></thead>
-        <tbody>
-          ${items.map(([code,c])=>{
-            const stockEntry = STATE.stock[code];
-            const remaining = stockEntry ? (stockEntry.total_quantity - stockEntry.issued_quantity) : '—';
-            const desc = c.description || (stockEntry?stockEntry.description:'');
-            return `<tr><td>${esc(desc)}</td><td class="code-cell">${esc(code)}</td><td>${c.qtyAdded}</td><td>${remaining}</td></tr>`;
-          }).join('') || '<tr><td colspan="4" class="empty">لا توجد بيانات</td></tr>'}
-        </tbody>
-      </table></div>
-      <div class="btnrow"><button class="secondary" id="btnCloseReceiptViewerDetail">إغلاق</button></div>
-    </div>
-  `;
-  document.getElementById('btnCloseReceiptViewerDetail').addEventListener('click', ()=>{ RECEIPTS_VIEWER_SELECTED_SIG=null; area.innerHTML=''; });
-}
-/* قسم "تاجات المواد المتوفرة" — تصفح كل تاج غير مصروف بعد (status='available') عبر كل الأصناف، مع بحث/ترتيب/صفحات */
-let TAGS_SEARCH_Q = '';
-let TAGS_SORT_COL = 'name'; // 'tag' | 'name' | 'code'
-let TAGS_SORT_DIR = 1; // 1 = تصاعدي، -1 = تنازلي
-let TAGS_PAGE = 1;
-const TAGS_PAGE_SIZE = 50;
-function collectAvailableTagRows(){
-  const out = [];
-  Object.values(STATE.stock).forEach(s=>{
-    s.tags.forEach(t=>{
-      if(t.status==='available'){
-        out.push({tag:t.tag, name:s.description, code:s.code});
-      }
-    });
-  });
-  return out;
-}
-function renderAvailableTagsTab(el){
-  let rows = collectAvailableTagRows();
-  const q = TAGS_SEARCH_Q.trim().toLowerCase();
+/* نسخة قراءة فقط من "مخزون المستودع" — بحث موحّد على كل الأعمدة + جدول الملخص + تصدير فقط،
+   بدون نموذج استلام/إخراج/رفع دفعة أو سجل حركات (تلك خاصة بالوضع الإداري وحده، renderGoodsTab). */
+let GOODS_VIEWER_SEARCH_Q = '';
+function renderGoodsViewerTab(el){
+  const q = trim(GOODS_VIEWER_SEARCH_Q).toLowerCase();
+  let catRows = Object.values(STATE.goodsCatalog).filter(it => !GOODS_SHOW_AVAILABLE_ONLY || (it.totalIn-it.totalOut)>0).sort((a,b)=>a.name.localeCompare(b.name));
   if(q){
-    rows = rows.filter(r =>
-      r.tag.toLowerCase().includes(q) ||
-      (r.name||'').toLowerCase().includes(q) ||
-      (r.code||'').toLowerCase().includes(q)
+    catRows = catRows.filter(it=>
+      trim(it.code).toLowerCase().includes(q) ||
+      trim(it.name).toLowerCase().includes(q) ||
+      trim(it.category).toLowerCase().includes(q) ||
+      trim(it.unit).toLowerCase().includes(q) ||
+      String(it.totalIn).includes(q) ||
+      String(it.totalOut).includes(q) ||
+      String(it.totalIn-it.totalOut).includes(q)
     );
   }
-  rows.sort((a,b)=>{
-    const av = (a[TAGS_SORT_COL]||'').toString().toLowerCase();
-    const bv = (b[TAGS_SORT_COL]||'').toString().toLowerCase();
-    return av.localeCompare(bv) * TAGS_SORT_DIR;
-  });
-  const totalPages = Math.max(1, Math.ceil(rows.length / TAGS_PAGE_SIZE));
-  if(TAGS_PAGE > totalPages) TAGS_PAGE = totalPages;
-  const pageRows = rows.slice((TAGS_PAGE-1)*TAGS_PAGE_SIZE, TAGS_PAGE*TAGS_PAGE_SIZE);
-  const sortArrow = (col)=> TAGS_SORT_COL===col ? (TAGS_SORT_DIR===1?' ▲':' ▼') : '';
-
   el.innerHTML = `
     <div class="panel">
-      <h2>${L('tags_heading')}</h2>
-      <div class="desc">كل التاجات غير المصروفة بعد (موجودة فعلياً في المستودع) عبر كل أصناف مواد 4G. اضغط على عنوان أي عمود للترتيب.</div>
+      <h2>${L('tab_goods_viewer')}</h2>
+      <div class="desc">المواد المتوفرة حالياً في مخزون المستودع — عرض واستخراج تقارير فقط.</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-        <input type="text" id="tagsSearchInput" placeholder="ابحث بالتاج / اسم المادة / الكود..." value="${esc(TAGS_SEARCH_Q)}" style="max-width:340px;">
-        <button class="secondary" id="btnExportTags" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;">📥 تصدير إلى Excel</button>
-      </div>
-      <div class="tablewrap"><table class="data">
-        <thead><tr>
-          <th style="cursor:pointer;" data-sort="tag">رقم التاج${sortArrow('tag')}</th>
-          <th style="cursor:pointer;" data-sort="name">اسم المادة${sortArrow('name')}</th>
-          <th style="cursor:pointer;" data-sort="code">كود الصنف (Part Number)${sortArrow('code')}</th>
-          <th>الحالة</th>
-          <th>الموقع</th>
-        </tr></thead>
-        <tbody>
-          ${pageRows.map(r=>`<tr>
-            <td class="code-cell">${esc(r.tag)}</td>
-            <td>${esc(r.name)}</td>
-            <td class="code-cell">${esc(r.code)}</td>
-            <td><span class="pill ok">متوفر بالمستودع</span></td>
-            <td>المستودع</td>
-          </tr>`).join('') || `<tr><td colspan="5" class="empty">${q?'لا توجد نتائج مطابقة':'لا توجد تاجات متوفرة حالياً'}</td></tr>`}
-        </tbody>
-      </table></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:10px;">
-        <span style="font-size:12.5px;color:var(--muted);">${rows.length} تاج (صفحة ${TAGS_PAGE} من ${totalPages})</span>
-        <div class="btnrow" style="margin-top:0;">
-          <button class="secondary" id="btnTagsPrev" ${TAGS_PAGE<=1?'disabled':''} style="padding:7px 14px;font-size:12.5px;">◀ السابق</button>
-          <button class="secondary" id="btnTagsNext" ${TAGS_PAGE>=totalPages?'disabled':''} style="padding:7px 14px;font-size:12.5px;">التالي ▶</button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.getElementById('tagsSearchInput').addEventListener('input', (e)=>{
-    TAGS_SEARCH_Q = e.target.value;
-    TAGS_PAGE = 1;
-    renderAvailableTagsTab(el);
-  });
-  el.querySelectorAll('[data-sort]').forEach(th=>{
-    th.addEventListener('click', ()=>{
-      const col = th.dataset.sort;
-      if(TAGS_SORT_COL===col){ TAGS_SORT_DIR *= -1; } else { TAGS_SORT_COL = col; TAGS_SORT_DIR = 1; }
-      renderAvailableTagsTab(el);
-    });
-  });
-  document.getElementById('btnTagsPrev').addEventListener('click', ()=>{ TAGS_PAGE = Math.max(1, TAGS_PAGE-1); renderAvailableTagsTab(el); });
-  document.getElementById('btnTagsNext').addEventListener('click', ()=>{ TAGS_PAGE = Math.min(totalPages, TAGS_PAGE+1); renderAvailableTagsTab(el); });
-  document.getElementById('btnExportTags').addEventListener('click', ()=>{
-    const headers = ['رقم التاج','اسم المادة','كود الصنف (Part Number)','الحالة','الموقع'];
-    const exportRows = rows.map(r=>[r.tag, r.name, r.code, 'متوفر بالمستودع', 'المستودع']);
-    exportSectionToExcel(headers, exportRows, 'تاجات متوفرة', [20,32,20,18,14]);
-  });
-}
-/* نسخة قراءة فقط من "مخزون المستودع" — بحث + جدول الملخص فقط، بدون أي نموذج إدخال أو حذف */
-function renderGoodsViewerTab(el){
-  const catRows = Object.values(STATE.goodsCatalog).filter(it => !GOODS_SHOW_AVAILABLE_ONLY || (it.totalIn-it.totalOut)>0).sort((a,b)=>a.name.localeCompare(b.name));
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('goods_viewer_search_heading')}</h2>
-      <input type="text" id="goodsViewerSearch" placeholder="اكتب للبحث... مثال: براغي">
-      <div id="goodsViewerResults" style="margin-top:14px;"></div>
-    </div>
-    <div class="panel">
-      <h2>${L('goods_summary_heading')}</h2>
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
+        <input type="text" id="goodsViewerSearch" placeholder="بحث في كل الأعمدة: الكود، اسم الصنف، التصنيف، الوحدة..." value="${esc(GOODS_VIEWER_SEARCH_Q)}" style="max-width:340px;flex:1;min-width:220px;">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;white-space:nowrap;">
           <input type="checkbox" id="goodsViewerAvailOnlyToggle" ${GOODS_SHOW_AVAILABLE_ONLY?'checked':''}> إخفاء المواد ذات الرصيد صفر
         </label>
-        <button class="secondary" id="btnExportGoodsViewer" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button>
+        <button class="secondary" id="btnExportGoodsViewer" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;">📥 تصدير إلى Excel</button>
       </div>
       <div class="tablewrap"><table class="data">
         <thead><tr><th>كود</th><th>اسم الصنف</th><th>التصنيف</th><th>الوحدة</th><th>إجمالي مُدخَل</th><th>إجمالي مُخرَج</th><th>المتبقي</th></tr></thead>
@@ -2862,24 +2710,19 @@ function renderGoodsViewerTab(el){
             const remaining = it.totalIn-it.totalOut;
             const cls = remaining<0?'tag-bad':(remaining===0?'tag-warn':'');
             return `<tr><td class="code-cell">${esc(it.code)}</td><td>${esc(it.name)}</td><td>${esc(it.category)}</td><td>${esc(it.unit)}</td><td>${it.totalIn}</td><td>${it.totalOut}</td><td class="${cls}">${remaining}</td></tr>`;
-          }).join('') || `<tr><td colspan="7" class="empty">${GOODS_SHOW_AVAILABLE_ONLY?'لا يوجد أصناف برصيد متوفر حالياً':'لا يوجد كتالوج مستورَد بعد'}</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-    <div class="panel">
-      <h2>${L('goods_ledger_heading')}</h2>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>التاريخ</th><th>النوع</th><th>الصنف</th><th>الكمية</th><th>ملاحظة</th></tr></thead>
-        <tbody>
-          ${STATE.goodsLedger.slice().reverse().slice(0,200).map(e=>`<tr>
-            <td>${e.time?e.time+' — ':''}${e.date}</td>
-            <td>${e.direction==='IN'?'<span class="pill ok">إدخال</span>':'<span class="pill warn">إخراج</span>'}</td>
-            <td>${esc(e.name)}</td><td>${e.qty}</td><td>${esc(e.note)}${e.site?` <span style="color:var(--muted);font-size:11.5px;">— الموقع: ${esc(e.site)}</span>`:''}</td>
-          </tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد حركات بعد</td></tr>'}
+          }).join('') || `<tr><td colspan="7" class="empty">${q?'لا توجد نتائج مطابقة للبحث':(GOODS_SHOW_AVAILABLE_ONLY?'لا يوجد أصناف برصيد متوفر حالياً':'لا يوجد كتالوج مستورَد بعد')}</td></tr>`}
         </tbody>
       </table></div>
     </div>
   `;
+  const inp = document.getElementById('goodsViewerSearch');
+  inp.addEventListener('input', ()=>{
+    const pos = inp.selectionStart;
+    GOODS_VIEWER_SEARCH_Q = inp.value;
+    renderGoodsViewerTab(el);
+    const i2 = document.getElementById('goodsViewerSearch');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
   document.getElementById('goodsViewerAvailOnlyToggle').addEventListener('change', (e)=>{
     GOODS_SHOW_AVAILABLE_ONLY = e.target.checked;
     renderGoodsViewerTab(el);
@@ -2887,41 +2730,64 @@ function renderGoodsViewerTab(el){
   document.getElementById('btnExportGoodsViewer').addEventListener('click', ()=>{
     const headers = ['كود','اسم الصنف','التصنيف','الوحدة','إجمالي مُدخَل','إجمالي مُخرَج','المتبقي'];
     const exportRows = catRows.map(it=>[it.code, it.name, it.category, it.unit, it.totalIn, it.totalOut, it.totalIn-it.totalOut]);
-    exportSectionToExcel(headers, exportRows, 'مخزون المستودع', [12,30,16,10,14,14,12]);
-  });
-  document.getElementById('goodsViewerSearch').addEventListener('input', (e)=>{
-    const results = searchGoodsCatalog(e.target.value);
-    const out = document.getElementById('goodsViewerResults');
-    if(!e.target.value.trim()){ out.innerHTML=''; return; }
-    out.innerHTML = `<div class="tablewrap"><table class="data">
-      <thead><tr><th>اسم الصنف</th><th>التصنيف</th><th>الوحدة</th><th>المتبقي</th></tr></thead>
-      <tbody>${results.map(it=>`<tr><td>${esc(it.name)}</td><td>${esc(it.category)}</td><td>${esc(it.unit)}</td><td>${it.totalIn-it.totalOut}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">لا نتائج</td></tr>'}</tbody>
-    </table></div>`;
+    exportSectionToExcel(headers, exportRows, 'مواد المستودع المتوفرة', [12,30,16,10,14,14,12]);
   });
 }
-/* نسخة قراءة فقط من سجل SID المنفَّذة — بدون زر "إلغاء الصرف" */
-function renderSidHistoryViewerTab(el){
-  const entries = Object.entries(STATE.processedSids).sort((a,b)=>b[1].date.localeCompare(a[1].date));
+/* نسخة قراءة فقط من "رصد التاجات" — تعرض بيانات STATE.tagLog كما رُصدت من الوضع الإداري تماماً
+   (بدون أي إضافة/تعديل/حذف/تغيير حالة)، مع بحث موحّد على كل الأعمدة، وتصدير Excel بنفس فورم
+   الاستيراد المستخدم في الوضع الإداري (اسم القطعة، التاج، اسم الموقع) — بلا أي فورم جديد. */
+let TLV_FILTER_QUERY = '';
+function tlvFilteredRows(){
+  const q = trim(TLV_FILTER_QUERY).toLowerCase();
+  let rows = STATE.tagLog.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(!q) return rows;
+  return rows.filter(r=>
+    trim(r.tag).toLowerCase().includes(q) ||
+    trim(r.materialName).toLowerCase().includes(q) ||
+    (r.type==='Dismantled'?'dismantled':'installed').includes(q) ||
+    trim(r.siteName).toLowerCase().includes(q) ||
+    trim(r.installDate).toLowerCase().includes(q)
+  );
+}
+function renderTagLogViewerTab(el){
+  const rows = tlvFilteredRows();
+  const total = STATE.tagLog.length;
   el.innerHTML = `
     <div class="panel">
-      <h2>${L('sidhistory_heading')}</h2>
-      <div class="btnrow"><button class="secondary" id="btnExportSidHistory" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button></div>
+      <h2>${L('tab_taglog_viewer')}</h2>
+      <div class="desc">كل التاجات المرصودة من الوضع الإداري — عرض واستخراج تقارير فقط، بلا أي إمكانية إضافة أو تعديل أو حذف أو تغيير حالة.</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <input type="text" id="tlvSearchInput" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TLV_FILTER_QUERY)}" style="max-width:380px;flex:1;min-width:220px;">
+        <button class="secondary" id="btnExportTlv" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;">📥 تصدير إلى Excel</button>
+      </div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>الموقع</th><th>التاريخ</th><th>الملف</th><th>أصناف</th><th>مطلوب</th><th>مصروف</th><th>نقص</th></tr></thead>
+        <thead><tr><th>التاج</th><th>اسم القطعة</th><th>النوع</th><th>اسم الموقع</th><th>تاريخ التركيب</th></tr></thead>
         <tbody>
-          ${entries.map(([site,r])=>`<tr>
-            <td class="code-cell">${esc(site)}</td><td>${r.date}</td><td>${esc(r.filename)}</td>
-            <td>${r.materials_count}</td><td>${r.requested_units}</td><td>${r.issued_units}</td>
-            <td>${r.shortage_units>0?`<span class="tag-warn">${r.shortage_units}</span>`:'0'}</td>
-          </tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد SID منفَّذة بعد</td></tr>'}
+          ${rows.map(r=>`<tr>
+            <td class="code-cell">${esc(r.tag)}</td>
+            <td>${esc(r.materialName)}</td>
+            <td>${esc(r.type==='Dismantled'?'Dismantled':'Installed')}</td>
+            <td>${esc(r.siteName)}</td>
+            <td>${esc(r.installDate)}</td>
+          </tr>`).join('') || `<tr><td colspan="5" class="empty">${total?'لا توجد نتائج مطابقة للبحث':'لا توجد تاجات مسجَّلة بعد'}</td></tr>`}
         </tbody>
       </table></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:10px;">${rows.length}${rows.length!==total?` من ${total}`:''} سجل</div>
     </div>
   `;
-  document.getElementById('btnExportSidHistory').addEventListener('click', ()=>{
-    const headers = ['الموقع','التاريخ','الملف','عدد الأصناف','الكمية المطلوبة','الكمية المصروفة','النقص'];
-    const exportRows = entries.map(([site,r])=>[site, r.date, r.filename, r.materials_count, r.requested_units, r.issued_units, r.shortage_units]);
-    exportSectionToExcel(headers, exportRows, 'سجل SID', [14,14,26,12,14,14,10]);
+  const inp = document.getElementById('tlvSearchInput');
+  inp.addEventListener('input', ()=>{
+    const pos = inp.selectionStart;
+    TLV_FILTER_QUERY = inp.value;
+    renderTagLogViewerTab(el);
+    const i2 = document.getElementById('tlvSearchInput');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  document.getElementById('btnExportTlv').addEventListener('click', ()=>{
+    // نفس فورم رفع Excel في الوضع الإداري تماماً: اسم القطعة، التاج، اسم الموقع (بلا أي عمود إضافي)
+    const headers = ['اسم القطعة','التاج','اسم الموقع'];
+    const exportRows = rows.map(r=>[r.materialName, r.tag, r.siteName]);
+    exportSectionToExcel(headers, exportRows, 'رصد التاجات', [30,20,22]);
   });
 }
 
@@ -5323,14 +5189,28 @@ function buildEntryCard(entry, idx){
 }
 
 /* ---- تبويب: مواد 4G المتوفرة ---- */
+let STOCK_SEARCH_Q = ''; // بحث حي موحّد على كل أعمدة "مواد 4G المتوفرة" (مشترك بين الوضع الإداري ووضع القراءة فقط)
 function renderStockTab(el){
+  const q = trim(STOCK_SEARCH_Q).toLowerCase();
   const allRows = Object.values(STATE.stock).sort((a,b)=>a.code.localeCompare(b.code));
-  const rows = allRows.filter(s => !STOCK_HIDE_ZERO || (s.total_quantity - s.issued_quantity) !== 0);
+  let rows = allRows.filter(s => !STOCK_HIDE_ZERO || (s.total_quantity - s.issued_quantity) !== 0);
+  if(q){
+    rows = rows.filter(s=>
+      trim(s.code).toLowerCase().includes(q) ||
+      trim(s.description).toLowerCase().includes(q) ||
+      String(s.total_quantity).includes(q) ||
+      String(s.issued_quantity).includes(q) ||
+      String(s.total_quantity-s.issued_quantity).includes(q) ||
+      String(s.tags.filter(t=>t.status==='available').length).includes(q)
+    );
+  }
+  const emptyMsg = q ? 'لا توجد نتائج مطابقة للبحث' : (STOCK_HIDE_ZERO?'لا توجد مواد برصيد غير صفري':'لا توجد بيانات بعد — ابدأ من تبويب استلام مواد 4G');
   el.innerHTML = `
     <div class="panel">
       <h2>${L('stock_heading')}</h2>
       <div class="desc">${L('stock_desc')}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <input type="text" id="stockSearchInput" placeholder="بحث في كل الأعمدة: الكود، اسم المادة..." value="${esc(STOCK_SEARCH_Q)}" style="max-width:320px;flex:1;min-width:200px;">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
           <input type="checkbox" id="stockHideZeroToggle" ${STOCK_HIDE_ZERO?'checked':''}> إخفاء المواد ذات الرصيد صفر
         </label>
@@ -5352,11 +5232,19 @@ function renderStockTab(el){
               <td>${s.tags.filter(t=>t.status==='available').length}</td>
               ${renderCustomColCells('stock', s.code)}
             </tr>`;
-          }).join('') || `<tr>          <td colspan="${6 + getCustomCols('stock').length}" class="empty">${STOCK_HIDE_ZERO?'لا توجد مواد برصيد غير صفري':'لا توجد بيانات بعد — ابدأ من تبويب استلام مواد 4G'}</td></tr>`}
+          }).join('') || `<tr>          <td colspan="${6 + getCustomCols('stock').length}" class="empty">${emptyMsg}</td></tr>`}
         </tbody>
       </table></div>
     </div>
   `;
+  const searchInp = document.getElementById('stockSearchInput');
+  searchInp.addEventListener('input', ()=>{
+    const pos = searchInp.selectionStart;
+    STOCK_SEARCH_Q = searchInp.value;
+    renderStockTab(el);
+    const i2 = document.getElementById('stockSearchInput');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
   document.getElementById('stockHideZeroToggle').addEventListener('change', (e)=>{
     STOCK_HIDE_ZERO = e.target.checked;
     renderStockTab(el);
@@ -5814,54 +5702,6 @@ function renderSidHistoryTab(el){
   });
 }
 
-/* ---- تبويب: البحث ---- */
-function renderSearchTab(el){
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('search_heading')}</h2>
-      <div class="desc">ابحث بالكود، اسم المادة، رقم التاج، اسم الموقع، أو معرّف SID.</div>
-      <input type="text" id="searchInput" placeholder="اكتب للبحث...">
-      <div id="searchResults" style="margin-top:16px;"></div>
-    </div>
-  `;
-  document.getElementById('searchInput').addEventListener('input', (e)=>{
-    doSearch(e.target.value.trim());
-  });
-}
-function doSearch(q){
-  const out = document.getElementById('searchResults');
-  if(!q){ out.innerHTML=''; return; }
-  const ql = q.toLowerCase();
-
-  const stockHits = Object.values(STATE.stock).filter(s=>
-    s.code.toLowerCase().includes(ql) || (s.description||'').toLowerCase().includes(ql));
-  const tagHits = [];
-  Object.values(STATE.stock).forEach(s=> s.tags.forEach(t=>{
-    if(t.tag.toLowerCase().includes(ql)) tagHits.push({...t, code:s.code, description:s.description});
-  }));
-  const dismHits = STATE.dismantled.filter(d=>
-    (d.tag||'').toLowerCase().includes(ql) || d.material.toLowerCase().includes(ql) || d.from.toLowerCase().includes(ql));
-  const sidHits = Object.entries(STATE.processedSids).filter(([site])=>site.toLowerCase().includes(ql));
-
-  out.innerHTML = `
-    <h3>${L('search_hits_stock')} (${stockHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_th_code')}</th><th>${L('search_th_desc')}</th><th>${L('search_th_remaining')}</th></tr></thead>
-    <tbody>${stockHits.map(s=>`<tr><td class="code-cell">${esc(s.code)}</td><td>${esc(s.description)}</td><td>${s.total_quantity-s.issued_quantity}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
-
-    <h3>${L('search_hits_tags')} (${tagHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_th_tag')}</th><th>${L('search_th_code')}</th><th>${L('search_th_desc')}</th><th>${L('search_th_status')}</th><th>${L('search_th_sid')}</th></tr></thead>
-    <tbody>${tagHits.map(t=>`<tr><td class="code-cell">${esc(t.tag)}</td><td class="code-cell">${esc(t.code)}</td><td>${esc(t.description)}</td><td>${t.status==='available'?'<span class="pill ok">متوفر</span>':'<span class="pill warn">مصروف</span>'}</td><td>${esc(t.issued_to_sid||'—')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
-
-    <h3>${L('search_hits_dismantled')} (${dismHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_dism_th_tag')}</th><th>${L('search_dism_th_material')}</th><th>${L('search_dism_th_from')}</th></tr></thead>
-    <tbody>${dismHits.map(d=>`<tr><td class="code-cell">${esc(d.tag_display)}</td><td>${esc(d.material)}</td><td>${esc(d.from)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
-
-    <h3>${L('search_hits_sids')} (${sidHits.length})</h3>
-    <div class="tablewrap"><table class="data"><thead><tr><th>${L('search_sid_th_site')}</th><th>${L('search_sid_th_date')}</th><th>${L('search_sid_th_issued')}</th><th>${L('search_sid_th_shortage')}</th></tr></thead>
-    <tbody>${sidHits.map(([site,r])=>`<tr><td class="code-cell">${esc(site)}</td><td>${r.date}</td><td>${r.issued_units}</td><td>${r.shortage_units}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">لا يوجد</td></tr>'}</tbody></table></div>
-  `;
-}
-
 /* ---- تبويب: المشاكل ---- */
 function renderIssuesTab(el){
   const rows = STATE.issues.slice().reverse();
@@ -5883,22 +5723,6 @@ function renderIssuesTab(el){
     const exportRows = rows.map(i=>[i.type, i.code, i.material||'', i.detail, i.date]);
     exportSectionToExcel(headers, exportRows, 'المشاكل', [22,20,26,50,14]);
   });
-}
-
-/* ---- تبويب: التقارير ---- */
-function renderReportsTab(el){
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('reports_heading')}</h2>
-      <div class="desc">${L('reports_desc')}</div>
-      <div class="btnrow"><button class="primary" id="btnFullReport">تنزيل التقرير الشامل (Excel)</button></div>
-    </div>
-    <div class="panel">
-      <h2>${L('reports_sid_heading')}</h2>
-      <div class="desc">${L('reports_sid_desc')}</div>
-    </div>
-  `;
-  document.getElementById('btnFullReport').addEventListener('click', downloadFullReport);
 }
 
 /* ---- تبويب: تخصيص الأعمدة والتسميات ---- */
