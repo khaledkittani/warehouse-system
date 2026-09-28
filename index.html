@@ -349,7 +349,39 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   /* ===== قسم رصد التاجات ===== */
-  .tl-tag-input{font-size:17px;font-weight:600;}
+  input.tl-tag-input{font-size:17px;font-weight:600;}
+
+  /* شاشة تشغيل مخصصة لرصد التاجات: عرض أوسع خاص بهذا التبويب فقط (لا يؤثر على باقي التبويبات)،
+     مع تسلسل واضح: الموقع ← المادة الحالية ← التاج ← قائمة ما رُصد، بدون أي Scroll أفقي.
+     نفس الحقول والأزرار والمعرّفات (IDs) كما هي تماماً — تعديل بصري فقط، بلا أي تغيير بالمنطق. */
+  #app.tl-wide{max-width:1680px;}
+  .tl-stage{display:grid;grid-template-columns:minmax(360px,440px) 1fr;gap:20px;align-items:start;}
+  .tl-console{min-width:0;padding:18px;}
+  .tl-log{min-width:0;}
+  .tl-block{margin-bottom:14px;}
+  .tl-block:last-child{margin-bottom:0;}
+  .tl-console .flabel{margin-bottom:4px;}
+  input.tl-site-input{
+    font-family:'Cairo',sans-serif;font-weight:800;font-size:26px;
+    padding:11px 14px;border:2px solid var(--line);border-radius:8px;background:#fff;width:100%;
+  }
+  input.tl-site-input:focus{outline:none;border-color:var(--steel);}
+  .tl-material-current{
+    background:var(--paper);border:1.5px solid var(--steel);border-radius:8px;padding:11px 14px;
+  }
+  .tl-material-current .lbl{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;}
+  .tl-material-current .name{
+    font-size:24px;font-weight:800;line-height:1.3;word-break:break-word;overflow-wrap:anywhere;
+  }
+  .tl-log .tablewrap{max-height:560px;}
+  @media(max-width:1000px){
+    .tl-stage{grid-template-columns:1fr;}
+    .tl-log .tablewrap{max-height:460px;}
+  }
+  @media(max-width:600px){
+    input.tl-site-input{font-size:20px;padding:12px 14px;}
+    .tl-material-current .name{font-size:19px;}
+  }
 
   /* ===== شاشة تسجيل الدخول ===== */
   .login-page{
@@ -2366,14 +2398,19 @@ let APP_MODE = 'quick'; // 'quick' = وضع المستودع السريع (ال�
 function renderApp(roleFetchError, roleResult){
   const app = document.getElementById('app');
   if(SUPABASE_ENABLED && !CURRENT_SESSION){
+    app.classList.remove('tl-wide');
     renderLoginScreen(app);
     return;
   }
   if(roleFetchError){
+    app.classList.remove('tl-wide');
     renderRoleErrorScreen(app, roleResult);
     return;
   }
   const isAdmin = CURRENT_ROLE === 'admin';
+  // عرض أوسع خاص بشاشة رصد التاجات فقط (تصميم/CSS بحت) — يُعاد ضبطه أيضاً عند تبديل التبويبات
+  // داخل الوضع الإداري نفسه من renderTabContent، لأن تبديل التبويب لا يمر عبر renderApp.
+  app.classList.toggle('tl-wide', isAdmin && APP_MODE==='admin' && ACTIVE_TAB==='tagcapture');
   app.innerHTML = `
     <div class="modebar">
       <div class="modebar-title">${L('app_title')}</div>
@@ -2631,6 +2668,8 @@ function renderAdminMode(root){
 
 function renderTabContent(){
   const el = document.getElementById('tabContent');
+  const appEl = document.getElementById('app');
+  if(appEl) appEl.classList.toggle('tl-wide', ACTIVE_TAB==='tagcapture');
   if(ACTIVE_TAB==='setup') return renderSetupTab(el);
   if(ACTIVE_TAB==='sid') return renderSidTab(el);
   if(ACTIVE_TAB==='stock') return renderStockTab(el);
@@ -3862,14 +3901,14 @@ function taglogSelectMaterial(name){
   TAGLOG_SEARCH_RESULTS = [];
   renderTagCaptureTab(document.getElementById('tabContent'));
   const tagInp = document.getElementById('tlTagInput');
-  if(tagInp) tagInp.focus();
+  if(tagInp) tagInp.focus({preventScroll:true}); // preventScroll: كي لا يُحرّك اختيار المادة الصفحة ويُخفي الموقع/القائمة عن الشاشة
 }
 function taglogChangeMaterial(){
   taglogStopBarcodeScanner();
   TAGLOG_SELECTED_MATERIAL = null;
   renderTagCaptureTab(document.getElementById('tabContent'));
   const s = document.getElementById('tlMaterialSearch');
-  if(s){ s.value=''; s.focus(); }
+  if(s){ s.value=''; s.focus({preventScroll:true}); }
 }
 
 /* ---- تسجيل التاج ---- */
@@ -3882,7 +3921,7 @@ async function taglogHandleSave(){
   if(!res.ok){
     alert(res.msg);
     if(btn) btn.disabled = false;
-    if(tagInp){ tagInp.focus(); tagInp.select(); }
+    if(tagInp){ tagInp.focus({preventScroll:true}); tagInp.select(); }
     return;
   }
   // المادة المختارة تبقى كما هي عمداً بعد الحفظ (لا تُصفَّر) — حتى يسجّل المستخدم عدة تاجات
@@ -4330,41 +4369,52 @@ function renderTagCaptureTab(el){
         </div>
       </div>
       <div class="desc">اكتب اسم الموقع مرة واحدة، ابحث عن المادة واخترها، ثم امسح التاج — يُحفظ السجل فوراً وتنتقل تلقائياً لمادة جديدة بنفس الموقع.</div>
-
-      ${TAGLOG_FLASH_MSG ? `<div class="msg ok" id="tlFlash">✅ ${esc(TAGLOG_FLASH_MSG)}</div>` : ''}
-
-      <label class="flabel">اسم الموقع</label>
-      <input type="text" id="tlSite" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}">
-
-      <div style="margin-top:16px;">
-        <label class="flabel">نوع التاج</label>
-        <div class="btnrow" style="gap:8px;">
-          <button type="button" id="btnTlTypeInstalled" class="${TAGLOG_TYPE==='Installed'?'primary':'secondary'}" style="flex:1;">Installed</button>
-          <button type="button" id="btnTlTypeDismantled" class="${TAGLOG_TYPE==='Dismantled'?'primary':'secondary'}" style="flex:1;">Dismantled</button>
-        </div>
-      </div>
-
-      <div style="margin-top:16px;">
-        <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة + مواد الإرجاع)</label>
-        <div class="qm-search-wrap">
-          <input type="text" id="tlMaterialSearch" class="qm-search-input" placeholder="اكتب جزءاً من اسم المادة..." autocomplete="off">
-          <div id="tlMaterialDropdown"></div>
-        </div>
-      </div>
-
-      ${TAGLOG_SELECTED_MATERIAL ? `
-        <div class="qm-selected-name">${esc(TAGLOG_SELECTED_MATERIAL)} <button type="button" id="btnTlChangeMaterial" class="records-btn" style="font-size:11px;">✕ تغيير</button></div>
-        <label class="flabel">Tag</label>
-        <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter، أو استخدم الكاميرا" autocomplete="off">
-        <div class="btnrow">
-          <button class="primary" id="btnTlSave">✅ تسجيل</button>
-          <button type="button" class="qm-barcode-btn" id="btnTlBarcodeScan">📷 مسح بالكاميرا</button>
-        </div>
-        <div id="tlBarcodeArea"></div>
-      ` : `<div class="msg info" style="margin-top:14px;">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`}
+      ${TAGLOG_FLASH_MSG ? `<div class="msg ok" id="tlFlash" style="margin-bottom:0;">✅ ${esc(TAGLOG_FLASH_MSG)}</div>` : ''}
     </div>
 
-    <div class="panel" id="tlRecordsPanel"></div>
+    <div class="tl-stage">
+      <div class="panel tl-console">
+        <div class="tl-block">
+          <label class="flabel">📍 الموقع الحالي</label>
+          <input type="text" id="tlSite" class="tl-site-input" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}">
+        </div>
+
+        <div class="tl-block">
+          <label class="flabel">نوع التاج</label>
+          <div class="btnrow" style="gap:8px;margin-top:0;">
+            <button type="button" id="btnTlTypeInstalled" class="${TAGLOG_TYPE==='Installed'?'primary':'secondary'}" style="flex:1;">Installed</button>
+            <button type="button" id="btnTlTypeDismantled" class="${TAGLOG_TYPE==='Dismantled'?'primary':'secondary'}" style="flex:1;">Dismantled</button>
+          </div>
+        </div>
+
+        <div class="tl-block">
+          <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة + مواد الإرجاع)</label>
+          <div class="qm-search-wrap">
+            <input type="text" id="tlMaterialSearch" class="qm-search-input" placeholder="اكتب جزءاً من اسم المادة..." autocomplete="off">
+            <div id="tlMaterialDropdown"></div>
+          </div>
+        </div>
+
+        ${TAGLOG_SELECTED_MATERIAL ? `
+          <div class="tl-block tl-material-current">
+            <div class="lbl">📦 المادة الحالية</div>
+            <div class="name">${esc(TAGLOG_SELECTED_MATERIAL)}</div>
+            <button type="button" id="btnTlChangeMaterial" class="records-btn" style="font-size:11px;margin-top:8px;margin-inline-start:0;">✕ تغيير المادة</button>
+          </div>
+          <div class="tl-block">
+            <label class="flabel">🏷️ Tag</label>
+            <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter، أو استخدم الكاميرا" autocomplete="off">
+            <div class="btnrow">
+              <button class="primary" id="btnTlSave">✅ تسجيل</button>
+              <button type="button" class="qm-barcode-btn" id="btnTlBarcodeScan">📷 مسح بالكاميرا</button>
+            </div>
+            <div id="tlBarcodeArea"></div>
+          </div>
+        ` : `<div class="msg info tl-block">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`}
+      </div>
+
+      <div class="panel tl-log" id="tlRecordsPanel"></div>
+    </div>
 
     <div class="panel">
       <h2>استخراج تقرير حسب الموقع</h2>
@@ -4399,14 +4449,14 @@ function renderTagCaptureTab(el){
       const dd = document.getElementById('tlMaterialDropdown'); if(dd) dd.innerHTML=''; TAGLOG_SEARCH_RESULTS=[];
     }
   });
-  searchInp.focus();
+  searchInp.focus({preventScroll:true});
 
   const changeBtn = document.getElementById('btnTlChangeMaterial');
   if(changeBtn) changeBtn.addEventListener('click', taglogChangeMaterial);
 
   const tagInp = document.getElementById('tlTagInput');
   if(tagInp){
-    tagInp.focus();
+    tagInp.focus({preventScroll:true}); // preventScroll: تسجيل تاج جديد لا يجب أن يُحرّك الصفحة ويُخفي الموقع/القائمة
     bindEnterSubmit(['tlTagInput'], 'btnTlSave');
     document.getElementById('btnTlSave').addEventListener('click', taglogHandleSave);
     document.getElementById('btnTlBarcodeScan').addEventListener('click', taglogToggleBarcodeScanner);
