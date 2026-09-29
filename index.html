@@ -374,6 +374,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     font-size:24px;font-weight:800;line-height:1.3;word-break:break-word;overflow-wrap:anywhere;
   }
   .tl-log .tablewrap{max-height:560px;}
+
+  /* الأكثر استخدامًا: قسم مدمج فوق خانة البحث عن المادة — اختصارات ضغطة واحدة لأكثر المواد
+     اختياراً فعلياً في سجل رصد التاجات (STATE.tagLog)، محسوبة مباشرة من نفس البيانات دون أي
+     تخزين منفصل. مخفي تلقائياً إن لم تتوفر بيانات كافية بعد. */
+  .tl-most-used .flabel{margin-bottom:6px;}
+  .tl-most-used-chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .tl-most-used-chip{
+    font-family:'Cairo',sans-serif;font-size:11.5px;font-weight:600;line-height:1.3;
+    padding:5px 10px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink);
+    cursor:pointer;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .tl-most-used-chip:hover{background:var(--paper);border-color:var(--steel);}
   @media(max-width:1000px){
     .tl-stage{grid-template-columns:1fr;}
     .tl-log .tablewrap{max-height:460px;}
@@ -381,6 +393,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   @media(max-width:600px){
     input.tl-site-input{font-size:20px;padding:12px 14px;}
     .tl-material-current .name{font-size:19px;}
+    .tl-most-used-chip{max-width:140px;}
   }
 
   /* ===== شاشة تسجيل الدخول ===== */
@@ -3850,6 +3863,24 @@ function taglogSearchAllMaterials(q){
   if(!ql) return [];
   return taglogAllMaterialNames().filter(n=>n.toLowerCase().includes(ql)).map(n=>({description:n}));
 }
+/* ---- الأكثر استخدامًا: مبنية مباشرة من عدد مرات ظهور كل مادة فعلياً في STATE.tagLog (أي عدد
+   مرات اختيارها وتسجيل تاج لها)، دون أي عدّاد أو مصدر بيانات منفصل — تتحدّث تلقائياً مع كل
+   تسجيل جديد لأنها تُحسب من نفس السجل الذي يُحفَظ أصلاً عبر saveState(['tagLog']) (Supabase/
+   STATE كما هو)، فلا تُفقد الإحصائيات عند تحديث الصفحة أو إعادة فتح النظام. ---- */
+function taglogMostUsedMaterials(limit){
+  const lim = limit || 7;
+  const counts = new Map(); // مفتاح: الاسم بحروف صغيرة → {name, count}
+  STATE.tagLog.forEach(r=>{
+    const name = trim(r.materialName||'');
+    if(!name) return;
+    const key = name.toLowerCase();
+    const cur = counts.get(key);
+    if(cur){ cur.count++; cur.name = name; } else { counts.set(key, {name, count:1}); }
+  });
+  return Array.from(counts.values())
+    .sort((a,b)=> b.count-a.count || a.name.localeCompare(b.name))
+    .slice(0, lim);
+}
 /* ---- إضافة مادة جديدة غير موجودة أصلاً (لا في مواد 4G المتوفرة ولا في مواد الإرجاع) ----
    تُنشأ كصنف جديد فعلي في "مواد 4G المتوفرة" (STATE.stock) بكمية 0 (لا تمثّل استلاماً فعلياً،
    فقط تسجّل اسم المادة ليصبح متاحاً للاختيار لاحقاً من نفس القائمة المدموجة)، بنفس شكل الصنف
@@ -4387,6 +4418,19 @@ function renderTagCaptureTab(el){
           </div>
         </div>
 
+        ${(function(){
+          const mostUsed = taglogMostUsedMaterials(7);
+          if(!mostUsed.length) return '';
+          return `
+            <div class="tl-block tl-most-used">
+              <label class="flabel">⭐ الأكثر استخدامًا</label>
+              <div class="tl-most-used-chips">
+                ${mostUsed.map(m=>`<button type="button" class="tl-most-used-chip" data-mu="${esc(m.name)}" title="${esc(m.name)} — استُخدمت ${m.count} مرة">${esc(m.name)}</button>`).join('')}
+              </div>
+            </div>
+          `;
+        })()}
+
         <div class="tl-block">
           <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة + مواد الإرجاع)</label>
           <div class="qm-search-wrap">
@@ -4433,6 +4477,10 @@ function renderTagCaptureTab(el){
 
   document.getElementById('btnTlTypeInstalled').addEventListener('click', ()=>taglogSetType('Installed'));
   document.getElementById('btnTlTypeDismantled').addEventListener('click', ()=>taglogSetType('Dismantled'));
+
+  el.querySelectorAll('.tl-most-used-chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>taglogSelectMaterial(chip.dataset.mu));
+  });
 
   renderTagLogRecordsPanel();
 
