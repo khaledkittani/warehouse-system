@@ -362,30 +362,44 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .tl-block:last-child{margin-bottom:0;}
   .tl-console .flabel{margin-bottom:4px;}
   input.tl-site-input{
-    font-family:'Cairo',sans-serif;font-weight:800;font-size:26px;
-    padding:11px 14px;border:2px solid var(--line);border-radius:8px;background:#fff;width:100%;
+    font-family:'Cairo',sans-serif;font-weight:800;font-size:28px;
+    padding:12px 14px;border:2px solid var(--line);border-radius:8px;background:#fff;width:100%;
   }
   input.tl-site-input:focus{outline:none;border-color:var(--steel);}
+  /* تحقق اسم الموقع مقابل القائمة المعتمدة (STATE.tagApprovedSites) — نص صغير أسفل الحقل مباشرة،
+     بدون أي صندوق msg يشغل مساحة إضافية؛ يظهر فقط إن وُجدت قائمة معتمدة مرفوعة أصلاً. */
+  .tl-site-warn{color:var(--rust);font-size:12.5px;font-weight:700;margin-top:5px;}
+  .tl-site-ok{color:var(--green);font-size:12.5px;font-weight:700;margin-top:5px;}
   .tl-material-current{
-    background:var(--paper);border:1.5px solid var(--steel);border-radius:8px;padding:11px 14px;
+    background:var(--paper);border:1.5px solid var(--steel);border-radius:8px;padding:12px 14px;
   }
   .tl-material-current .lbl{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;}
   .tl-material-current .name{
-    font-size:24px;font-weight:800;line-height:1.3;word-break:break-word;overflow-wrap:anywhere;
+    font-size:26px;font-weight:800;line-height:1.3;word-break:break-word;overflow-wrap:anywhere;
   }
-  .tl-log .tablewrap{max-height:560px;}
+  .tl-log .tablewrap{max-height:620px;}
 
-  /* الأكثر استخدامًا: قسم مدمج فوق خانة البحث عن المادة — اختصارات ضغطة واحدة لأكثر المواد
-     اختياراً فعلياً في سجل رصد التاجات (STATE.tagLog)، محسوبة مباشرة من نفس البيانات دون أي
-     تخزين منفصل. مخفي تلقائياً إن لم تتوفر بيانات كافية بعد. */
-  .tl-most-used .flabel{margin-bottom:6px;}
-  .tl-most-used-chips{display:flex;flex-wrap:wrap;gap:6px;}
-  .tl-most-used-chip{
-    font-family:'Cairo',sans-serif;font-size:11.5px;font-weight:600;line-height:1.3;
-    padding:5px 10px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink);
-    cursor:pointer;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  /* اختصارات المواد: 10 أزرار ثابتة قابلة للتخصيص من الأدمن (STATE.tagShortcuts)، تحل محل نظام
+     "الأكثر استخدامًا" السابق — تُعرض فوق خانة البحث عن المادة، مدمجة ولا تشغل مساحة كبيرة،
+     والضغط على أي منها يختار المادة المرتبطة به مباشرة دون الحاجة للبحث. */
+  .tl-shortcuts-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .tl-shortcuts-head .flabel{margin-bottom:0;}
+  .tl-shortcuts-gear{
+    background:#fff;border:1px solid var(--line);border-radius:6px;font-size:13px;
+    padding:3px 9px;cursor:pointer;line-height:1.6;
   }
-  .tl-most-used-chip:hover{background:var(--paper);border-color:var(--steel);}
+  .tl-shortcuts-gear:hover{background:var(--paper);border-color:var(--steel);}
+  .tl-shortcuts-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;}
+  .tl-shortcut-btn{
+    font-family:'Cairo',sans-serif;font-size:12px;font-weight:700;
+    padding:8px 4px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);
+    cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .tl-shortcut-btn:hover{background:var(--paper);border-color:var(--steel);}
+  .tl-shortcut-btn.empty{color:var(--muted);cursor:default;background:var(--paper);opacity:.5;}
+  .tl-shortcuts-editor{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto;}
+  .tl-shortcut-row{display:grid;grid-template-columns:30px 110px 1fr 32px;gap:8px;align-items:center;}
+  .tl-shortcut-num{font-weight:700;color:var(--muted);font-size:12px;}
   @media(max-width:1000px){
     .tl-stage{grid-template-columns:1fr;}
     .tl-log .tablewrap{max-height:460px;}
@@ -393,7 +407,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   @media(max-width:600px){
     input.tl-site-input{font-size:20px;padding:12px 14px;}
     .tl-material-current .name{font-size:19px;}
-    .tl-most-used-chip{max-width:140px;}
+    .tl-shortcuts-grid{grid-template-columns:repeat(5,1fr);}
+    .tl-shortcut-btn{font-size:11px;padding:7px 2px;}
+    .tl-shortcut-row{grid-template-columns:24px 90px 1fr 28px;}
   }
 
   /* ===== شاشة تسجيل الدخول ===== */
@@ -561,6 +577,8 @@ const STORE_KEYS = {
   customValues: 'wms_custom_values_v1',
   tagLog: 'wms_tag_log_v1',
   tagLogTemplate: 'wms_tag_log_template_v1',
+  tagApprovedSites: 'wms_tag_sites_v1',
+  tagShortcuts: 'wms_tag_shortcuts_v1',
 };
 
 let STATE = {
@@ -581,6 +599,8 @@ let STATE = {
   customValues: {},      // { sectionKey: { itemKey: { colId: value } } } — قيم الأعمدة المخصصة لكل صنف
   tagLog: [],   // [{id, tag, materialName, source, siteName, installDate, createdAt}] — سجل "رصد التاجات" المستقل، مستقل تماماً عن STATE.stock
   tagLogTemplate: null, // {fileName, base64, uploadedAt} — قالب إكسل "رصد التاجات" الذي يرفعه الأدمن مرة واحدة (إخراج فقط، لا يُستخرج منه أي قائمة مواد)
+  tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة أسماء المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
+  tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
 };
 
 let PENDING_SID = null;   // holds parsed SID awaiting confirmation
@@ -3606,7 +3626,7 @@ async function commitLabelScanTag(code, description, tag){
    ===================================================================== */
 const TAGLOG_SOURCE_DEFAULT = 'Rawabi Macoco';
 let TAGLOG_SITE = (function(){ try{ return localStorage.getItem('wms_taglog_last_site')||''; }catch(e){ return ''; } })();
-let TAGLOG_TYPE = (function(){ try{ return localStorage.getItem('wms_taglog_last_type')==='Dismantled' ? 'Dismantled' : 'Installed'; }catch(e){ return 'Installed'; } })(); // ثابت أثناء العمل، يتغيّر فقط عند اختيار المستخدم يدوياً
+let TAGLOG_TYPE = 'Installed'; // خيار Installed/Dismantled حُذف من واجهة الرصد اليدوي بناءً على طلب المستخدم (الصفحة تُستخدم لرصد المواد المركبة فقط)؛ القيمة ثابتة الآن، والحقل type نفسه يبقى محفوظاً بنفس الصيغة القديمة لأي سجل تاريخي أو مستورد عبر Excel
 let TAGLOG_SEARCH_RESULTS = [];
 let TAGLOG_HL_INDEX = -1;
 let TAGLOG_SELECTED_MATERIAL = null;
@@ -3863,23 +3883,169 @@ function taglogSearchAllMaterials(q){
   if(!ql) return [];
   return taglogAllMaterialNames().filter(n=>n.toLowerCase().includes(ql)).map(n=>({description:n}));
 }
-/* ---- الأكثر استخدامًا: مبنية مباشرة من عدد مرات ظهور كل مادة فعلياً في STATE.tagLog (أي عدد
-   مرات اختيارها وتسجيل تاج لها)، دون أي عدّاد أو مصدر بيانات منفصل — تتحدّث تلقائياً مع كل
-   تسجيل جديد لأنها تُحسب من نفس السجل الذي يُحفَظ أصلاً عبر saveState(['tagLog']) (Supabase/
-   STATE كما هو)، فلا تُفقد الإحصائيات عند تحديث الصفحة أو إعادة فتح النظام. ---- */
-function taglogMostUsedMaterials(limit){
-  const lim = limit || 7;
-  const counts = new Map(); // مفتاح: الاسم بحروف صغيرة → {name, count}
-  STATE.tagLog.forEach(r=>{
-    const name = trim(r.materialName||'');
-    if(!name) return;
-    const key = name.toLowerCase();
-    const cur = counts.get(key);
-    if(cur){ cur.count++; cur.name = name; } else { counts.set(key, {name, count:1}); }
+/* ---- التحقق من أسماء المواقع المعتمدة (STATE.tagApprovedSites) — قائمة يرفعها الأدمن مرة عبر
+   Excel وتبقى محفوظة (نفس آلية wms_state)؛ المطابقة تتجاهل المسافات الزائدة واختلاف حالة الأحرف
+   الإنجليزية. طالما لم تُرفع أي قائمة بعد (list فارغة)، لا يوجد أي تحقق أو منع — نفس السلوك القديم
+   يبقى كما هو تماماً حتى يُفعَّل هذا الإعداد فعلياً. ---- */
+function taglogNormSite(s){ return trim(s).replace(/\s+/g,' ').toLowerCase(); }
+function taglogApprovedSitesList(){
+  return (STATE.tagApprovedSites && Array.isArray(STATE.tagApprovedSites.list)) ? STATE.tagApprovedSites.list : [];
+}
+function taglogIsSiteApproved(site){
+  const list = taglogApprovedSitesList();
+  if(!list.length) return true;
+  const n = taglogNormSite(site);
+  if(!n) return false;
+  return list.some(s=>taglogNormSite(s)===n);
+}
+function taglogSiteSuggestions(q){
+  const list = taglogApprovedSitesList();
+  const ql = taglogNormSite(q);
+  if(!ql) return list.slice(0,30);
+  return list.filter(s=>taglogNormSite(s).includes(ql)).slice(0,30);
+}
+function taglogParseSitesWorkbook(wb){
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if(!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const seen = new Map();
+  for(let r=range.s.r; r<=range.e.r; r++){
+    const v = taglogImportCellText(ws, r, range.s.c);
+    const t = trim(v).replace(/\s+/g,' ');
+    if(!t) continue;
+    if(!seen.size && r===range.s.r && /^(اسم\s*)?الموقع$|^site\s*name$|^site$/i.test(t)) continue; // صف عناوين محتمل فقط
+    const key = t.toLowerCase();
+    if(!seen.has(key)) seen.set(key, t);
+  }
+  return Array.from(seen.values());
+}
+function taglogRenderSiteDropdown(){
+  const dd = document.getElementById('tlSiteDropdown');
+  const inp = document.getElementById('tlSite');
+  if(!dd || !inp) return;
+  const list = taglogApprovedSitesList();
+  const q = trim(inp.value);
+  if(!list.length || taglogIsSiteApproved(q)){ dd.innerHTML=''; return; }
+  const matches = taglogSiteSuggestions(q);
+  if(!matches.length){ dd.innerHTML=''; return; }
+  dd.innerHTML = `<div class="qm-dropdown">${matches.map(s=>`
+    <div class="qm-dropdown-item" data-sitepick="${esc(s)}"><span>${esc(s)}</span></div>
+  `).join('')}</div>`;
+  dd.querySelectorAll('[data-sitepick]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      TAGLOG_SITE = row.dataset.sitepick;
+      const inp2 = document.getElementById('tlSite');
+      if(inp2) inp2.value = TAGLOG_SITE;
+      try{ localStorage.setItem('wms_taglog_last_site', TAGLOG_SITE); }catch(e){}
+      dd.innerHTML = '';
+      taglogRenderSiteWarning();
+    });
   });
-  return Array.from(counts.values())
-    .sort((a,b)=> b.count-a.count || a.name.localeCompare(b.name))
-    .slice(0, lim);
+}
+function taglogRenderSiteWarning(){
+  const el = document.getElementById('tlSiteWarning');
+  if(!el) return;
+  const list = taglogApprovedSitesList();
+  const site = trim(TAGLOG_SITE);
+  if(!list.length || !site){ el.innerHTML=''; return; }
+  el.innerHTML = taglogIsSiteApproved(site)
+    ? `<div class="tl-site-ok">✓ اسم الموقع معتمد</div>`
+    : `<div class="tl-site-warn">⚠️ اسم الموقع غير معتمد — اختره من الاقتراحات أو صحّح الاسم</div>`;
+}
+function openTagSitesModal(){
+  openModal('📍 قائمة المواقع المعتمدة — رصد التاجات', (bodyEl)=>renderTagSitesModalBody(bodyEl), {maxWidth:'700px'});
+}
+function renderTagSitesModalBody(bodyEl){
+  const meta = STATE.tagApprovedSites || {list:[], fileName:null, uploadedAt:null};
+  bodyEl.innerHTML = `
+    <div class="desc">ارفع ملف Excel بعمود واحد يحتوي أسماء كل المواقع المعتمدة (صف العناوين الأول، إن وُجد، يُتجاهل تلقائياً). رفع ملف جديد يستبدل القائمة الحالية بالكامل، دون أي تأثير على سجلات الرصد السابقة.</div>
+    ${meta.list.length
+      ? `<div class="msg ok">القائمة الحالية: <b>${meta.list.length}</b> موقع معتمد${meta.fileName?` — من ملف "${esc(meta.fileName)}"${meta.uploadedAt?` بتاريخ ${esc(meta.uploadedAt)}`:''}`:''}</div>`
+      : `<div class="msg bad">لم تُرفع أي قائمة مواقع معتمدة بعد — التحقق من اسم الموقع معطَّل حالياً، ويُسمح بأي اسم كما كان سابقاً.</div>`}
+    <div class="filebox">
+      <label class="flabel">ملف قائمة المواقع (.xlsx / .xls)</label>
+      <input type="file" id="tlSitesFile" accept=".xlsx,.xls">
+    </div>
+    <div id="tlSitesMsg"></div>
+    <div class="btnrow"><button class="primary" id="btnTlSitesSave">💾 حفظ القائمة</button></div>
+    ${meta.list.length ? `<div class="tablewrap" style="max-height:240px;overflow:auto;margin-top:12px;"><table class="data"><thead><tr><th>اسم الموقع المعتمد</th></tr></thead><tbody>${meta.list.map(s=>`<tr><td>${esc(s)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+  `;
+  document.getElementById('btnTlSitesSave').addEventListener('click', async ()=>{
+    const fileInp = document.getElementById('tlSitesFile');
+    const file = fileInp.files[0];
+    const msgEl = document.getElementById('tlSitesMsg');
+    if(!file){ msgEl.innerHTML = `<div class="msg bad">اختر ملف Excel أولاً.</div>`; return; }
+    try{
+      const wb = await readWorkbook(file);
+      const list = taglogParseSitesWorkbook(wb);
+      if(!list.length){ msgEl.innerHTML = `<div class="msg bad">لم يتم العثور على أي أسماء مواقع في الملف.</div>`; return; }
+      STATE.tagApprovedSites = { list, fileName: file.name, uploadedAt: todayStr() };
+      await saveState(['tagApprovedSites']);
+      renderTagSitesModalBody(bodyEl);
+      const msgEl2 = document.getElementById('tlSitesMsg');
+      if(msgEl2) msgEl2.innerHTML = `<div class="msg ok">✅ تم حفظ ${list.length} موقعاً معتمداً بنجاح.</div>`;
+      taglogRenderSiteWarning(); // تحديث فوري لحالة الحقل خلف النافذة المنبثقة إن كان موقعاً مكتوباً بالفعل
+    }catch(e){
+      msgEl.innerHTML = `<div class="msg bad">تعذّرت قراءة الملف: ${esc(e.message||'')}</div>`;
+    }
+  });
+}
+
+/* ---- اختصارات المواد الثابتة (STATE.tagShortcuts): 10 أزرار يخصّصها الأدمن يدوياً (تسمية قصيرة
+   + مادة من القائمة الحالية)، تحل محل نظام "الأكثر استخداماً" السابق. تُحفظ بنفس آلية wms_state
+   المعتادة ولا تُفقد بين الجلسات. ---- */
+function taglogShortcutsSlots(){
+  const arr = Array.isArray(STATE.tagShortcuts) ? STATE.tagShortcuts.slice(0,10) : [];
+  while(arr.length<10) arr.push(null);
+  return arr;
+}
+function openTagShortcutsModal(){
+  openModal('⚙️ إعداد اختصارات المواد', (bodyEl)=>renderTagShortcutsModalBody(bodyEl), {maxWidth:'760px'});
+}
+function renderTagShortcutsModalBody(bodyEl){
+  const slots = taglogShortcutsSlots();
+  const allNames = taglogAllMaterialNames().sort((a,b)=>a.localeCompare(b));
+  bodyEl.innerHTML = `
+    <div class="desc">اربط كل اختصار بمادة من القائمة الحالية وأعطِه تسمية قصيرة تظهر على الزر (مثال: اختصار "RRU" لمادة "Radio Remote Unit 6626"). اترك التسمية أو المادة فارغة لتعطيل ذلك الاختصار. الضغط على "حفظ الاختصارات" يحفظها بشكل دائم.</div>
+    <div class="tl-shortcuts-editor">
+      ${slots.map((s,i)=>`
+        <div class="tl-shortcut-row">
+          <span class="tl-shortcut-num">#${i+1}</span>
+          <input type="text" class="tl-sc-label" data-i="${i}" placeholder="اختصار مثال: RRU" maxlength="10" value="${esc(s&&s.label?s.label:'')}">
+          <select class="tl-sc-material" data-i="${i}">
+            <option value="">— بلا مادة —</option>
+            ${allNames.map(n=>`<option value="${esc(n)}" ${s&&s.materialName===n?'selected':''}>${esc(n)}</option>`).join('')}
+          </select>
+          <button type="button" class="records-btn tl-sc-clear" data-i="${i}" title="مسح هذا الاختصار">✕</button>
+        </div>
+      `).join('')}
+    </div>
+    <div id="tlScMsg"></div>
+    <div class="btnrow"><button class="primary" id="btnTlScSave">💾 حفظ الاختصارات</button></div>
+  `;
+  bodyEl.querySelectorAll('.tl-sc-clear').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = btn.dataset.i;
+      const lbl = bodyEl.querySelector(`.tl-sc-label[data-i="${i}"]`);
+      const sel = bodyEl.querySelector(`.tl-sc-material[data-i="${i}"]`);
+      if(lbl) lbl.value = '';
+      if(sel) sel.value = '';
+    });
+  });
+  document.getElementById('btnTlScSave').addEventListener('click', async ()=>{
+    const newSlots = [];
+    for(let i=0;i<10;i++){
+      const lblEl = bodyEl.querySelector(`.tl-sc-label[data-i="${i}"]`);
+      const selEl = bodyEl.querySelector(`.tl-sc-material[data-i="${i}"]`);
+      const lbl = trim(lblEl ? lblEl.value : '');
+      const mat = selEl ? selEl.value : '';
+      newSlots.push((lbl && mat) ? {label: lbl, materialName: mat} : null);
+    }
+    STATE.tagShortcuts = newSlots;
+    await saveState(['tagShortcuts']);
+    closeModal();
+    renderTagCaptureTab(document.getElementById('tabContent'));
+  });
 }
 /* ---- إضافة مادة جديدة غير موجودة أصلاً (لا في مواد 4G المتوفرة ولا في مواد الإرجاع) ----
    تُنشأ كصنف جديد فعلي في "مواد 4G المتوفرة" (STATE.stock) بكمية 0 (لا تمثّل استلاماً فعلياً،
@@ -3947,6 +4113,14 @@ async function taglogHandleSave(){
   const tagInp = document.getElementById('tlTagInput');
   const btn = document.getElementById('btnTlSave');
   const tagVal = tagInp ? tagInp.value : '';
+  // تحقق اسم الموقع مقابل القائمة المعتمدة (إن وُجدت) قبل أي محاولة تسجيل — يمنع اعتماد اسم
+  // غير معتمد بتنبيه واضح، مع ترك الحقل كما هو للتصحيح فوراً. لا تأثير على مسار الاستيراد الدفعي.
+  if(taglogApprovedSitesList().length && !taglogIsSiteApproved(TAGLOG_SITE)){
+    alert(`اسم الموقع "${trim(TAGLOG_SITE)}" غير معتمد ضمن قائمة المواقع المعتمدة. صحّح الاسم أو اخترْه من الاقتراحات قبل تسجيل التاج.`);
+    const s = document.getElementById('tlSite');
+    if(s) s.focus({preventScroll:true});
+    return;
+  }
   if(btn) btn.disabled = true;
   const res = await taglogAddRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
   if(!res.ok){
@@ -4390,11 +4564,13 @@ function renderTagLogImportBody(bodyEl){
 /* ---- الواجهة ---- */
 function renderTagCaptureTab(el){
   if(!el) return;
+  const scSlots = taglogShortcutsSlots();
   el.innerHTML = `
     <div class="panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <h2 style="margin:0;">${L('tab_tagcapture')}</h2>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="secondary" id="btnTlSitesConfig" style="font-size:12px;padding:7px 14px;">📍 المواقع المعتمدة</button>
           <button class="secondary" id="btnTlImportExcel" style="font-size:12px;padding:7px 14px;">📤 رفع Excel</button>
           <button class="secondary" id="btnTlTemplate" style="font-size:12px;padding:7px 14px;">⚙️ قالب الإكسل</button>
         </div>
@@ -4407,29 +4583,25 @@ function renderTagCaptureTab(el){
       <div class="panel tl-console">
         <div class="tl-block">
           <label class="flabel">📍 الموقع الحالي</label>
-          <input type="text" id="tlSite" class="tl-site-input" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}">
+          <div class="qm-search-wrap">
+            <input type="text" id="tlSite" class="tl-site-input" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}" autocomplete="off">
+            <div id="tlSiteDropdown"></div>
+          </div>
+          <div id="tlSiteWarning"></div>
         </div>
 
-        <div class="tl-block">
-          <label class="flabel">نوع التاج</label>
-          <div class="btnrow" style="gap:8px;margin-top:0;">
-            <button type="button" id="btnTlTypeInstalled" class="${TAGLOG_TYPE==='Installed'?'primary':'secondary'}" style="flex:1;">Installed</button>
-            <button type="button" id="btnTlTypeDismantled" class="${TAGLOG_TYPE==='Dismantled'?'primary':'secondary'}" style="flex:1;">Dismantled</button>
+        <div class="tl-block tl-shortcuts">
+          <div class="tl-shortcuts-head">
+            <label class="flabel">⭐ اختصارات المواد</label>
+            <button type="button" id="btnTlShortcutsConfig" class="tl-shortcuts-gear" title="إعداد الاختصارات العشرة">⚙️ إعداد</button>
+          </div>
+          <div class="tl-shortcuts-grid">
+            ${scSlots.map((s,i)=> (s && s.materialName && s.label)
+              ? `<button type="button" class="tl-shortcut-btn" data-sc="${i}" title="${esc(s.materialName)}">${esc(s.label)}</button>`
+              : `<button type="button" class="tl-shortcut-btn empty" disabled title="غير مُعد — اضغط ⚙️ إعداد">—</button>`
+            ).join('')}
           </div>
         </div>
-
-        ${(function(){
-          const mostUsed = taglogMostUsedMaterials(7);
-          if(!mostUsed.length) return '';
-          return `
-            <div class="tl-block tl-most-used">
-              <label class="flabel">⭐ الأكثر استخدامًا</label>
-              <div class="tl-most-used-chips">
-                ${mostUsed.map(m=>`<button type="button" class="tl-most-used-chip" data-mu="${esc(m.name)}" title="${esc(m.name)} — استُخدمت ${m.count} مرة">${esc(m.name)}</button>`).join('')}
-              </div>
-            </div>
-          `;
-        })()}
 
         <div class="tl-block">
           <label class="flabel">البحث عن المادة (من مواد 4G المتوفرة + مواد الإرجاع)</label>
@@ -4473,13 +4645,21 @@ function renderTagCaptureTab(el){
   siteInp.addEventListener('input', ()=>{
     TAGLOG_SITE = siteInp.value;
     try{ localStorage.setItem('wms_taglog_last_site', TAGLOG_SITE); }catch(e){}
+    taglogRenderSiteDropdown();
+    taglogRenderSiteWarning();
   });
+  siteInp.addEventListener('focus', ()=>{ taglogRenderSiteDropdown(); });
+  siteInp.addEventListener('blur', ()=>{ setTimeout(()=>{ const dd=document.getElementById('tlSiteDropdown'); if(dd) dd.innerHTML=''; }, 150); });
+  taglogRenderSiteWarning();
 
-  document.getElementById('btnTlTypeInstalled').addEventListener('click', ()=>taglogSetType('Installed'));
-  document.getElementById('btnTlTypeDismantled').addEventListener('click', ()=>taglogSetType('Dismantled'));
+  document.getElementById('btnTlSitesConfig').addEventListener('click', openTagSitesModal);
 
-  el.querySelectorAll('.tl-most-used-chip').forEach(chip=>{
-    chip.addEventListener('click', ()=>taglogSelectMaterial(chip.dataset.mu));
+  document.getElementById('btnTlShortcutsConfig').addEventListener('click', openTagShortcutsModal);
+  el.querySelectorAll('.tl-shortcut-btn[data-sc]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const slot = scSlots[+btn.dataset.sc];
+      if(slot && slot.materialName) taglogSelectMaterial(slot.materialName);
+    });
   });
 
   renderTagLogRecordsPanel();
