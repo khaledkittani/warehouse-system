@@ -579,6 +579,7 @@ const STORE_KEYS = {
   tagLogTemplate: 'wms_tag_log_template_v1',
   tagApprovedSites: 'wms_tag_sites_v1',
   tagShortcuts: 'wms_tag_shortcuts_v1',
+  sidReview: 'wms_sid_review_v1',
 };
 
 let STATE = {
@@ -601,6 +602,7 @@ let STATE = {
   tagLogTemplate: null, // {fileName, base64, uploadedAt} — قالب إكسل "رصد التاجات" الذي يرفعه الأدمن مرة واحدة (إخراج فقط، لا يُستخرج منه أي قائمة مواد)
   tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة أسماء المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
   tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
+  sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected}]
 };
 
 let PENDING_SID = null;   // holds parsed SID awaiting confirmation
@@ -886,6 +888,7 @@ let SUPABASE_ONLINE = null; // null = لم تُختبر بعد، true/false بع
 let SUPABASE_LAST_SYNC_TIME = null;
 let SUPABASE_POLL_TIMER = null;
 let SUPABASE_ROW_CACHE = {}; // آخر نسخة معروفة من كل صف (key -> raw value) لاكتشاف التغييرات القادمة من مستخدمين آخرين فقط
+let SUPABASE_ROW_META_CACHE = {}; // آخر updated_at معروف لكل صف (key -> timestamp) — تُستخدم للتحقق الخفيف من وجود تحديثات دون تحميل كل القيم الكاملة في كل استطلاع
 
 function supabaseHeaders(extra){
   return Object.assign({
@@ -1056,19 +1059,40 @@ async function supabaseAuthedFetch(url, opts){
 }
 
 async function supabaseFetchAllRows(){
-  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=key,value`, {
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=key,value,updated_at`, {
+    headers: supabaseAuthHeaders()
+  });
+  if(!res.ok) throw new Error('Supabase read failed: HTTP ' + res.status);
+  return await res.json(); // [{key, value, updated_at}, ...]
+}
+/* فحص خفيف جداً: يجلب فقط (key, updated_at) لكل الصفوف دون قيمها الكاملة — يُستخدم في الاستطلاع الدوري
+   لمعرفة أي الصفوف تغيّرت فعلاً قبل تحميل قيمتها الكاملة (التي قد تكون كبيرة الحجم). */
+async function supabaseFetchAllMeta(){
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=key,updated_at`, {
+    headers: supabaseAuthHeaders()
+  });
+  if(!res.ok) throw new Error('Supabase meta read failed: HTTP ' + res.status);
+  return await res.json(); // [{key, updated_at}, ...]
+}
+/* يجلب القيمة الكاملة فقط للمفاتيح المطلوبة (وليس كل الجدول) */
+async function supabaseFetchRowsByKeys(keys){
+  if(!keys || !keys.length) return [];
+  const inList = keys.map(k=>encodeURIComponent(k)).join(',');
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=key,value&key=in.(${inList})`, {
     headers: supabaseAuthHeaders()
   });
   if(!res.ok) throw new Error('Supabase read failed: HTTP ' + res.status);
   return await res.json(); // [{key, value}, ...]
 }
 async function supabaseUpsertRow(key, value){
+  const ts = new Date().toISOString();
   const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}`, {
     method: 'POST',
     headers: supabaseAuthHeaders({'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal'}),
-    body: JSON.stringify([{ key, value, updated_at: new Date().toISOString() }])
+    body: JSON.stringify([{ key, value, updated_at: ts }])
   });
   if(!res.ok) throw new Error('Supabase write failed: HTTP ' + res.status);
+  return ts; // نُعيد الطابع الزمني المُستخدَم لتحديث ذاكرة التخزين المؤقت للـ metadata فوراً دون طلب إضافي
 }
 /* النسخ الاحتياطي التلقائي الفعلي يعمل على الخادم عبر pg_cron (راجع تعليمات SQL) — هذا فقط لتشغيله يدوياً من الواجهة، ولعرض سجله */
 async function triggerServerBackupNow(){
@@ -1136,7 +1160,7 @@ async function loadAllState(){
     try{
       const rows = await supabaseFetchAllRows();
       const map = {};
-      rows.forEach(r=>{ map[r.key] = r.value; });
+      rows.forEach(r=>{ map[r.key] = r.value; if(r.updated_at) SUPABASE_ROW_META_CACHE[r.key] = r.updated_at; });
       Object.keys(STORE_KEYS).forEach(k=>{
         const raw = map[STORE_KEYS[k]];
         if(raw){ STATE[k] = JSON.parse(raw); SUPABASE_ROW_CACHE[STORE_KEYS[k]] = raw; }
@@ -1165,8 +1189,9 @@ async function saveState(keys){
     if(SUPABASE_ENABLED){
       try{
         const raw = JSON.stringify(STATE[key]);
-        await supabaseUpsertRow(STORE_KEYS[key], raw);
+        const ts = await supabaseUpsertRow(STORE_KEYS[key], raw);
         SUPABASE_ROW_CACHE[STORE_KEYS[key]] = raw;
+        SUPABASE_ROW_META_CACHE[STORE_KEYS[key]] = ts;
         ok = true;
         SUPABASE_ONLINE = true;
         SUPABASE_LAST_SYNC_TIME = nowTimeStr();
@@ -1199,24 +1224,39 @@ function isUserActivelyTyping(){
 }
 function hasUnfinishedEditingState(){
   return !!(PENDING_SID || (typeof BATCH_SIDS!=='undefined' && BATCH_SIDS && BATCH_SIDS.length) ||
-    (typeof GOODS_BATCH!=='undefined' && GOODS_BATCH) || (typeof RESTORE_PENDING!=='undefined' && RESTORE_PENDING));
+    (typeof GOODS_BATCH!=='undefined' && GOODS_BATCH) || (typeof RESTORE_PENDING!=='undefined' && RESTORE_PENDING) ||
+    (typeof SIDR_BATCH!=='undefined' && SIDR_BATCH && SIDR_BATCH.length));
 }
 async function pollSupabaseForRemoteChanges(force){
   if(!SUPABASE_ENABLED) return;
   if(!force && (isUserActivelyTyping() || hasUnfinishedEditingState())) return; // لا نقاطع المستخدم في منتصف عمل إلا إذا طلب المزامنة يدوياً
   try{
-    const rows = await supabaseFetchAllRows();
+    // الخطوة 1: فحص خفيف جداً (key + updated_at فقط، دون القيم الكاملة) لمعرفة أي الصفوف تغيّرت فعلاً —
+    // هذا يمنع تحميل كامل بيانات المستودع (STATE) كل 20 ثانية بينما لا شيء تغيّر غالباً.
+    const metaRows = await supabaseFetchAllMeta();
+    const changedKeys = metaRows
+      .filter(r=> r.updated_at && r.updated_at !== SUPABASE_ROW_META_CACHE[r.key])
+      .map(r=> r.key);
     let changed = false;
-    const map = {};
-    rows.forEach(r=>{ map[r.key] = r.value; });
-    Object.keys(STORE_KEYS).forEach(k=>{
-      const raw = map[STORE_KEYS[k]];
-      if(raw && raw !== SUPABASE_ROW_CACHE[STORE_KEYS[k]]){
-        STATE[k] = JSON.parse(raw);
-        SUPABASE_ROW_CACHE[STORE_KEYS[k]] = raw;
-        changed = true;
-      }
-    });
+    if(changedKeys.length){
+      // الخطوة 2: تحميل القيمة الكاملة فقط للمفاتيح التي تغيّرت فعلاً
+      const rows = await supabaseFetchRowsByKeys(changedKeys);
+      const map = {};
+      rows.forEach(r=>{ map[r.key] = r.value; });
+      Object.keys(STORE_KEYS).forEach(k=>{
+        const dbKey = STORE_KEYS[k];
+        if(changedKeys.indexOf(dbKey) === -1) return;
+        const raw = map[dbKey];
+        if(raw !== undefined && raw !== SUPABASE_ROW_CACHE[dbKey]){
+          STATE[k] = JSON.parse(raw);
+          SUPABASE_ROW_CACHE[dbKey] = raw;
+          changed = true;
+        }
+      });
+      // نُحدّث ذاكرة الـ metadata فقط بعد نجاح تحميل القيم الفعلية، حتى لا نُسجّل مفتاحاً كـ"مُعالَج"
+      // إذا فشل جلب قيمته لسبب ما (فيُعاد فحصه في الاستطلاع التالي).
+      metaRows.forEach(r=>{ if(changedKeys.indexOf(r.key) !== -1) SUPABASE_ROW_META_CACHE[r.key] = r.updated_at; });
+    }
     SUPABASE_ONLINE = true;
     SUPABASE_LAST_SYNC_TIME = nowTimeStr();
     if(changed && typeof renderApp==='function'){ renderApp(); }
@@ -1267,6 +1307,18 @@ async function readWorkbook(file){
 function trim(v){
   if(v===null||v===undefined) return '';
   return String(v).trim();
+}
+/* ---------- Debounce عام: يؤخّر تنفيذ العمليات الثقيلة (إعادة رسم/فلترة) أثناء الكتابة المتلاحقة
+   في أي خانة بحث، دون التأثير على القيمة المكتوبة نفسها (تبقى فورية دائماً — المتصفح يعرضها مباشرة).
+   يمنع تكرار نفس عملية البحث/الفرز/إعادة الرسم عند كل ضغطة مفتاح لصالح تنفيذ واحد بعد توقف قصير
+   عن الكتابة (~160ms)، وهو أقصر من أن يُلاحَظ لكنه كافٍ لتفادي إعادة الحساب عشرات المرات أثناء
+   كتابة كلمة واحدة بسرعة. ---- */
+function debounce(fn, wait){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(()=>fn.apply(this, args), wait || 160);
+  };
 }
 // يحوّل شيت إلى مصفوفة كائنات باستخدام أول صف كعناوين (مع تهذيب المسافات من العناوين)
 function sheetToObjects(ws){
@@ -1704,6 +1756,296 @@ async function deleteSidRecord(site){
   delete STATE.processedSids[site];
   await saveState(['stock','ledger','issues','processedSids']);
   return {ok:true, msg:`تم إلغاء صرف SID الموقع ${site} وإعادة كل الكميات/التاجات للرصيد. يمكنك الآن رفعه من جديد.`};
+}
+
+/* ============================================================
+   3أ) مراجعة استلام SID — متعدد الملفات/المواقع (قراءة وتحليل فقط)
+   ملاحظة مهمة: هذا القسم مستقل تماماً عن آلية صرف SID أعلاه (parseSidFile/confirmAndIssueSid) —
+   لا يلمس STATE.stock ولا STATE.ledger ولا STATE.processedSids ولا التاجات إطلاقاً، ولا يُنفّذ أي
+   صرف فعلي. غرضه فقط مقارنة "الكمية المطلوبة" مع "الكمية الموجودة فعلياً في المستودع (EXIST IN DWH)"
+   كما وردت في نفس ملف/شيت SID المرفوع، لكل موقع (= اسم الـ Sheet)، عبر عدة ملفات وعدة مواقع دفعة واحدة.
+   يُخزَّن في STATE.sidReview (مفتاح Supabase عام جديد wms_sid_review_v1، بنفس آلية بقية مفاتيح STATE —
+   دون أي تعديل على مخطط قاعدة البيانات).
+   ============================================================ */
+function sidrNormHeader(s){
+  return trim(s).toLowerCase().replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function sidrToNum(v){
+  if(v===null||v===undefined||trim(v)==='') return 0;
+  const n = Number(String(v).replace(/,/g,'').trim());
+  return isNaN(n) ? 0 : n;
+}
+function sidrIsNumericVal(v){
+  if(v===null||v===undefined||trim(v)==='') return false;
+  const n = Number(String(v).replace(/,/g,'').trim());
+  return !isNaN(n) && isFinite(n);
+}
+function sidrHashStr(str){
+  let h = 5381;
+  for(let i=0;i<str.length;i++){ h = ((h*33) ^ str.charCodeAt(i)) >>> 0; }
+  return h.toString(36);
+}
+const SIDR_AL_QTY = ['quantity','qty','required','requested','required qty','requested qty','sid qty','req qty'];
+const SIDR_AL_RECEIVED = ['exist in dwh','exist','dwh','received','existing','available in dwh','qty in dwh','in dwh','balance in dwh'];
+const SIDR_AL_CODE_HDR = ['product code','prod code','item code','material code','code','type','category'];
+const SIDR_AL_PRODDESC_HDR = ['product description','prod description','prod desc'];
+const SIDR_AL_DESC_HDR = ['description','item description','material description','desc'];
+function sidrFindColByAliases(normHeader, aliases, excludeAliases, limit){
+  const n = limit!==undefined ? limit : normHeader.length;
+  for(let i=0;i<n;i++){ if(aliases.includes(normHeader[i])) return i; }
+  for(let i=0;i<n;i++){
+    const h = normHeader[i];
+    if(!h) continue;
+    if(aliases.some(a=>h.includes(a)) && !(excludeAliases && excludeAliases.some(a=>h.includes(a)))) return i;
+  }
+  return -1;
+}
+/* يبحث عن صف العناوين ضمن أول 8 صفوف — الصف الذي يحتوي عنواناً يشبه "Quantity" أو "EXIST IN DWH" */
+function sidrFindHeaderRowIdx(aoa){
+  const scanLimit = Math.min(8, aoa.length);
+  for(let i=0;i<scanLimit;i++){
+    const norm = (aoa[i]||[]).map(c=>sidrNormHeader(c));
+    const hasQty = norm.some(h=> SIDR_AL_QTY.includes(h));
+    const hasRecv = norm.some(h=> h && SIDR_AL_RECEIVED.some(a=>h.includes(a)));
+    if(hasQty || hasRecv) return i;
+  }
+  for(let i=0;i<scanLimit;i++){
+    const nonEmpty = (aoa[i]||[]).filter(c=>trim(c)!=='').length;
+    if(nonEmpty>=3) return i;
+  }
+  return 0;
+}
+/* التعرف على الأعمدة الخمسة: Product code (قد تكون فعلياً تصنيف/نوع)، Product description (قد تكون فعلياً
+   الكود الحقيقي)، Description (الوصف)، Quantity (مطلوب)، EXIST IN DWH (مستلم) — بالاسم أولاً، ثم بالمحتوى
+   والترتيب عند الغموض (أول عمودين رقميين بنسبة ≥70%: الأيسر = مطلوب، الذي يليه يميناً = مستلم، حسب تعليمات
+   المستخدم الصريحة)، مع ترك needsReview=true كلما لم تُحسَم الأعمدة الأساسية بالاسم صراحة. */
+function sidrDetectColumns(aoa, headerRowIdx){
+  const header = (aoa[headerRowIdx]||[]).map(c=>trim(c));
+  const normHeader = header.map(c=>sidrNormHeader(c));
+  const dataRows = aoa.slice(headerRowIdx+1).filter(r=> r && r.some(c=>trim(c)!==''));
+  const sample = dataRows.slice(0,40);
+  const colCount = Math.max(header.length, ...sample.map(r=>r.length), 1);
+
+  let qtyCol = sidrFindColByAliases(normHeader, SIDR_AL_QTY, SIDR_AL_RECEIVED);
+  let recvCol = sidrFindColByAliases(normHeader, SIDR_AL_RECEIVED, SIDR_AL_QTY);
+  const qtyByName = qtyCol!==-1, recvByName = recvCol!==-1;
+
+  const numericCols = [];
+  const minSampleForNumeric = Math.max(1, Math.min(3, sample.length));
+  for(let c=0;c<colCount;c++){
+    let numCount=0, total=0;
+    sample.forEach(r=>{ const v=r[c]; if(v===undefined||v===null||trim(v)==='') return; total++; if(sidrIsNumericVal(v)) numCount++; });
+    if(total>=minSampleForNumeric && (numCount/total)>=0.7) numericCols.push(c);
+  }
+  if(qtyCol===-1 && numericCols.length) qtyCol = numericCols[0];
+  if(recvCol===-1){
+    const after = numericCols.find(c=>c>qtyCol);
+    recvCol = after!==undefined ? after : (qtyCol>=0 ? qtyCol+1 : (numericCols[1]!==undefined?numericCols[1]:-1));
+  }
+
+  const beforeQty = qtyCol>=0 ? qtyCol : colCount;
+  const textCols = [];
+  for(let c=0;c<beforeQty;c++){ if(sample.some(r=>trim(r[c])!=='')) textCols.push(c); }
+
+  let catCol = sidrFindColByAliases(normHeader, SIDR_AL_CODE_HDR, SIDR_AL_PRODDESC_HDR.concat(SIDR_AL_DESC_HDR), beforeQty);
+  let pdescCol = sidrFindColByAliases(normHeader, SIDR_AL_PRODDESC_HDR, SIDR_AL_CODE_HDR.concat(SIDR_AL_DESC_HDR), beforeQty);
+  let descCol = sidrFindColByAliases(normHeader, SIDR_AL_DESC_HDR, SIDR_AL_CODE_HDR.concat(SIDR_AL_PRODDESC_HDR), beforeQty);
+  const descByName = descCol!==-1;
+
+  const remaining = textCols.filter(c=> c!==catCol && c!==pdescCol && c!==descCol);
+  if(descCol===-1 && remaining.length) descCol = remaining.pop();
+  if(pdescCol===-1 && remaining.length) pdescCol = remaining.pop();
+  if(catCol===-1 && remaining.length) catCol = remaining.pop();
+
+  const needsReview = !(qtyByName && recvByName && (descByName || textCols.length===3));
+
+  return {
+    headerRowIdx, header,
+    cols: {cat: catCol>=0?catCol:null, pdesc: pdescCol>=0?pdescCol:null, desc: descCol>=0?descCol:null, qty:(qtyCol>=0?qtyCol:null), received:(recvCol>=0?recvCol:null)},
+    byName: {qty:qtyByName, received:recvByName, desc:descByName},
+    needsReview,
+    dataRows,
+  };
+}
+/* يستخرج صفوف البيانات الفعلية وفق تعيين الأعمدة الحالي (تلقائي أو بعد مراجعة يدوية) */
+function sidrBuildRows(detection){
+  const {cols, dataRows} = detection;
+  const rows = [];
+  dataRows.forEach(r=>{
+    const catVal = (cols.cat!==null && cols.cat!==undefined) ? trim(r[cols.cat]) : '';
+    const pdescVal = (cols.pdesc!==null && cols.pdesc!==undefined) ? trim(r[cols.pdesc]) : '';
+    const descVal = (cols.desc!==null && cols.desc!==undefined) ? trim(r[cols.desc]) : '';
+    const idText = (pdescVal || catVal || descVal).toLowerCase();
+    if(!idText) return;
+    if(SIDR_AL_QTY.includes(idText) || SIDR_AL_CODE_HDR.includes(idText) || SIDR_AL_PRODDESC_HDR.includes(idText) || SIDR_AL_DESC_HDR.includes(idText)) return; // صف عناوين متكرر بالخطأ ضمن البيانات
+    const requested = (cols.qty!==null && cols.qty!==undefined) ? sidrToNum(r[cols.qty]) : 0;
+    const received = (cols.received!==null && cols.received!==undefined) ? sidrToNum(r[cols.received]) : 0;
+    if(requested<=0 && received<=0) return;
+    rows.push({productCode: catVal, productDescription: pdescVal, description: descVal, requested, received});
+  });
+  return rows;
+}
+function sidrComputeSignature(site, rows){
+  const parts = rows.map(r=>[r.productCode,r.productDescription,r.description,r.requested,r.received].join('~')).sort();
+  return sidrHashStr(trim(site).toLowerCase()+'||'+parts.join('|'));
+}
+function sidrStatusFor(requested, received){
+  const diff = requested - received;
+  if(diff===0) return {shortage:0, surplus:0, status:'مكتمل'};
+  if(diff>0) return {shortage:diff, surplus:0, status:'ناقص'};
+  return {shortage:0, surplus:-diff, status:'زيادة'};
+}
+/* يقرأ ملف Excel كاملاً ويمرّ على كل الشيتات (كل شيت = موقع)، شيتاً فشيتاً — وليس أول شيت فقط */
+async function sidrParseWorkbookFile(file){
+  const wb = await readWorkbook(file);
+  const sheets = [];
+  wb.SheetNames.forEach(sheetName=>{
+    const ws = wb.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+    const nonEmptyRows = aoa.filter(r=> r && r.some(c=>trim(c)!==''));
+    if(nonEmptyRows.length < 2){
+      sheets.push({sheetName, site: trim(sheetName)||sheetName, error:'الشيت فارغ أو لا يحتوي بيانات كافية', rows:[], detection:null, needsReview:false});
+      return;
+    }
+    const headerRowIdx = sidrFindHeaderRowIdx(aoa);
+    const detection = sidrDetectColumns(aoa, headerRowIdx);
+    const rows = (detection.cols.qty!==null || detection.cols.received!==null) ? sidrBuildRows(detection) : [];
+    const needsReview = detection.needsReview || detection.cols.qty===null || detection.cols.received===null || !rows.length;
+    sheets.push({sheetName, site: trim(sheetName)||sheetName, rows, detection, needsReview, error:null});
+  });
+  return {fileName: file.name, sheets};
+}
+function sidrRebuildWithManualCols(entry, manualCols){
+  entry.detection.cols = manualCols;
+  entry.rows = sidrBuildRows(entry.detection);
+  entry.manuallyReviewed = true;
+  if(entry.rows.length){ entry.needsReview = false; }
+  else { entry.needsReview = true; }
+}
+let SIDR_BATCH = []; // [{fileName, sheetName, site, rows, detection, needsReview, error, manuallyReviewed, skip, action, actionNote, signature}]
+function sidrAnnotateBatchActions(){
+  SIDR_BATCH.forEach(entry=>{
+    if(entry.error){ entry.action='error'; entry.actionNote=null; return; }
+    if(entry.needsReview){ entry.action=null; entry.actionNote=null; return; }
+    const siteNorm = trim(entry.site).toLowerCase();
+    const dupInBatch = SIDR_BATCH.filter(e=>!e.error && !e.needsReview && !e.skip && trim(e.site).toLowerCase()===siteNorm).length>1;
+    if(dupInBatch){
+      entry.action = 'conflict';
+      entry.actionNote = 'أكثر من شيت بنفس اسم الموقع ضمن هذه الدفعة — عدّل اسم الموقع لأحدها أو تجاهل الباقي.';
+      return;
+    }
+    const existing = STATE.sidReview.imports.find(imp=> trim(imp.site).toLowerCase()===siteNorm);
+    const sig = sidrComputeSignature(entry.site, entry.rows);
+    entry.signature = sig;
+    if(!existing){ entry.action='new'; entry.actionNote=null; return; }
+    if(existing.signature === sig){
+      entry.action = 'duplicate';
+      entry.actionNote = `مطابق تماماً لاستيراد سابق لنفس الموقع بتاريخ ${existing.importedAt.slice(0,10)} — سيُتجاهل.`;
+    } else {
+      entry.action = 'replace';
+      entry.actionNote = `سيستبدل استيراداً سابقاً لنفس الموقع (ملف: ${existing.fileName}، بتاريخ ${existing.importedAt.slice(0,10)}).`;
+    }
+  });
+}
+async function sidrCommitBatch(){
+  sidrAnnotateBatchActions();
+  const runnable = SIDR_BATCH.filter(e=> !e.skip && (e.action==='new' || e.action==='replace'));
+  if(!runnable.length) return {ok:false, msg:'لا يوجد أي شيت جاهز للاستيراد الآن (تحقق من التكرارات أو التعارضات أو الشيتات التي تحتاج مراجعة أعمدة).'};
+  const now = new Date().toISOString();
+  runnable.forEach(entry=>{
+    const siteNorm = trim(entry.site).toLowerCase();
+    const existingIdx = STATE.sidReview.imports.findIndex(imp=> trim(imp.site).toLowerCase()===siteNorm);
+    if(existingIdx!==-1) STATE.sidReview.imports.splice(existingIdx,1);
+    STATE.sidReview.imports.push({
+      id: 'SR'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+      fileName: entry.fileName, sheetName: entry.sheetName, site: trim(entry.site),
+      importedAt: now, signature: entry.signature,
+      rows: entry.rows, autoDetected: !entry.manuallyReviewed,
+    });
+  });
+  await saveState(['sidReview']);
+  const skippedDup = SIDR_BATCH.filter(e=>e.action==='duplicate').length;
+  SIDR_BATCH = [];
+  return {ok:true, importedCount: runnable.length, skippedDup};
+}
+async function sidrDeleteImport(id){
+  const idx = STATE.sidReview.imports.findIndex(imp=>imp.id===id);
+  if(idx===-1) return {ok:false, msg:'الاستيراد غير موجود (ربما حُذف مسبقاً).'};
+  const rec = STATE.sidReview.imports[idx];
+  STATE.sidReview.imports.splice(idx,1);
+  await saveState(['sidReview']);
+  return {ok:true, msg:`تم حذف استيراد الموقع "${rec.site}" من مراجعة SID. لا يؤثر هذا على أي بيانات أخرى في النظام (الرصيد، صرف SID، السجلات) — يمكنك رفعه من جديد لاحقاً.`};
+}
+function sidrSitesList(){ return STATE.sidReview.imports.map(imp=>imp.site).slice().sort((a,b)=>a.localeCompare(b)); }
+function sidrImportForSite(site){ return STATE.sidReview.imports.find(imp=> trim(imp.site).toLowerCase()===trim(site).toLowerCase()); }
+function sidrRowsWithStatus(rows){ return rows.map(r=>({...r, ...sidrStatusFor(r.requested, r.received)})); }
+function sidrAllRowsFlat(){
+  const out = [];
+  STATE.sidReview.imports.forEach(imp=>{ sidrRowsWithStatus(imp.rows).forEach(r=> out.push({site:imp.site, ...r})); });
+  return out;
+}
+function sidrGlobalSummary(){
+  const all = sidrAllRowsFlat();
+  const sitesWithShortage = new Set(all.filter(r=>r.status==='ناقص').map(r=>r.site));
+  return {
+    sitesCount: STATE.sidReview.imports.length,
+    sitesWithShortageCount: sitesWithShortage.size,
+    totalRequested: all.reduce((s,r)=>s+r.requested,0),
+    totalReceived: all.reduce((s,r)=>s+r.received,0),
+    totalShortage: all.reduce((s,r)=>s+r.shortage,0),
+  };
+}
+/* ملخص إضافي حسب المادة عبر كل المواقع — مع الاحتفاظ بتفاصيل كل موقع (لا يُخفي أي موقع لديه نقص) */
+function sidrMaterialAggregate(){
+  const map = {};
+  sidrAllRowsFlat().forEach(r=>{
+    const key = trim(r.productDescription || r.productCode || r.description).toLowerCase() || '—';
+    if(!map[key]) map[key] = {key, productCode:r.productCode, productDescription:r.productDescription, description:r.description, totalRequested:0, totalReceived:0, totalShortage:0, sites:[]};
+    map[key].totalRequested += r.requested;
+    map[key].totalReceived += r.received;
+    map[key].totalShortage += r.shortage;
+    map[key].sites.push({site:r.site, requested:r.requested, received:r.received, shortage:r.shortage, status:r.status});
+  });
+  return Object.values(map).sort((a,b)=> b.totalShortage - a.totalShortage);
+}
+function sidrFullReportAoa(){
+  const header = ['الموقع','Product code','Product description','Description','الكمية المطلوبة','الكمية المستلمة','الفرق (نقص+/زيادة-)','الحالة'];
+  const rows = sidrAllRowsFlat().map(r=>[r.site, r.productCode, r.productDescription, r.description, r.requested, r.received, r.shortage>0?r.shortage:-r.surplus, r.status]);
+  return [header, ...rows];
+}
+function sidrShortageOnlyAoa(site){
+  const header = ['الموقع','Product code','Product description','Description','الكمية المطلوبة','الكمية المستلمة','كمية النقص'];
+  let rows = sidrAllRowsFlat().filter(r=>r.status==='ناقص');
+  if(site) rows = rows.filter(r=>r.site===site);
+  return [header, ...rows.map(r=>[r.site, r.productCode, r.productDescription, r.description, r.requested, r.received, r.shortage])];
+}
+function sidrMaterialSummaryAoa(){
+  const header = ['Product code','Product description','Description','إجمالي المطلوب','إجمالي المستلم','إجمالي النقص','عدد المواقع'];
+  return [header, ...sidrMaterialAggregate().map(a=>[a.productCode, a.productDescription, a.description, a.totalRequested, a.totalReceived, a.totalShortage, a.sites.length])];
+}
+function sidrMaterialDetailAoa(){
+  const header = ['المادة (Product description)','الموقع','المطلوب','المستلم','النقص','الحالة'];
+  const rows = [];
+  sidrMaterialAggregate().forEach(a=>{ a.sites.forEach(s=> rows.push([a.productDescription||a.productCode, s.site, s.requested, s.received, s.shortage, s.status])); });
+  return [header, ...rows];
+}
+function sidrDownloadFullReport(){
+  downloadWorkbook([{name:'كل المواقع والمواد', ws: aoaSheet(sidrFullReportAoa(),[16,16,30,30,14,14,14,12])}], `مراجعة_SID_تقرير_شامل_${todayStr()}.xlsx`);
+}
+function sidrDownloadAllShortages(){
+  downloadWorkbook([{name:'نواقص كل المواقع', ws: aoaSheet(sidrShortageOnlyAoa(null),[16,16,30,30,14,14,14])}], `مراجعة_SID_نواقص_${todayStr()}.xlsx`);
+}
+function sidrDownloadSiteDetail(site){
+  const rows = sidrAllRowsFlat().filter(r=>r.site===site);
+  const header = ['Product code','Product description','Description','الكمية المطلوبة','الكمية المستلمة','كمية النقص/الزيادة','الحالة'];
+  const aoa = [header, ...rows.map(r=>[r.productCode,r.productDescription,r.description,r.requested,r.received, r.shortage>0?r.shortage:(r.surplus>0?('+'+r.surplus):0), r.status])];
+  downloadWorkbook([{name: safeSheetName(site), ws: aoaSheet(aoa,[16,16,30,30,14,14,16,12])}], `مراجعة_SID_${safeSheetName(site)}_${todayStr()}.xlsx`);
+}
+function sidrDownloadMaterialSummary(){
+  downloadWorkbook([
+    {name:'ملخص حسب المادة', ws: aoaSheet(sidrMaterialSummaryAoa(),[16,16,30,14,14,14,12])},
+    {name:'تفاصيل حسب الموقع', ws: aoaSheet(sidrMaterialDetailAoa(),[30,16,14,14,14,12])},
+  ], `مراجعة_SID_ملخص_حسب_المادة_${todayStr()}.xlsx`);
 }
 
 /* ============================================================
@@ -2432,11 +2774,13 @@ function renderApp(roleFetchError, roleResult){
   const app = document.getElementById('app');
   if(SUPABASE_ENABLED && !CURRENT_SESSION){
     app.classList.remove('tl-wide');
+    app.dataset.shellSig = '';
     renderLoginScreen(app);
     return;
   }
   if(roleFetchError){
     app.classList.remove('tl-wide');
+    app.dataset.shellSig = '';
     renderRoleErrorScreen(app, roleResult);
     return;
   }
@@ -2444,35 +2788,51 @@ function renderApp(roleFetchError, roleResult){
   // عرض أوسع خاص بشاشة رصد التاجات فقط (تصميم/CSS بحت) — يُعاد ضبطه أيضاً عند تبديل التبويبات
   // داخل الوضع الإداري نفسه من renderTabContent، لأن تبديل التبويب لا يمر عبر renderApp.
   app.classList.toggle('tl-wide', isAdmin && APP_MODE==='admin' && ACTIVE_TAB==='tagcapture');
-  app.innerHTML = `
-    <div class="modebar">
-      <div class="modebar-title">${L('app_title')}</div>
-      <div class="modebar-switch">
-        ${isAdmin ? `
-          <button id="modeBtnQuick" class="${APP_MODE==='quick'?'active':''}">⚡ ${L('app_quick_mode')}</button>
-          <button id="modeBtnAdmin" class="${APP_MODE==='admin'?'active':''}">⚙️ ${L('app_admin_mode')}</button>
-        ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">${L('app_viewer_chip')}</span>`}
+
+  // renderApp() يُستدعى بعد كل عملية شبه في النظام (استلام، صرف، حفظ تسمية، رصد تاج...) لتحديث
+  // البيانات المعروضة. شريط الوضع العلوي (العنوان، البريد، زر الخروج) لا يتغيّر عملياً بين عملية
+  // وأخرى طالما بقي نفس المستخدم/الدور — إعادة بنائه وربط أزراره من جديد في كل مرة كانت تُنفَّذ
+  // فعلياً ولا داعٍ لها، وهي أحد أسباب البطء المحسوس عند كل عملية. نعيد استخدامه هنا ونكتفي
+  // بإعادة رسم منطقة المحتوى (#modeContent) فقط، وهي المكان الذي تتغيّر فيه البيانات فعلاً.
+  const shellSig = `${isAdmin?'admin':'viewer'}|${CURRENT_SESSION?CURRENT_SESSION.user.email:''}`;
+  let content = document.getElementById('modeContent');
+  if(!content || app.dataset.shellSig !== shellSig){
+    app.dataset.shellSig = shellSig;
+    app.innerHTML = `
+      <div class="modebar">
+        <div class="modebar-title">${L('app_title')}</div>
+        <div class="modebar-switch">
+          ${isAdmin ? `
+            <button id="modeBtnQuick" class="${APP_MODE==='quick'?'active':''}">⚡ ${L('app_quick_mode')}</button>
+            <button id="modeBtnAdmin" class="${APP_MODE==='admin'?'active':''}">⚙️ ${L('app_admin_mode')}</button>
+          ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">${L('app_viewer_chip')}</span>`}
+        </div>
+        ${CURRENT_SESSION ? `<span style="color:#d9d4c6;font-size:11.5px;margin-inline-end:10px;">${esc(CURRENT_SESSION.user.email)}</span><button id="btnSignOut" class="secondary" style="padding:6px 14px;font-size:12px;">خروج</button>` : ''}
+        <span id="saveIndicator" class="modebar-save"></span>
       </div>
-      ${CURRENT_SESSION ? `<span style="color:#d9d4c6;font-size:11.5px;margin-inline-end:10px;">${esc(CURRENT_SESSION.user.email)}</span><button id="btnSignOut" class="secondary" style="padding:6px 14px;font-size:12px;">خروج</button>` : ''}
-      <span id="saveIndicator" class="modebar-save"></span>
-    </div>
-    <div id="modeContent"></div>
-    <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">${L('app_footer')}</footer>
-  `;
-  if(isAdmin){
-    document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='quick'; renderApp(); });
-    document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='admin'; renderApp(); });
-  }
-  if(CURRENT_SESSION){
-    document.getElementById('btnSignOut').addEventListener('click', ()=>{
-      if(!confirm('تسجيل الخروج؟')) return;
-      taglogStopBarcodeScanner();
-      authSignOut();
-      renderApp();
-    });
+      <div id="modeContent"></div>
+      <footer style="text-align:center;padding:16px 10px 10px;color:var(--muted);font-size:11px;">${L('app_footer')}</footer>
+    `;
+    if(isAdmin){
+      document.getElementById('modeBtnQuick').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='quick'; renderApp(); });
+      document.getElementById('modeBtnAdmin').addEventListener('click', ()=>{ taglogStopBarcodeScanner(); APP_MODE='admin'; renderApp(); });
+    }
+    if(CURRENT_SESSION){
+      document.getElementById('btnSignOut').addEventListener('click', ()=>{
+        if(!confirm('تسجيل الخروج؟')) return;
+        taglogStopBarcodeScanner();
+        authSignOut();
+        renderApp();
+      });
+    }
+    content = document.getElementById('modeContent');
+  } else if(isAdmin){
+    // الشريط مُعاد استخدامه — فقط تحديث تمييز الزر النشط (⚡/⚙️) لو تغيّر وضع المستودع
+    const bq = document.getElementById('modeBtnQuick'), ba = document.getElementById('modeBtnAdmin');
+    if(bq) bq.classList.toggle('active', APP_MODE==='quick');
+    if(ba) ba.classList.toggle('active', APP_MODE==='admin');
   }
   updateSaveIndicator();
-  const content = document.getElementById('modeContent');
   if(!isAdmin){ renderViewerMode(content); return; }
   if(APP_MODE==='quick') renderQuickMode(content); else renderAdminMode(content);
 }
@@ -2679,11 +3039,16 @@ function renderAdminMode(root){
     </div>
     <div class="footer-note">يُحفظ كل شيء تلقائياً في متصفحك بعد كل عملية — لا حاجة لأي زر حفظ يدوي. لا تُحذف أي حركة من السجل، أي تصحيح يُسجَّل كحركة جديدة.</div>
   `;
+  // التنقل بين التبويبات: تحديث التبويب النشط + محتوى القسم فقط، دون إعادة بناء الهيدر
+  // (الأرقام الإجمالية) أو شريط التبويبات بالكامل — تلك لا تتغيّر بمجرد تبديل القسم، وإعادة
+  // بنائها في كل نقرة كانت السبب الرئيسي لبطء التنقل بين الأقسام.
   root.querySelectorAll('nav.tabs button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(ACTIVE_TAB===btn.dataset.tab) return;
       if(ACTIVE_TAB==='tagcapture') taglogStopBarcodeScanner(); // أوقف كاميرا رصد التاجات عند الانتقال لقسم آخر
       ACTIVE_TAB = btn.dataset.tab;
-      renderAdminMode(root);
+      root.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===ACTIVE_TAB));
+      renderTabContent();
     });
   });
   document.getElementById('btnOpenIssuesModal').addEventListener('click', ()=>{
@@ -2737,7 +3102,12 @@ function renderViewerMode(root){
     <div id="viewerTabContent"></div>
   `;
   root.querySelectorAll('nav.tabs button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ VIEWER_ACTIVE_TAB = btn.dataset.tab; renderViewerMode(root); });
+    btn.addEventListener('click', ()=>{
+      if(VIEWER_ACTIVE_TAB===btn.dataset.tab) return;
+      VIEWER_ACTIVE_TAB = btn.dataset.tab;
+      root.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===VIEWER_ACTIVE_TAB));
+      renderViewerTabContent();
+    });
   });
   renderViewerTabContent();
 }
@@ -2788,12 +3158,15 @@ function renderGoodsViewerTab(el){
     </div>
   `;
   const inp = document.getElementById('goodsViewerSearch');
-  inp.addEventListener('input', ()=>{
+  const debouncedGoodsViewerRender = debounce(()=>{
     const pos = inp.selectionStart;
-    GOODS_VIEWER_SEARCH_Q = inp.value;
     renderGoodsViewerTab(el);
     const i2 = document.getElementById('goodsViewerSearch');
     if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  inp.addEventListener('input', ()=>{
+    GOODS_VIEWER_SEARCH_Q = inp.value;
+    debouncedGoodsViewerRender();
   });
   document.getElementById('goodsViewerAvailOnlyToggle').addEventListener('change', (e)=>{
     GOODS_SHOW_AVAILABLE_ONLY = e.target.checked;
@@ -2848,12 +3221,15 @@ function renderTagLogViewerTab(el){
     </div>
   `;
   const inp = document.getElementById('tlvSearchInput');
-  inp.addEventListener('input', ()=>{
+  const debouncedTlvRender = debounce(()=>{
     const pos = inp.selectionStart;
-    TLV_FILTER_QUERY = inp.value;
     renderTagLogViewerTab(el);
     const i2 = document.getElementById('tlvSearchInput');
     if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  inp.addEventListener('input', ()=>{
+    TLV_FILTER_QUERY = inp.value;
+    debouncedTlvRender();
   });
   document.getElementById('btnExportTlv').addEventListener('click', ()=>{
     // نفس فورم رفع Excel في الوضع الإداري تماماً: اسم القطعة، التاج، اسم الموقع (بلا أي عمود إضافي)
@@ -3047,7 +3423,7 @@ function wireQuickModeEvents(){
   });
 
   const searchInp = document.getElementById('qmSearch');
-  searchInp.addEventListener('input', ()=>{ qmRunSearch(searchInp.value); });
+  searchInp.addEventListener('input', debounce(()=>{ qmRunSearch(searchInp.value); }));
   searchInp.addEventListener('keydown', (e)=>{
     if(e.key==='ArrowDown'){ e.preventDefault(); QM_HL_INDEX = Math.min(QM_HL_INDEX+1, QM_CURRENT_RESULTS.length-1); qmRenderDropdown(); }
     else if(e.key==='ArrowUp'){ e.preventDefault(); QM_HL_INDEX = Math.max(QM_HL_INDEX-1, 0); qmRenderDropdown(); }
@@ -3082,7 +3458,7 @@ function wireQuickModeEvents(){
   const availTagsNow = (QM_DOMAIN==='stock' && itemNow && itemNow.tags) ? itemNow.tags.filter(t=>t.status==='available') : [];
   const tagInp = document.getElementById('qmTagInput');
   if(tagInp){
-    tagInp.addEventListener('input', ()=>qmRunTagSearch(tagInp.value));
+    tagInp.addEventListener('input', debounce(()=>qmRunTagSearch(tagInp.value)));
     tagInp.addEventListener('focus', ()=>qmRunTagSearch(tagInp.value));
     tagInp.addEventListener('keydown', (e)=>{
       if(e.key==='ArrowDown'){ e.preventDefault(); QM_TAG_HL_INDEX = Math.min(QM_TAG_HL_INDEX+1, QM_TAG_CURRENT_RESULTS.length-1); qmRenderTagDropdown(); }
@@ -3850,12 +4226,15 @@ function renderTagLogRecordsPanel(){
     </table></div>
   `;
   const filterInp = document.getElementById('tlRecordsFilter');
-  filterInp.addEventListener('input', ()=>{
+  const debouncedRecordsFilterRender = debounce(()=>{
     const pos = filterInp.selectionStart;
-    TAGLOG_FILTER_QUERY = filterInp.value;
     renderTagLogRecordsPanel();
     const f2 = document.getElementById('tlRecordsFilter');
     if(f2){ f2.focus(); try{ f2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  filterInp.addEventListener('input', ()=>{
+    TAGLOG_FILTER_QUERY = filterInp.value;
+    debouncedRecordsFilterRender();
   });
   panel.querySelectorAll('[data-sort]').forEach(th=>{
     th.addEventListener('click', ()=>taglogSetSort(th.dataset.sort));
@@ -4109,6 +4488,14 @@ function taglogChangeMaterial(){
 }
 
 /* ---- تسجيل التاج ---- */
+/* يعرض/يحدّث رسالة النجاح داخل مكانها الثابت في الشاشة (#tlFlash) مباشرة عبر DOM، دون إعادة
+   رسم بقية شاشة رصد التاجات — يُستخدم في حلقة التسجيل المتكررة (تسجيل تاج تلو الآخر) حيث تُستدعى
+   هذه الدالة عشرات/مئات المرات أثناء العمل. */
+function taglogSetFlash(msg){
+  TAGLOG_FLASH_MSG = msg;
+  const el = document.getElementById('tlFlash');
+  if(el) el.innerHTML = msg ? `<div class="msg ok" style="margin-bottom:0;">✅ ${esc(msg)}</div>` : '';
+}
 async function taglogHandleSave(){
   const tagInp = document.getElementById('tlTagInput');
   const btn = document.getElementById('btnTlSave');
@@ -4121,25 +4508,25 @@ async function taglogHandleSave(){
     if(s) s.focus({preventScroll:true});
     return;
   }
-  if(btn) btn.disabled = true;
+  // مؤشر تحميل فوري فقط أثناء انتظار تأكيد الحفظ الفعلي (Supabase) — لا نُظهر أي نجاح قبل ذلك
+  if(btn){ btn.disabled = true; btn.dataset.origLabel = btn.dataset.origLabel || btn.textContent; btn.textContent = '⏳ جارِ الحفظ…'; }
   const res = await taglogAddRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
   if(!res.ok){
     alert(res.msg);
-    if(btn) btn.disabled = false;
+    if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origLabel || '✅ تسجيل'; }
     if(tagInp){ tagInp.focus({preventScroll:true}); tagInp.select(); }
     return;
   }
-  // المادة المختارة تبقى كما هي عمداً بعد الحفظ (لا تُصفَّر) — حتى يسجّل المستخدم عدة تاجات
-  // متتالية لنفس المادة بدون إعادة البحث في كل مرة؛ فقط خانة التاج تُصفَّر وتُعاد إليها الكتابة.
-  TAGLOG_FLASH_MSG = `تم تسجيل التاج "${trim(tagVal)}" بنجاح.`;
-  renderTagCaptureTab(document.getElementById('tabContent'));
-  const t2 = document.getElementById('tlTagInput');
-  if(t2) t2.focus({preventScroll:true});
-  setTimeout(()=>{
-    TAGLOG_FLASH_MSG = null;
-    const el = document.getElementById('tlFlash');
-    if(el) el.remove();
-  }, 3500);
+  // تحديث مستهدف فقط: قائمة التاجات المسجَّلة (والعدّاد المعروض معها) + خانة التاج التالية —
+  // دون إعادة رسم بقية الشاشة (الموقع، الاختصارات، البحث عن المادة) التي لم يتغيّر شيء فيها.
+  // المادة المختارة تبقى كما هي عمداً (لا تُصفَّر) — حتى يسجّل المستخدم عدة تاجات متتالية لنفس
+  // المادة دون إعادة البحث كل مرة؛ فقط خانة التاج تُصفَّر وتُعاد إليها الكتابة فوراً.
+  if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origLabel || '✅ تسجيل'; }
+  if(tagInp) tagInp.value = '';
+  renderTagLogRecordsPanel();
+  taglogSetFlash(`تم تسجيل التاج "${trim(tagVal)}" بنجاح.`);
+  if(tagInp) tagInp.focus({preventScroll:true});
+  setTimeout(()=>{ taglogSetFlash(null); }, 3500);
 }
 
 /* ---- قراءة التاج بكاميرا الهاتف (بديل اختياري لجهاز Scanner الفيزيائي) ----
@@ -4576,7 +4963,7 @@ function renderTagCaptureTab(el){
         </div>
       </div>
       <div class="desc">اكتب اسم الموقع مرة واحدة، ابحث عن المادة واخترها، ثم امسح التاج — يُحفظ السجل فوراً وتنتقل تلقائياً لمادة جديدة بنفس الموقع.</div>
-      ${TAGLOG_FLASH_MSG ? `<div class="msg ok" id="tlFlash" style="margin-bottom:0;">✅ ${esc(TAGLOG_FLASH_MSG)}</div>` : ''}
+      <div id="tlFlash">${TAGLOG_FLASH_MSG ? `<div class="msg ok" style="margin-bottom:0;">✅ ${esc(TAGLOG_FLASH_MSG)}</div>` : ''}</div>
     </div>
 
     <div class="tl-stage">
@@ -4642,11 +5029,14 @@ function renderTagCaptureTab(el){
   `;
 
   const siteInp = document.getElementById('tlSite');
+  const debouncedSiteChecks = debounce(()=>{
+    taglogRenderSiteDropdown();
+    taglogRenderSiteWarning();
+  });
   siteInp.addEventListener('input', ()=>{
     TAGLOG_SITE = siteInp.value;
     try{ localStorage.setItem('wms_taglog_last_site', TAGLOG_SITE); }catch(e){}
-    taglogRenderSiteDropdown();
-    taglogRenderSiteWarning();
+    debouncedSiteChecks();
   });
   siteInp.addEventListener('focus', ()=>{ taglogRenderSiteDropdown(); });
   siteInp.addEventListener('blur', ()=>{ setTimeout(()=>{ const dd=document.getElementById('tlSiteDropdown'); if(dd) dd.innerHTML=''; }, 150); });
@@ -4665,7 +5055,7 @@ function renderTagCaptureTab(el){
   renderTagLogRecordsPanel();
 
   const searchInp = document.getElementById('tlMaterialSearch');
-  searchInp.addEventListener('input', ()=>{ taglogRunSearch(searchInp.value); });
+  searchInp.addEventListener('input', debounce(()=>{ taglogRunSearch(searchInp.value); }));
   searchInp.addEventListener('keydown', (e)=>{
     if(e.key==='ArrowDown'){ e.preventDefault(); TAGLOG_HL_INDEX = Math.min(TAGLOG_HL_INDEX+1, TAGLOG_SEARCH_RESULTS.length-1); taglogRenderDropdown(); }
     else if(e.key==='ArrowUp'){ e.preventDefault(); TAGLOG_HL_INDEX = Math.max(TAGLOG_HL_INDEX-1, 0); taglogRenderDropdown(); }
@@ -4863,7 +5253,17 @@ function renderReceiptsTab(el){
     </div>
     <div id="receiptDetailArea"></div>
   `;
-  document.getElementById('receiptsSearchInput').addEventListener('input', (e)=>{ RECEIPTS_SEARCH_Q = e.target.value; renderReceiptsTab(el); });
+  const receiptsSearchInp = document.getElementById('receiptsSearchInput');
+  const debouncedReceiptsRender = debounce(()=>{
+    const pos = receiptsSearchInp.selectionStart;
+    renderReceiptsTab(el);
+    const i2 = document.getElementById('receiptsSearchInput');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  receiptsSearchInp.addEventListener('input', ()=>{
+    RECEIPTS_SEARCH_Q = receiptsSearchInp.value; // فوري — أي زر (مثل التصدير) يقرأ القيمة الحالية دائماً
+    debouncedReceiptsRender();
+  });
   document.getElementById('receiptsDateFilter').addEventListener('change', (e)=>{ RECEIPTS_DATE_FILTER = e.target.value; renderReceiptsTab(el); });
   const fromInp = document.getElementById('receiptsDateFrom');
   const toInp = document.getElementById('receiptsDateTo');
@@ -5059,7 +5459,17 @@ function renderMovementsTab(el){
       </table></div>
     </div>
   `;
-  document.getElementById('movSearchInput').addEventListener('input', (e)=>{ MOV_SEARCH_Q = e.target.value; renderMovementsTab(el); });
+  const movSearchInp = document.getElementById('movSearchInput');
+  const debouncedMovRender = debounce(()=>{
+    const pos = movSearchInp.selectionStart;
+    renderMovementsTab(el);
+    const i2 = document.getElementById('movSearchInput');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  movSearchInp.addEventListener('input', ()=>{
+    MOV_SEARCH_Q = movSearchInp.value; // فوري — أي زر يقرأ القيمة الحالية دائماً
+    debouncedMovRender();
+  });
   document.getElementById('movTypeFilter').addEventListener('change', (e)=>{ MOV_TYPE_FILTER = e.target.value; renderMovementsTab(el); });
   document.getElementById('movDateFilter').addEventListener('change', (e)=>{ MOV_DATE_FILTER = e.target.value; renderMovementsTab(el); });
   const fromInp = document.getElementById('movDateFrom');
@@ -5200,12 +5610,12 @@ function wireModalQuickFilter(bodyEl, tableSelector){
   const inp = bodyEl.querySelector('.modal-filter');
   const table = bodyEl.querySelector(tableSelector || '.data');
   if(!inp || !table) return;
-  inp.addEventListener('input', ()=>{
+  inp.addEventListener('input', debounce(()=>{
     const q = inp.value.trim().toLowerCase();
     table.querySelectorAll('tbody tr').forEach(tr=>{
       tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
     });
-  });
+  }));
 }
 function openRecordsModal(title, renderFn, tableSelector){
   openModal(title, (bodyEl)=>{
@@ -5294,10 +5704,34 @@ document.addEventListener('keydown', function(e){
   t.dispatchEvent(new Event('change', {bubbles:true}));
 }, true);
 
-/* ---- تبويب: رفع SID (يدعم رفع عدة ملفات دفعة واحدة) ---- */
-let BATCH_SIDS = []; // [{filename, site, items:[{code,description,category,qty}], parseError}]
+/* ---- تبويب SID: مفتاح رئيسي يُبقي الطريقة الحالية (صرف SID) كما هي تماماً، ويضيف مراجعة استلام SID
+   متعددة المواقع كوضع عرض منفصل بجانبها — دون أي تغيير على منطق الصرف القديم. ---- */
+let SID_SUBVIEW = 'issue'; // 'issue' = الطريقة الحالية (صرف فعلي) | 'review' = مراجعة استلام SID الجديدة (قراءة/تقارير فقط)
 
 function renderSidTab(el){
+  el.innerHTML = `
+    <nav class="tabs" style="margin-bottom:14px;">
+      <button type="button" data-sidsub="issue" class="${SID_SUBVIEW==='issue'?'active':''}">📥 صرف SID (الطريقة الحالية)</button>
+      <button type="button" data-sidsub="review" class="${SID_SUBVIEW==='review'?'active':''}">📊 مراجعة استلام SID (متعدد المواقع)</button>
+    </nav>
+    <div id="sidSubviewArea"></div>
+  `;
+  el.querySelectorAll('[data-sidsub]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(SID_SUBVIEW===btn.dataset.sidsub) return;
+      SID_SUBVIEW = btn.dataset.sidsub;
+      renderSidTab(el);
+    });
+  });
+  const sub = document.getElementById('sidSubviewArea');
+  if(SID_SUBVIEW==='review') renderSidReviewSubview(sub);
+  else renderSidIssueSubview(sub);
+}
+
+/* ---- تبويب: رفع SID (يدعم رفع عدة ملفات دفعة واحدة) — الطريقة الحالية، دون أي تعديل في منطقها ---- */
+let BATCH_SIDS = []; // [{filename, site, items:[{code,description,category,qty}], parseError}]
+
+function renderSidIssueSubview(el){
   el.innerHTML = `
     ${renderIssuesInlineBanner(['UNMATCHED_MATERIAL'], 'sid')}
     <div class="panel">
@@ -5466,6 +5900,420 @@ function buildEntryCard(entry, idx){
   return div;
 }
 
+/* ============================================================
+   واجهة مراجعة استلام SID — متعدد الملفات/المواقع
+   ============================================================ */
+let SIDR_VIEW = 'upload'; // 'upload' | 'sites' | 'summary'
+
+function renderSidReviewSubview(el){
+  el.innerHTML = `
+    <div class="msg info">قسم مستقل تماماً لمراجعة ملفات SID متعددة المواقع والملفات (مقارنة الكمية المطلوبة بالكمية الموجودة فعلياً EXIST IN DWH من نفس الملف) — لا يُنفّذ أي صرف فعلي ولا يُغيّر رصيد المخزون أو سجل صرف SID.</div>
+    <nav class="tabs" style="margin-bottom:14px;">
+      <button type="button" data-sidrview="upload" class="${SIDR_VIEW==='upload'?'active':''}">⬆️ رفع ومعالجة الملفات</button>
+      <button type="button" data-sidrview="sites" class="${SIDR_VIEW==='sites'?'active':''}">📍 مراجعة حسب الموقع (${STATE.sidReview.imports.length})</button>
+      <button type="button" data-sidrview="summary" class="${SIDR_VIEW==='summary'?'active':''}">📊 ملخص النواقص لكل المواقع</button>
+    </nav>
+    <div id="sidrViewArea"></div>
+  `;
+  el.querySelectorAll('[data-sidrview]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ SIDR_VIEW = btn.dataset.sidrview; renderSidReviewSubview(el); });
+  });
+  const area = document.getElementById('sidrViewArea');
+  if(SIDR_VIEW==='sites') renderSidrSitesView(area);
+  else if(SIDR_VIEW==='summary') renderSidrSummaryView(area);
+  else renderSidrUploadView(area);
+}
+
+/* ---- 1) رفع ومعالجة الملفات ---- */
+function renderSidrUploadView(el){
+  el.innerHTML = `
+    <div class="panel">
+      <h2>رفع ملفات SID للمراجعة (متعدد الملفات، ومتعدد المواقع داخل كل ملف)</h2>
+      <div class="desc">ارفع ملفاً أو أكثر؛ كل ملف يمكن أن يحتوي عدة Sheets — كل Sheet يمثّل موقعاً باسمه. سيحاول النظام تحديد الأعمدة تلقائياً من الاسم والمحتوى والترتيب، وإن لم يكن واثقاً سيطلب منك مراجعتها يدوياً قبل الاستيراد.</div>
+      <div class="filebox">
+        <label class="flabel">ملف/ملفات SID للمراجعة (.xlsx)</label>
+        <input type="file" id="sidrFile" accept=".xlsx,.xls" multiple>
+      </div>
+      <div id="sidrMsg"></div>
+      <div class="btnrow"><button class="primary" id="btnSidrParse">فحص الملفات وتحضير المعاينة</button></div>
+    </div>
+    <div id="sidrPreviewArea"></div>
+  `;
+  document.getElementById('btnSidrParse').addEventListener('click', async ()=>{
+    const inp = document.getElementById('sidrFile');
+    if(!inp.files.length){ showMsg('sidrMsg','warn','اختر ملفاً واحداً أو أكثر أولاً.'); return; }
+    setBusy('btnSidrParse', true, 'جارِ الفحص…');
+    SIDR_BATCH = [];
+    let sheetsOk=0, sheetsErr=0;
+    for(const file of inp.files){
+      try{
+        const res = await sidrParseWorkbookFile(file);
+        res.sheets.forEach(s=>{
+          SIDR_BATCH.push({fileName: res.fileName, sheetName: s.sheetName, site: s.site, rows: s.rows||[], detection: s.detection, needsReview: !!s.needsReview, error: s.error||null, manuallyReviewed:false, skip:false});
+          if(s.error) sheetsErr++; else sheetsOk++;
+        });
+      }catch(e){
+        SIDR_BATCH.push({fileName:file.name, sheetName:'-', site:'-', rows:[], detection:null, needsReview:false, error:'تعذّرت قراءة الملف: '+e.message, manuallyReviewed:false, skip:false});
+        sheetsErr++;
+      }
+    }
+    sidrAnnotateBatchActions();
+    showMsg('sidrMsg', sheetsErr?'warn':'ok', `تم فحص ${inp.files.length} ملف: ${sheetsOk} شيت صالح${sheetsErr?`، ${sheetsErr} شيت به مشكلة (موضّحة أدناه)`:''}.`);
+    renderSidrBatchPreview();
+    setBusy('btnSidrParse', false, 'فحص الملفات وتحضير المعاينة');
+  });
+  if(SIDR_BATCH.length) renderSidrBatchPreview();
+}
+
+function renderSidrBatchPreview(){
+  const area = document.getElementById('sidrPreviewArea');
+  if(!area) return;
+  if(!SIDR_BATCH.length){ area.innerHTML=''; return; }
+  sidrAnnotateBatchActions();
+  const importable = SIDR_BATCH.filter(e=>!e.skip && !e.error && !e.needsReview && (e.action==='new'||e.action==='replace'));
+  const needReviewCount = SIDR_BATCH.filter(e=>!e.skip && !e.error && e.needsReview).length;
+  const errorCount = SIDR_BATCH.filter(e=>e.error).length;
+  const dupCount = SIDR_BATCH.filter(e=>e.action==='duplicate').length;
+
+  area.innerHTML = `
+    <div class="panel">
+      <h2>معاينة الدفعة (${SIDR_BATCH.length} شيت)</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="num">${importable.length}</div><div class="lbl">جاهز للاستيراد الآن</div></div>
+        <div class="kpi ${needReviewCount?'warn':''}"><div class="num">${needReviewCount}</div><div class="lbl">بحاجة لمراجعة الأعمدة</div></div>
+        <div class="kpi ${dupCount?'warn':''}"><div class="num">${dupCount}</div><div class="lbl">مكرر (سيُتجاهل)</div></div>
+        <div class="kpi ${errorCount?'bad':''}"><div class="num">${errorCount}</div><div class="lbl">به مشكلة</div></div>
+      </div>
+      <div class="msg info">الاستيراد سيستبدل أي استيراد سابق لنفس اسم الموقع إن اختلفت بياناته، ويتجاهل أي تطابق تام مع استيراد سابق تلقائياً.</div>
+      <div class="btnrow">
+        <button class="primary" id="btnSidrCommit">✅ تأكيد استيراد الجاهز (${importable.length})</button>
+        <button class="secondary" id="btnSidrCancelBatch">إلغاء الكل</button>
+      </div>
+      <div id="sidrCommitMsg"></div>
+    </div>
+    <div id="sidrBatchCards"></div>
+  `;
+  const cardsWrap = document.getElementById('sidrBatchCards');
+  SIDR_BATCH.forEach((entry, idx)=>{ cardsWrap.appendChild(buildSidrEntryCard(entry, idx)); });
+
+  document.getElementById('btnSidrCancelBatch').addEventListener('click', ()=>{ SIDR_BATCH=[]; area.innerHTML=''; });
+  document.getElementById('btnSidrCommit').addEventListener('click', async ()=>{
+    if(!importable.length){ showMsg('sidrCommitMsg','warn','لا يوجد أي شيت جاهز للاستيراد الآن.'); return; }
+    if(!confirm(`سيتم استيراد ${importable.length} موقع. أي موقع له استيراد سابق مختلف سيُستبدل بالكامل. هل تريد المتابعة؟`)) return;
+    setBusy('btnSidrCommit', true, 'جارِ الاستيراد…');
+    const res = await sidrCommitBatch();
+    if(res.ok){
+      alert(`تم استيراد ${res.importedCount} موقع بنجاح${res.skippedDup?`، وتم تجاهل ${res.skippedDup} شيت مطابق تماماً لاستيراد سابق`:''}.`);
+      area.innerHTML = '';
+      const host = document.getElementById('sidSubviewArea');
+      if(host) renderSidTab(host);
+    } else {
+      setBusy('btnSidrCommit', false, `✅ تأكيد استيراد الجاهز (${importable.length})`);
+      showMsg('sidrCommitMsg','bad', res.msg);
+    }
+  });
+}
+
+function buildSidrEntryCard(entry, idx){
+  const div = document.createElement('div');
+  div.className = 'panel';
+  if(entry.error){
+    div.innerHTML = `<h2>❌ ${esc(entry.fileName)} — ${esc(entry.sheetName)}</h2><div class="msg bad">${esc(entry.error)}</div>`;
+    return div;
+  }
+  const statusPill = entry.skip ? '<span class="pill bad">مُتجاهَل</span>'
+    : entry.needsReview ? '<span class="pill warn">بحاجة لمراجعة الأعمدة</span>'
+    : entry.action==='duplicate' ? '<span class="pill bad">مكرر — سيُتجاهل</span>'
+    : entry.action==='replace' ? '<span class="pill warn">سيستبدل استيراداً سابقاً</span>'
+    : entry.action==='conflict' ? '<span class="pill bad">تعارض اسم موقع ضمن الدفعة</span>'
+    : '<span class="pill ok">جديد</span>';
+  const totals = entry.rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received}), {requested:0,received:0});
+  div.innerHTML = `
+    <h2>${esc(entry.fileName)} — ${esc(entry.sheetName)} ${statusPill}</h2>
+    <label class="flabel">اسم الموقع</label>
+    <input type="text" class="mono sidrSiteInput" data-idx="${idx}" value="${esc(entry.site)}" style="max-width:260px;">
+    ${entry.actionNote?`<div class="msg ${entry.action==='replace'?'warn':'bad'}" style="margin-top:8px;">${esc(entry.actionNote)}</div>`:''}
+    <div class="kpi-grid" style="margin-top:14px;">
+      <div class="kpi"><div class="num">${entry.rows.length}</div><div class="lbl">أصناف</div></div>
+      <div class="kpi"><div class="num">${totals.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
+      <div class="kpi"><div class="num">${totals.received}</div><div class="lbl">إجمالي المستلم</div></div>
+    </div>
+    <div class="btnrow">
+      ${!entry.skip?`<button class="secondary" data-sidrreview="${idx}" type="button">🛠️ مراجعة تعيين الأعمدة</button>`:''}
+      <button class="secondary" data-sidrskip="${idx}" type="button">${entry.skip?'إلغاء التجاهل':'تجاهل هذا الشيت'}</button>
+    </div>
+    ${entry.rows.length ? `
+    <div class="tablewrap" style="margin-top:10px;"><table class="data">
+      <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th></tr></thead>
+      <tbody>
+        ${entry.rows.slice(0,5).map(r=>`<tr><td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td><td>${r.requested}</td><td>${r.received}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${entry.rows.length>5?`<div class="desc">+ ${entry.rows.length-5} صف إضافي…</div>`:''}
+    ` : ''}
+  `;
+  div.querySelector('.sidrSiteInput').addEventListener('change', (e)=>{
+    SIDR_BATCH[idx].site = e.target.value;
+    renderSidrBatchPreview();
+  });
+  const reviewBtn = div.querySelector('[data-sidrreview]');
+  if(reviewBtn) reviewBtn.addEventListener('click', ()=> openSidrColumnReviewModal(idx));
+  div.querySelector('[data-sidrskip]').addEventListener('click', ()=>{
+    SIDR_BATCH[idx].skip = !SIDR_BATCH[idx].skip;
+    renderSidrBatchPreview();
+  });
+  return div;
+}
+
+function openSidrColumnReviewModal(idx){
+  const entry = SIDR_BATCH[idx];
+  const det = entry.detection;
+  if(!det){ alert('تعذّر عرض الأعمدة لهذا الشيت.'); return; }
+  const sampleRows = det.dataRows.slice(0,5);
+  const colCount = Math.max(det.header.length, ...sampleRows.map(r=>r.length), 1);
+  const colLabel = (c)=> `عمود ${c+1}${det.header[c]?` ("${esc(trim(det.header[c]))}")`:''} — مثال: ${esc(trim((sampleRows[0]||[])[c] ?? ''))}`;
+  const fieldDefs = [
+    {key:'cat', label:'Product code (كما في ملفك — قد تكون فعلياً تصنيف/نوع المادة)'},
+    {key:'pdesc', label:'Product description (كما في ملفك — قد تكون فعلياً كود/رقم المادة)'},
+    {key:'desc', label:'Description (وصف المادة)'},
+    {key:'qty', label:'Quantity — الكمية المطلوبة'},
+    {key:'received', label:'EXIST IN DWH — الكمية المستلمة'},
+  ];
+  openModal(`🛠️ مراجعة تعيين الأعمدة — ${esc(entry.fileName)} / ${esc(entry.sheetName)}`, (bodyEl)=>{
+    bodyEl.innerHTML = `
+      <div class="desc">اختر العمود الصحيح لكل حقل. الأعمدة المقترحة تلقائياً محدَّدة مسبقاً حيثما أمكن — صحّحها إن لزم، ثم أكِّد.</div>
+      ${fieldDefs.map(f=>`
+        <div style="margin-bottom:12px;">
+          <label class="flabel">${f.label}</label>
+          <select id="sidrMapSel_${f.key}" style="width:100%;">
+            <option value="">— لا يوجد —</option>
+            ${Array.from({length:colCount}).map((_,c)=>`<option value="${c}" ${det.cols[f.key]===c?'selected':''}>${colLabel(c)}</option>`).join('')}
+          </select>
+        </div>
+      `).join('')}
+      <div class="tablewrap"><table class="data">
+        <thead><tr>${Array.from({length:colCount}).map((_,c)=>`<th>عمود ${c+1}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${sampleRows.map(r=>`<tr>${Array.from({length:colCount}).map((_,c)=>`<td>${esc(trim(r[c]??''))}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div class="btnrow" style="margin-top:14px;"><button class="primary" id="btnSidrConfirmMap">تأكيد التعيين واستخراج البيانات</button></div>
+      <div id="sidrMapMsg"></div>
+    `;
+    bodyEl.querySelector('#btnSidrConfirmMap').addEventListener('click', ()=>{
+      const getVal = (k)=>{ const v = bodyEl.querySelector('#sidrMapSel_'+k).value; return v===''?null:Number(v); };
+      const manualCols = {cat:getVal('cat'), pdesc:getVal('pdesc'), desc:getVal('desc'), qty:getVal('qty'), received:getVal('received')};
+      if(manualCols.qty===null || manualCols.received===null){
+        bodyEl.querySelector('#sidrMapMsg').innerHTML = `<div class="msg bad">يجب تحديد عمودي الكمية المطلوبة والمستلمة على الأقل.</div>`;
+        return;
+      }
+      sidrRebuildWithManualCols(entry, manualCols);
+      closeModal();
+      renderSidrBatchPreview();
+    });
+  }, {maxWidth:'760px'});
+}
+
+/* ---- 2) مراجعة حسب الموقع ---- */
+let SIDR_SELECTED_SITE = null;
+let SIDR_SITE_SEARCH = '';
+let SIDR_SITE_SHORTAGE_ONLY = false;
+
+function renderSidrSitesView(el){
+  const sites = sidrSitesList();
+  if(!SIDR_SELECTED_SITE || !sites.includes(SIDR_SELECTED_SITE)) SIDR_SELECTED_SITE = sites[0] || null;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>مراجعة حسب الموقع</h2>
+      ${sites.length ? `
+      <div class="grid2">
+        <select id="sidrSiteSelect">
+          ${sites.map(s=>`<option value="${esc(s)}" ${SIDR_SELECTED_SITE===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select>
+        <input type="text" id="sidrSiteSearch" placeholder="ابحث باسم المادة أو الكود..." value="${esc(SIDR_SITE_SEARCH)}">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;">
+        <input type="checkbox" id="sidrShortageOnly" ${SIDR_SITE_SHORTAGE_ONLY?'checked':''}> إظهار المواد الناقصة فقط
+      </label>
+      ` : `<div class="msg info">لا توجد مواقع مستوردة بعد — ارفع ملفات من تبويب "رفع ومعالجة الملفات".</div>`}
+    </div>
+    <div id="sidrSiteDetailArea"></div>
+  `;
+  if(!sites.length) return;
+  document.getElementById('sidrSiteSelect').addEventListener('change', (e)=>{ SIDR_SELECTED_SITE = e.target.value; renderSidrSiteDetail(); });
+  const searchInp = document.getElementById('sidrSiteSearch');
+  const debouncedSiteDetail = debounce(()=>{
+    const pos = searchInp.selectionStart;
+    renderSidrSiteDetail();
+    const i2 = document.getElementById('sidrSiteSearch');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos,pos); }catch(e){} }
+  });
+  searchInp.addEventListener('input', ()=>{ SIDR_SITE_SEARCH = searchInp.value; debouncedSiteDetail(); });
+  document.getElementById('sidrShortageOnly').addEventListener('change', (e)=>{ SIDR_SITE_SHORTAGE_ONLY = e.target.checked; renderSidrSiteDetail(); });
+  renderSidrSiteDetail();
+}
+
+function renderSidrSiteDetail(){
+  const area = document.getElementById('sidrSiteDetailArea');
+  if(!area || !SIDR_SELECTED_SITE) return;
+  const imp = sidrImportForSite(SIDR_SELECTED_SITE);
+  if(!imp){ area.innerHTML=''; return; }
+  let rows = sidrRowsWithStatus(imp.rows);
+  const q = trim(SIDR_SITE_SEARCH).toLowerCase();
+  if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
+  if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
+  const totals = rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received, shortage:s.shortage+r.shortage}), {requested:0,received:0,shortage:0});
+  area.innerHTML = `
+    <div class="panel">
+      <h2>${esc(imp.site)}</h2>
+      <div class="desc">الملف: ${esc(imp.fileName)} (${esc(imp.sheetName)}) — تاريخ الاستيراد: ${esc(imp.importedAt.slice(0,10))}${imp.autoDetected?'':' — روجعت أعمدته يدوياً'}</div>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="num">${rows.length}</div><div class="lbl">عدد الأصناف المعروضة</div></div>
+        <div class="kpi"><div class="num">${totals.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
+        <div class="kpi"><div class="num">${totals.received}</div><div class="lbl">إجمالي المستلم</div></div>
+        <div class="kpi ${totals.shortage>0?'warn':''}"><div class="num">${totals.shortage}</div><div class="lbl">إجمالي النقص</div></div>
+      </div>
+      <div class="btnrow">
+        <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
+        <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
+      </div>
+      <div class="tablewrap"><table class="data">
+        <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr>
+            <td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td>
+            <td>${r.requested}</td><td>${r.received}</td>
+            <td>${r.shortage>0?`<span class="tag-warn">${r.shortage}</span>`:(r.surplus>0?`+${r.surplus}`:'0')}</td>
+            <td>${r.status==='ناقص'?'<span class="pill warn">ناقص</span>':r.status==='زيادة'?'<span class="pill bad">زيادة</span>':'<span class="pill ok">مكتمل</span>'}</td>
+          </tr>`).join('') || `<tr><td colspan="7" class="empty">لا توجد نتائج مطابقة</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+  document.getElementById('btnSidrExportSite').addEventListener('click', ()=> sidrDownloadSiteDetail(imp.site));
+  document.getElementById('btnSidrDeleteImport').addEventListener('click', async ()=>{
+    if(!confirm(`هل أنت متأكد من حذف استيراد الموقع "${imp.site}"؟ هذا لا يؤثر على أي بيانات أخرى (الرصيد، صرف SID، السجلات)، ويمكنك رفعه من جديد لاحقاً.`)) return;
+    const res = await sidrDeleteImport(imp.id);
+    alert(res.msg);
+    if(res.ok){ SIDR_SELECTED_SITE=null; renderApp(); }
+  });
+}
+
+/* ---- 3) ملخص النواقص لكل المواقع ---- */
+let SIDR_SUMMARY_SEARCH = '';
+let SIDR_SUMMARY_SITE_FILTER = 'all';
+let SIDR_SUMMARY_GROUP_BY_MATERIAL = false;
+
+function renderSidrSummaryView(el){
+  const g = sidrGlobalSummary();
+  const sites = sidrSitesList();
+  el.innerHTML = `
+    <div class="panel">
+      <h2>ملخص النواقص لجميع المواقع</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="num">${g.sitesCount}</div><div class="lbl">عدد المواقع المستوردة</div></div>
+        <div class="kpi ${g.sitesWithShortageCount?'warn':''}"><div class="num">${g.sitesWithShortageCount}</div><div class="lbl">مواقع بها نواقص</div></div>
+        <div class="kpi"><div class="num">${g.totalRequested}</div><div class="lbl">إجمالي المطلوب</div></div>
+        <div class="kpi"><div class="num">${g.totalReceived}</div><div class="lbl">إجمالي المستلم</div></div>
+        <div class="kpi ${g.totalShortage?'warn':''}"><div class="num">${g.totalShortage}</div><div class="lbl">إجمالي النواقص</div></div>
+      </div>
+      ${sites.length ? `
+      <div class="grid2" style="margin-top:10px;">
+        <input type="text" id="sidrSummarySearch" placeholder="ابحث باسم المادة أو الكود..." value="${esc(SIDR_SUMMARY_SEARCH)}">
+        <select id="sidrSummarySiteFilter">
+          <option value="all" ${SIDR_SUMMARY_SITE_FILTER==='all'?'selected':''}>كل المواقع</option>
+          ${sites.map(s=>`<option value="${esc(s)}" ${SIDR_SUMMARY_SITE_FILTER===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;">
+        <input type="checkbox" id="sidrGroupByMaterial" ${SIDR_SUMMARY_GROUP_BY_MATERIAL?'checked':''}> تجميع حسب المادة عبر كل المواقع (مع الاحتفاظ بتفاصيل كل موقع)
+      </label>
+      <div class="btnrow" style="margin-top:10px;">
+        <button class="secondary" id="btnSidrExportFull">📥 تقرير كامل (كل المواقع والمواد)</button>
+        <button class="secondary" id="btnSidrExportAllShort">📥 تقرير النواقص لكل المواقع</button>
+        <button class="secondary" id="btnSidrExportByMaterial">📥 ملخص النواقص حسب المادة</button>
+      </div>
+      ` : ''}
+    </div>
+    <div id="sidrSummaryTableArea"></div>
+  `;
+  if(!sites.length) return;
+  const searchInp = document.getElementById('sidrSummarySearch');
+  const debouncedSummary = debounce(()=>{
+    const pos = searchInp.selectionStart;
+    renderSidrSummaryTable();
+    const i2 = document.getElementById('sidrSummarySearch');
+    if(i2){ i2.focus(); try{ i2.setSelectionRange(pos,pos); }catch(e){} }
+  });
+  searchInp.addEventListener('input', ()=>{ SIDR_SUMMARY_SEARCH = searchInp.value; debouncedSummary(); });
+  document.getElementById('sidrSummarySiteFilter').addEventListener('change', (e)=>{ SIDR_SUMMARY_SITE_FILTER = e.target.value; renderSidrSummaryTable(); });
+  document.getElementById('sidrGroupByMaterial').addEventListener('change', (e)=>{ SIDR_SUMMARY_GROUP_BY_MATERIAL = e.target.checked; renderSidrSummaryTable(); });
+  document.getElementById('btnSidrExportFull').addEventListener('click', sidrDownloadFullReport);
+  document.getElementById('btnSidrExportAllShort').addEventListener('click', ()=> sidrDownloadAllShortages());
+  document.getElementById('btnSidrExportByMaterial').addEventListener('click', sidrDownloadMaterialSummary);
+  renderSidrSummaryTable();
+}
+
+function renderSidrSummaryTable(){
+  const area = document.getElementById('sidrSummaryTableArea');
+  if(!area) return;
+  const q = trim(SIDR_SUMMARY_SEARCH).toLowerCase();
+  if(SIDR_SUMMARY_GROUP_BY_MATERIAL){
+    let agg = sidrMaterialAggregate();
+    if(q) agg = agg.filter(a=> (a.productCode+' '+a.productDescription+' '+a.description).toLowerCase().includes(q));
+    if(SIDR_SUMMARY_SITE_FILTER!=='all') agg = agg.filter(a=> a.sites.some(s=>s.site===SIDR_SUMMARY_SITE_FILTER));
+    area.innerHTML = `
+      <div class="panel">
+        <div class="tablewrap"><table class="data">
+          <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>إجمالي المطلوب</th><th>إجمالي المستلم</th><th>إجمالي النقص</th><th>عدد المواقع</th><th></th></tr></thead>
+          <tbody>
+            ${agg.map((a,i)=>`<tr>
+              <td>${esc(a.productCode)}</td><td>${esc(a.productDescription)}</td><td>${esc(a.description)}</td>
+              <td>${a.totalRequested}</td><td>${a.totalReceived}</td>
+              <td>${a.totalShortage>0?`<span class="tag-warn">${a.totalShortage}</span>`:'0'}</td>
+              <td>${a.sites.length}</td>
+              <td><button class="secondary" data-sidragg="${i}" style="padding:4px 10px;font-size:11px;">تفاصيل حسب الموقع</button></td>
+            </tr>`).join('') || `<tr><td colspan="8" class="empty">لا توجد نتائج</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+      <div id="sidrAggDetailArea"></div>
+    `;
+    area.querySelectorAll('[data-sidragg]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const a = agg[Number(btn.dataset.sidragg)];
+        const detailArea = document.getElementById('sidrAggDetailArea');
+        detailArea.innerHTML = `
+          <div class="panel">
+            <h3>${esc(a.productDescription||a.productCode)} — حسب الموقع</h3>
+            <div class="tablewrap"><table class="data">
+              <thead><tr><th>الموقع</th><th>المطلوب</th><th>المستلم</th><th>النقص</th><th>الحالة</th></tr></thead>
+              <tbody>${a.sites.map(s=>`<tr><td>${esc(s.site)}</td><td>${s.requested}</td><td>${s.received}</td><td>${s.shortage>0?s.shortage:0}</td><td>${s.status}</td></tr>`).join('')}</tbody>
+            </table></div>
+          </div>
+        `;
+      });
+    });
+    return;
+  }
+  let rows = sidrAllRowsFlat().filter(r=>r.status==='ناقص');
+  if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
+  if(SIDR_SUMMARY_SITE_FILTER!=='all') rows = rows.filter(r=>r.site===SIDR_SUMMARY_SITE_FILTER);
+  area.innerHTML = `
+    <div class="panel">
+      <div class="tablewrap"><table class="data">
+        <thead><tr><th>الموقع</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr>
+            <td>${esc(r.site)}</td><td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td>
+            <td>${r.requested}</td><td>${r.received}</td><td><span class="tag-warn">${r.shortage}</span></td>
+          </tr>`).join('') || `<tr><td colspan="7" class="empty">لا توجد نواقص مطابقة 🎉</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
 /* ---- تبويب: مواد 4G المتوفرة ---- */
 let STOCK_SEARCH_Q = ''; // بحث حي موحّد على كل أعمدة "مواد 4G المتوفرة" (مشترك بين الوضع الإداري ووضع القراءة فقط)
 function renderStockTab(el){
@@ -5516,12 +6364,15 @@ function renderStockTab(el){
     </div>
   `;
   const searchInp = document.getElementById('stockSearchInput');
-  searchInp.addEventListener('input', ()=>{
+  const debouncedStockRender = debounce(()=>{
     const pos = searchInp.selectionStart;
-    STOCK_SEARCH_Q = searchInp.value;
     renderStockTab(el);
     const i2 = document.getElementById('stockSearchInput');
     if(i2){ i2.focus(); try{ i2.setSelectionRange(pos, pos); }catch(e){} }
+  });
+  searchInp.addEventListener('input', ()=>{
+    STOCK_SEARCH_Q = searchInp.value;
+    debouncedStockRender();
   });
   document.getElementById('stockHideZeroToggle').addEventListener('change', (e)=>{
     STOCK_HIDE_ZERO = e.target.checked;
@@ -5768,7 +6619,7 @@ function renderGoodsTab(el){
     });
   });
 
-  document.getElementById('goodsSearchInput').addEventListener('input', (e)=>{
+  document.getElementById('goodsSearchInput').addEventListener('input', debounce((e)=>{
     const results = searchGoodsCatalog(e.target.value);
     const out = document.getElementById('goodsSearchResults');
     if(!e.target.value.trim()){ out.innerHTML=''; return; }
@@ -5776,9 +6627,9 @@ function renderGoodsTab(el){
       <thead><tr><th>اسم الصنف</th><th>التصنيف</th><th>الوحدة</th><th>إجمالي مُدخَل</th><th>إجمالي مُخرَج</th><th>المتبقي</th></tr></thead>
       <tbody>${results.map(it=>`<tr><td>${esc(it.name)}</td><td>${esc(it.category)}</td><td>${esc(it.unit)}</td><td>${it.totalIn}</td><td>${it.totalOut}</td><td>${it.totalIn-it.totalOut}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">لا نتائج</td></tr>'}</tbody>
     </table></div>`;
-  });
+  }));
 
-  document.getElementById('quickSearchInput').addEventListener('input', (e)=>{
+  document.getElementById('quickSearchInput').addEventListener('input', debounce((e)=>{
     const q = e.target.value;
     const results = searchGoodsCatalog(q).slice(0,8);
     const out = document.getElementById('quickSearchResults');
@@ -5806,7 +6657,7 @@ function renderGoodsTab(el){
         }
       });
     }
-  });
+  }));
 
   document.getElementById('btnQuickSubmit').addEventListener('click', async ()=>{
     setBusy('btnQuickSubmit', true, 'جارِ التسجيل…');
