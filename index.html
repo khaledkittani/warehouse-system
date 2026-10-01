@@ -1808,40 +1808,13 @@ function sidrFindColByAliases(normHeader, aliases, excludeAliases, limit){
   }
   return -1;
 }
-/* يبحث عن صف العناوين الحقيقي ضمن أول عدة صفوف. بعض ملفات SID الحقيقية (مثل نموذج "PLANT SPECIFICATION")
-   تحتوي على ترويسة/بيانات تعريفية (مُعِد الملف، تاريخ، رقم مراجعة، اسم المشروع والموقع...) قد تمتد لأكثر
-   من 10 صفوف قبل صف عناوين الأعمدة الفعلي — لذا نوسّع نطاق البحث، ونفضّل عند الحاجة الصفَّ الذي "يتكرر
-   شكله" (نفس الأعمدة المملوءة) عبر أكبر عدد من الصفوف التالية، بدل أول صف فيه 3 خلايا غير فارغة فقط (والذي
-   قد يلتقط بالخطأ صف بيانات تعريفية متناثرة مثل "Doc respons/Approved | Checked | Date | Rev. | File"). */
+/* صف عناوين الأعمدة في تنسيق ملف SID الرسمي ثابت دائماً عند الصف رقم 12 (فهرسة من الصفر = 11) —
+   الصفوف من 1 إلى 11 (ترويسة/بيانات تعريفية: مُعِد الملف، تاريخ، رقم مراجعة، اسم المشروع والموقع...)
+   تُتجاهل بالكامل دائماً بصرف النظر عن محتواها، في كل Sheet من كل ملف مرفوع (كل Sheet = موقع مستقل).
+   هذا قرار ثابت حسب تنسيق الملف المعتمد، وليس تخميناً أو اكتشافاً تلقائياً. */
+const SIDR_FIXED_HEADER_ROW_IDX = 11; // الصف 12 (فهرسة من الصفر)
 function sidrFindHeaderRowIdx(aoa){
-  const scanLimit = Math.min(30, aoa.length);
-  for(let i=0;i<scanLimit;i++){
-    const norm = (aoa[i]||[]).map(c=>sidrNormHeader(c));
-    const hasQty = norm.some(h=> SIDR_AL_QTY.includes(h));
-    const hasRecv = norm.some(h=> h && SIDR_AL_RECEIVED.some(a=>h.includes(a)));
-    if(hasQty || hasRecv) return i;
-  }
-  let bestIdx = -1, bestScore = -1;
-  for(let i=0;i<scanLimit;i++){
-    const row = aoa[i]||[];
-    const cols = [];
-    row.forEach((v,c)=>{ if(trim(v)!=='') cols.push(c); });
-    if(cols.length<3) continue;
-    const lookahead = Math.min(20, aoa.length-i-1);
-    let score = 0;
-    for(let k=1;k<=lookahead;k++){
-      const nextRow = aoa[i+k]||[];
-      const overlap = cols.filter(c=> trim(nextRow[c])!=='').length;
-      if(overlap >= Math.min(2, cols.length)) score++;
-    }
-    if(score > bestScore){ bestScore = score; bestIdx = i; }
-  }
-  if(bestIdx!==-1 && bestScore>=3) return bestIdx; // يتكرر شكله عبر 3 صفوف لاحقة على الأقل = على الأرجح صف عناوين حقيقي فوق جدول بيانات
-  for(let i=0;i<scanLimit;i++){
-    const nonEmpty = (aoa[i]||[]).filter(c=>trim(c)!=='').length;
-    if(nonEmpty>=3) return i;
-  }
-  return 0;
+  return SIDR_FIXED_HEADER_ROW_IDX;
 }
 /* التعرف على الأعمدة الخمسة: Product code (قد تكون فعلياً تصنيف/نوع)، Product description (قد تكون فعلياً
    الكود الحقيقي)، Description (الوصف)، Quantity (مطلوب)، EXIST IN DWH (مستلم) — بالاسم أولاً، ثم بالمحتوى
@@ -1936,6 +1909,11 @@ async function sidrParseWorkbookFile(file){
       return;
     }
     const headerRowIdx = sidrFindHeaderRowIdx(aoa);
+    const headerRowHasContent = (aoa[headerRowIdx]||[]).some(c=>trim(c)!=='');
+    if(!headerRowHasContent){
+      sheets.push({sheetName, site: trim(sheetName)||sheetName, error:`لا يوجد صف عناوين أعمدة في السطر ${headerRowIdx+1} كما هو متوقع — تحقق من تنسيق هذا الشيت`, rows:[], detection:null, needsReview:false});
+      return;
+    }
     const detection = sidrDetectColumns(aoa, headerRowIdx);
     const rows = (detection.cols.qty!==null || detection.cols.received!==null) ? sidrBuildRows(detection) : [];
     const needsReview = detection.needsReview || detection.cols.qty===null || detection.cols.received===null || !rows.length;
