@@ -370,6 +370,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
      بدون أي صندوق msg يشغل مساحة إضافية؛ يظهر فقط إن وُجدت قائمة معتمدة مرفوعة أصلاً. */
   .tl-site-warn{color:var(--rust);font-size:12.5px;font-weight:700;margin-top:5px;}
   .tl-site-ok{color:var(--green);font-size:12.5px;font-weight:700;margin-top:5px;}
+  .tl-site-address{color:var(--muted);font-size:12px;font-weight:600;margin-top:2px;}
   .tl-material-current{
     background:var(--paper);border:1.5px solid var(--steel);border-radius:8px;padding:12px 14px;
   }
@@ -600,7 +601,7 @@ let STATE = {
   customValues: {},      // { sectionKey: { itemKey: { colId: value } } } — قيم الأعمدة المخصصة لكل صنف
   tagLog: [],   // [{id, tag, materialName, source, siteName, installDate, createdAt}] — سجل "رصد التاجات" المستقل، مستقل تماماً عن STATE.stock
   tagLogTemplate: null, // {fileName, base64, uploadedAt} — قالب إكسل "رصد التاجات" الذي يرفعه الأدمن مرة واحدة (إخراج فقط، لا يُستخرج منه أي قائمة مواد)
-  tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة أسماء المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
+  tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ list: [{name, address}] — عنصر نصي قديم (من قبل إضافة العنوان) يُطبَّع تلقائياً عند القراءة عبر taglogApprovedSitesList() إلى {name, address:''}. رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
   tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
   sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected,rawHeader:[...],rawRows:[[...]]}] — rawHeader/rawRows: نسخة كاملة غير معالَجة من كل الأعمدة والصفوف كما في Excel الأصلي، للعرض في شاشة "الملف الأصلي كاملاً" فقط
 };
@@ -4045,36 +4046,75 @@ function taglogSearchAllMaterials(q){
    الإنجليزية. طالما لم تُرفع أي قائمة بعد (list فارغة)، لا يوجد أي تحقق أو منع — نفس السلوك القديم
    يبقى كما هو تماماً حتى يُفعَّل هذا الإعداد فعلياً. ---- */
 function taglogNormSite(s){ return trim(s).replace(/\s+/g,' ').toLowerCase(); }
+/* يُعيد قائمة المواقع المعتمدة دائماً بصيغة موحّدة {name, address} — عنصر نصي قديم محفوظ من قبل إضافة
+   خانة العنوان يُطبَّع تلقائياً إلى {name: النص, address:''} حتى لا تنكسر القوائم المحفوظة سابقاً. */
 function taglogApprovedSitesList(){
-  return (STATE.tagApprovedSites && Array.isArray(STATE.tagApprovedSites.list)) ? STATE.tagApprovedSites.list : [];
+  const raw = (STATE.tagApprovedSites && Array.isArray(STATE.tagApprovedSites.list)) ? STATE.tagApprovedSites.list : [];
+  return raw.map(e=> typeof e==='string'
+    ? {name: trim(e), address: ''}
+    : {name: trim(e && e.name || ''), address: trim(e && e.address || '')}
+  ).filter(e=>e.name);
 }
 function taglogIsSiteApproved(site){
   const list = taglogApprovedSitesList();
   if(!list.length) return true;
   const n = taglogNormSite(site);
   if(!n) return false;
-  return list.some(s=>taglogNormSite(s)===n);
+  return list.some(s=>taglogNormSite(s.name)===n);
+}
+/* يعيد بيانات الموقع المعتمد المطابق (الاسم والعنوان) أو null إن لم يكن معتمداً — تُستخدم لعرض العنوان
+   مباشرةً أسفل خانة اختيار الموقع فور مطابقة الاسم. */
+function taglogFindApprovedSite(site){
+  const list = taglogApprovedSitesList();
+  const n = taglogNormSite(site);
+  if(!n) return null;
+  return list.find(s=>taglogNormSite(s.name)===n) || null;
 }
 function taglogSiteSuggestions(q){
   const list = taglogApprovedSitesList();
   const ql = taglogNormSite(q);
   if(!ql) return list.slice(0,30);
-  return list.filter(s=>taglogNormSite(s).includes(ql)).slice(0,30);
+  return list.filter(s=>taglogNormSite(s.name).includes(ql)).slice(0,30);
 }
+/* يتحقق إن كان نص رأس عمود مطابقاً لأحد الأنماط المتوقعة لعمود Site Name أو Site Address (إنجليزي أو
+   عربي، بغض النظر عن حالة الأحرف أو المسافات الزائدة) — لاكتشاف ترتيب الأعمدة تلقائياً من صف العناوين. */
+function taglogSitesColMatches(s, patterns){
+  const n = trim(s).toLowerCase().replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
+  return patterns.some(p=>p.test(n));
+}
+/* يقرأ ملف قائمة المواقع المعتمدة: عمودان — Site Name (اسم الموقع) و Site Address (عنوان الموقع).
+   يكتشف صف العناوين تلقائياً بمطابقة اسمي العمودين (إنجليزي أو عربي)؛ إن لم يُكتشف صف عناوين واضح،
+   يُفترض العمود الأول = الاسم والثاني = العنوان بدءاً من أول صف (نفس سلوك النسخة السابقة أحادية العمود).
+   الأسماء المكررة: يُحتفظ بأول ظهور فقط، ويُحتسب الباقي كتكرار للتنبيه عنه دون إيقاف الاستيراد. */
 function taglogParseSitesWorkbook(wb){
+  const out = {list:[], duplicateCount:0, missingAddressCount:0};
   const ws = wb.Sheets[wb.SheetNames[0]];
-  if(!ws || !ws['!ref']) return [];
+  if(!ws || !ws['!ref']) return out;
   const range = XLSX.utils.decode_range(ws['!ref']);
-  const seen = new Map();
-  for(let r=range.s.r; r<=range.e.r; r++){
-    const v = taglogImportCellText(ws, r, range.s.c);
-    const t = trim(v).replace(/\s+/g,' ');
-    if(!t) continue;
-    if(!seen.size && r===range.s.r && /^(اسم\s*)?الموقع$|^site\s*name$|^site$/i.test(t)) continue; // صف عناوين محتمل فقط
-    const key = t.toLowerCase();
-    if(!seen.has(key)) seen.set(key, t);
+  let nameCol = range.s.c, addrCol = range.s.c+1, startRow = range.s.r;
+  const headerCells = [];
+  for(let c=range.s.c; c<=range.e.c; c++) headerCells.push(taglogImportCellText(ws, range.s.r, c));
+  const nameIdx = headerCells.findIndex(t=>taglogSitesColMatches(t, [/^site\s*name$/, /^name$/, /^اسم\s*الموقع$/, /^الموقع$/]));
+  const addrIdx = headerCells.findIndex(t=>taglogSitesColMatches(t, [/^site\s*address$/, /^address$/, /^عنوان\s*الموقع$/, /^العنوان$/]));
+  if(nameIdx>=0 && addrIdx>=0){
+    nameCol = range.s.c+nameIdx; addrCol = range.s.c+addrIdx; startRow = range.s.r+1;
+  } else if(nameIdx>=0){
+    nameCol = range.s.c+nameIdx; addrCol = nameCol+1; startRow = range.s.r+1;
+  } else if(addrIdx>=0){
+    addrCol = range.s.c+addrIdx; nameCol = addrCol>range.s.c ? addrCol-1 : addrCol+1; startRow = range.s.r+1;
   }
-  return Array.from(seen.values());
+  const seen = new Map();
+  for(let r=startRow; r<=range.e.r; r++){
+    const name = trim(taglogImportCellText(ws, r, nameCol)).replace(/\s+/g,' ');
+    const address = trim(taglogImportCellText(ws, r, addrCol)).replace(/\s+/g,' ');
+    if(!name) continue;
+    const key = name.toLowerCase();
+    if(seen.has(key)){ out.duplicateCount++; continue; }
+    if(!address) out.missingAddressCount++;
+    seen.set(key, {name, address});
+  }
+  out.list = Array.from(seen.values());
+  return out;
 }
 function taglogRenderSiteDropdown(){
   const dd = document.getElementById('tlSiteDropdown');
@@ -4086,7 +4126,7 @@ function taglogRenderSiteDropdown(){
   const matches = taglogSiteSuggestions(q);
   if(!matches.length){ dd.innerHTML=''; return; }
   dd.innerHTML = `<div class="qm-dropdown">${matches.map(s=>`
-    <div class="qm-dropdown-item" data-sitepick="${esc(s)}"><span>${esc(s)}</span></div>
+    <div class="qm-dropdown-item" data-sitepick="${esc(s.name)}"><span>${esc(s.name)}</span>${s.address?`<span class="rem">${esc(s.address)}</span>`:''}</div>
   `).join('')}</div>`;
   dd.querySelectorAll('[data-sitepick]').forEach(row=>{
     row.addEventListener('click', ()=>{
@@ -4105,8 +4145,9 @@ function taglogRenderSiteWarning(){
   const list = taglogApprovedSitesList();
   const site = trim(TAGLOG_SITE);
   if(!list.length || !site){ el.innerHTML=''; return; }
-  el.innerHTML = taglogIsSiteApproved(site)
-    ? `<div class="tl-site-ok">✓ اسم الموقع معتمد</div>`
+  const found = taglogFindApprovedSite(site);
+  el.innerHTML = found
+    ? `<div class="tl-site-ok">✓ موقع معتمد: ${esc(found.name)}</div><div class="tl-site-address">📍 ${found.address?esc(found.address):'لا يوجد عنوان مسجَّل لهذا الموقع في القائمة'}</div>`
     : `<div class="tl-site-warn">⚠️ اسم الموقع غير معتمد — اختره من الاقتراحات أو صحّح الاسم</div>`;
 }
 function openTagSitesModal(){
@@ -4114,18 +4155,19 @@ function openTagSitesModal(){
 }
 function renderTagSitesModalBody(bodyEl){
   const meta = STATE.tagApprovedSites || {list:[], fileName:null, uploadedAt:null};
+  const normList = taglogApprovedSitesList();
   bodyEl.innerHTML = `
-    <div class="desc">ارفع ملف Excel بعمود واحد يحتوي أسماء كل المواقع المعتمدة (صف العناوين الأول، إن وُجد، يُتجاهل تلقائياً). رفع ملف جديد يستبدل القائمة الحالية بالكامل، دون أي تأثير على سجلات الرصد السابقة.</div>
-    ${meta.list.length
-      ? `<div class="msg ok">القائمة الحالية: <b>${meta.list.length}</b> موقع معتمد${meta.fileName?` — من ملف "${esc(meta.fileName)}"${meta.uploadedAt?` بتاريخ ${esc(meta.uploadedAt)}`:''}`:''}</div>`
+    <div class="desc">ارفع ملف Excel بعمودين: <b>Site Name</b> (اسم الموقع) و<b>Site Address</b> (عنوان الموقع) — صف العناوين الأول يُكتشف تلقائياً ويُتجاهل. رفع ملف جديد يستبدل القائمة الحالية بالكامل فوراً، دون أي تأثير على سجلات الرصد السابقة.</div>
+    ${normList.length
+      ? `<div class="msg ok">القائمة الحالية: <b>${normList.length}</b> موقع معتمد${meta.fileName?` — من ملف "${esc(meta.fileName)}"${meta.uploadedAt?` بتاريخ ${esc(meta.uploadedAt)}`:''}`:''}</div>`
       : `<div class="msg bad">لم تُرفع أي قائمة مواقع معتمدة بعد — التحقق من اسم الموقع معطَّل حالياً، ويُسمح بأي اسم كما كان سابقاً.</div>`}
     <div class="filebox">
-      <label class="flabel">ملف قائمة المواقع (.xlsx / .xls)</label>
+      <label class="flabel">ملف قائمة المواقع (.xlsx / .xls) — عمودا Site Name و Site Address</label>
       <input type="file" id="tlSitesFile" accept=".xlsx,.xls">
     </div>
     <div id="tlSitesMsg"></div>
-    <div class="btnrow"><button class="primary" id="btnTlSitesSave">💾 حفظ القائمة</button></div>
-    ${meta.list.length ? `<div class="tablewrap" style="max-height:240px;overflow:auto;margin-top:12px;"><table class="data"><thead><tr><th>اسم الموقع المعتمد</th></tr></thead><tbody>${meta.list.map(s=>`<tr><td>${esc(s)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="btnrow"><button class="primary" id="btnTlSitesSave">💾 رفع / استبدال القائمة بالكامل</button></div>
+    ${normList.length ? `<div class="tablewrap" style="max-height:260px;overflow:auto;margin-top:12px;"><table class="data"><thead><tr><th>اسم الموقع المعتمد</th><th>العنوان</th></tr></thead><tbody>${normList.map(s=>`<tr><td>${esc(s.name)}</td><td>${s.address?esc(s.address):'<span class="empty">—</span>'}</td></tr>`).join('')}</tbody></table></div>` : ''}
   `;
   document.getElementById('btnTlSitesSave').addEventListener('click', async ()=>{
     const fileInp = document.getElementById('tlSitesFile');
@@ -4134,13 +4176,16 @@ function renderTagSitesModalBody(bodyEl){
     if(!file){ msgEl.innerHTML = `<div class="msg bad">اختر ملف Excel أولاً.</div>`; return; }
     try{
       const wb = await readWorkbook(file);
-      const list = taglogParseSitesWorkbook(wb);
-      if(!list.length){ msgEl.innerHTML = `<div class="msg bad">لم يتم العثور على أي أسماء مواقع في الملف.</div>`; return; }
-      STATE.tagApprovedSites = { list, fileName: file.name, uploadedAt: todayStr() };
+      const res = taglogParseSitesWorkbook(wb);
+      if(!res.list.length){ msgEl.innerHTML = `<div class="msg bad">لم يتم العثور على أي أسماء مواقع صالحة في الملف. تحقق من وجود عمودي Site Name و Site Address.</div>`; return; }
+      STATE.tagApprovedSites = { list: res.list, fileName: file.name, uploadedAt: todayStr() };
       await saveState(['tagApprovedSites']);
       renderTagSitesModalBody(bodyEl);
       const msgEl2 = document.getElementById('tlSitesMsg');
-      if(msgEl2) msgEl2.innerHTML = `<div class="msg ok">✅ تم حفظ ${list.length} موقعاً معتمداً بنجاح.</div>`;
+      const warnParts = [];
+      if(res.duplicateCount) warnParts.push(`تم تجاهل ${res.duplicateCount} اسم موقع مكرر (احتُفظ بأول ظهور لكل اسم فقط)`);
+      if(res.missingAddressCount) warnParts.push(`${res.missingAddressCount} موقع بلا عنوان مُدخَل في الملف`);
+      if(msgEl2) msgEl2.innerHTML = `<div class="msg ${warnParts.length?'warn':'ok'}">✅ تم استبدال القائمة بالكامل: ${res.list.length} موقعاً معتمداً قُرئ بنجاح.${warnParts.length?'<br>⚠️ '+warnParts.join(' — '):''}</div>`;
       taglogRenderSiteWarning(); // تحديث فوري لحالة الحقل خلف النافذة المنبثقة إن كان موقعاً مكتوباً بالفعل
     }catch(e){
       msgEl.innerHTML = `<div class="msg bad">تعذّرت قراءة الملف: ${esc(e.message||'')}</div>`;
