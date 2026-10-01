@@ -1772,21 +1772,29 @@ function sidrNormHeader(s){
 }
 function sidrToNum(v){
   if(v===null||v===undefined||trim(v)==='') return 0;
-  const n = Number(String(v).replace(/,/g,'').trim());
-  return isNaN(n) ? 0 : n;
+  const s = String(v).replace(/,/g,'').trim();
+  const n = Number(s);
+  if(!isNaN(n)) return n;
+  /* بعض ملفات SID الحقيقية تكتب الكمية المستلمة مع ملاحظة نصية ملاصقة، مثل "1 FROM BULK"
+     (تعني: تم التوريد فعلياً، لكن من مخزون عام وليس تخصيصاً مباشراً للموقع) — نستخرج الرقم الصريح
+     في بداية النص بدل اعتبار الخلية صفراً بالكامل، لأن ذلك كان يُظهر مواد مكتملة التوريد كأنها ناقصة. */
+  const m = s.match(/^-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) : 0;
 }
 function sidrIsNumericVal(v){
   if(v===null||v===undefined||trim(v)==='') return false;
-  const n = Number(String(v).replace(/,/g,'').trim());
-  return !isNaN(n) && isFinite(n);
+  const s = String(v).replace(/,/g,'').trim();
+  const n = Number(s);
+  if(!isNaN(n) && isFinite(n)) return true;
+  return /^-?\d+(\.\d+)?/.test(s); // يحتسب خلايا مثل "1 FROM BULK" كقيمة رقمية لأغراض اكتشاف عمود الكمية
 }
 function sidrHashStr(str){
   let h = 5381;
   for(let i=0;i<str.length;i++){ h = ((h*33) ^ str.charCodeAt(i)) >>> 0; }
   return h.toString(36);
 }
-const SIDR_AL_QTY = ['quantity','qty','required','requested','required qty','requested qty','sid qty','req qty'];
-const SIDR_AL_RECEIVED = ['exist in dwh','exist','dwh','received','existing','available in dwh','qty in dwh','in dwh','balance in dwh'];
+const SIDR_AL_QTY = ['quantity','qty','required','requested','required qty','requested qty','sid qty','req qty','quantity1','quantity2','qty1','qty2','sid quantity'];
+const SIDR_AL_RECEIVED = ['exist in dwh','exist','dwh','received','existing','available in dwh','qty in dwh','in dwh','balance in dwh','delivered','delivered qty','qty delivered'];
 const SIDR_AL_CODE_HDR = ['product code','prod code','item code','material code','code','type','category'];
 const SIDR_AL_PRODDESC_HDR = ['product description','prod description','prod desc'];
 const SIDR_AL_DESC_HDR = ['description','item description','material description','desc'];
@@ -1800,15 +1808,35 @@ function sidrFindColByAliases(normHeader, aliases, excludeAliases, limit){
   }
   return -1;
 }
-/* يبحث عن صف العناوين ضمن أول 8 صفوف — الصف الذي يحتوي عنواناً يشبه "Quantity" أو "EXIST IN DWH" */
+/* يبحث عن صف العناوين الحقيقي ضمن أول عدة صفوف. بعض ملفات SID الحقيقية (مثل نموذج "PLANT SPECIFICATION")
+   تحتوي على ترويسة/بيانات تعريفية (مُعِد الملف، تاريخ، رقم مراجعة، اسم المشروع والموقع...) قد تمتد لأكثر
+   من 10 صفوف قبل صف عناوين الأعمدة الفعلي — لذا نوسّع نطاق البحث، ونفضّل عند الحاجة الصفَّ الذي "يتكرر
+   شكله" (نفس الأعمدة المملوءة) عبر أكبر عدد من الصفوف التالية، بدل أول صف فيه 3 خلايا غير فارغة فقط (والذي
+   قد يلتقط بالخطأ صف بيانات تعريفية متناثرة مثل "Doc respons/Approved | Checked | Date | Rev. | File"). */
 function sidrFindHeaderRowIdx(aoa){
-  const scanLimit = Math.min(8, aoa.length);
+  const scanLimit = Math.min(30, aoa.length);
   for(let i=0;i<scanLimit;i++){
     const norm = (aoa[i]||[]).map(c=>sidrNormHeader(c));
     const hasQty = norm.some(h=> SIDR_AL_QTY.includes(h));
     const hasRecv = norm.some(h=> h && SIDR_AL_RECEIVED.some(a=>h.includes(a)));
     if(hasQty || hasRecv) return i;
   }
+  let bestIdx = -1, bestScore = -1;
+  for(let i=0;i<scanLimit;i++){
+    const row = aoa[i]||[];
+    const cols = [];
+    row.forEach((v,c)=>{ if(trim(v)!=='') cols.push(c); });
+    if(cols.length<3) continue;
+    const lookahead = Math.min(20, aoa.length-i-1);
+    let score = 0;
+    for(let k=1;k<=lookahead;k++){
+      const nextRow = aoa[i+k]||[];
+      const overlap = cols.filter(c=> trim(nextRow[c])!=='').length;
+      if(overlap >= Math.min(2, cols.length)) score++;
+    }
+    if(score > bestScore){ bestScore = score; bestIdx = i; }
+  }
+  if(bestIdx!==-1 && bestScore>=3) return bestIdx; // يتكرر شكله عبر 3 صفوف لاحقة على الأقل = على الأرجح صف عناوين حقيقي فوق جدول بيانات
   for(let i=0;i<scanLimit;i++){
     const nonEmpty = (aoa[i]||[]).filter(c=>trim(c)!=='').length;
     if(nonEmpty>=3) return i;
