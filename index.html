@@ -602,10 +602,9 @@ let STATE = {
   tagLogTemplate: null, // {fileName, base64, uploadedAt} — قالب إكسل "رصد التاجات" الذي يرفعه الأدمن مرة واحدة (إخراج فقط، لا يُستخرج منه أي قائمة مواد)
   tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة أسماء المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
   tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
-  sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected}]
+  sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected,rawHeader:[...],rawRows:[[...]]}] — rawHeader/rawRows: نسخة كاملة غير معالَجة من كل الأعمدة والصفوف كما في Excel الأصلي، للعرض في شاشة "الملف الأصلي كاملاً" فقط
 };
 
-let PENDING_SID = null;   // holds parsed SID awaiting confirmation
 let ACTIVE_TAB = 'setup';
 let ID_COUNTER = 1;
 function nextId(){ return (Date.now().toString(36) + '_' + (ID_COUNTER++)); }
@@ -1223,8 +1222,7 @@ function isUserActivelyTyping(){
   return tag==='INPUT' || tag==='TEXTAREA';
 }
 function hasUnfinishedEditingState(){
-  return !!(PENDING_SID || (typeof BATCH_SIDS!=='undefined' && BATCH_SIDS && BATCH_SIDS.length) ||
-    (typeof GOODS_BATCH!=='undefined' && GOODS_BATCH) || (typeof RESTORE_PENDING!=='undefined' && RESTORE_PENDING) ||
+  return !!((typeof GOODS_BATCH!=='undefined' && GOODS_BATCH) || (typeof RESTORE_PENDING!=='undefined' && RESTORE_PENDING) ||
     (typeof SIDR_BATCH!=='undefined' && SIDR_BATCH && SIDR_BATCH.length));
 }
 async function pollSupabaseForRemoteChanges(force){
@@ -1620,152 +1618,16 @@ async function deleteDismantledFile(sig){
 }
 
 /* ============================================================
-   3) معالجة ملف SID
-   ============================================================ */
-function guessSiteCodeFromFilename(filename){
-  const base = filename.replace(/\.[^.]+$/,'');
-  let m = base.match(/SID[_\-\s]+([A-Za-z0-9]+)/i);
-  if(m) return m[1].toUpperCase();
-  const parts = base.split(/[_\-\s]+/).filter(Boolean);
-  return (parts[parts.length-1]||base).toUpperCase();
-}
-
-async function parseSidFile(file){
-  const wb = await readWorkbook(file);
-  const sheetName = wb.SheetNames.find(n=>n.toLowerCase().includes('radio plant spec')) ||
-                     wb.SheetNames.find(n=>n.toLowerCase().includes('plant spec'));
-  if(!sheetName){
-    return {ok:false, msg:`لم أجد شيت "Radio Plant Spec" في هذا الملف. الشيتات الموجودة: ${wb.SheetNames.join('، ')}`};
-  }
-  const ws = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
-  const requested = {}; // code -> {code, description, category, qty}
-  rows.forEach(row=>{
-    if(!row) return;
-    const category = row[1];
-    const code = row[2];
-    const desc = row[3];
-    const qty = row[4];
-    if(code===null||code===undefined) return;
-    const codeStr = trim(code);
-    if(!codeStr || codeStr.toLowerCase()==='product description' || codeStr.toLowerCase()==='product code') return;
-    const q = toNum(qty); // فراغ = صفر تلقائياً عبر toNum
-    if(q<=0) return;
-    if(!requested[codeStr]) requested[codeStr] = {code:codeStr, description: trim(desc), category: trim(category), qty:0};
-    requested[codeStr].qty += q;
-  });
-  const list = Object.values(requested);
-  if(!list.length){
-    return {ok:false, msg:'لم أجد أي أصناف بكمية أكبر من صفر في شيت Radio Plant Spec.'};
-  }
-  return {ok:true, siteGuess: guessSiteCodeFromFilename(file.name), items:list, filename:file.name};
-}
-
-function buildAllocationPreview(site, items){
-  const rows = items.map(it=>{
-    const stockEntry = STATE.stock[it.code];
-    if(!stockEntry){
-      return {code:it.code, description:it.description, requested:it.qty, available:0, issued:0, shortage:it.qty, unmatched:true};
-    }
-    const remaining = Math.max(0, stockEntry.total_quantity - stockEntry.issued_quantity);
-    const issued = Math.min(it.qty, remaining);
-    return {code:it.code, description: it.description || stockEntry.description, requested:it.qty, available:remaining, issued, shortage: it.qty-issued, unmatched:false};
-  });
-  const summary = {
-    site,
-    materials: rows.length,
-    requested: rows.reduce((s,r)=>s+r.requested,0),
-    available: rows.reduce((s,r)=>s+r.available,0),
-    issued: rows.reduce((s,r)=>s+r.issued,0),
-    shortage: rows.reduce((s,r)=>s+r.shortage,0),
-    unmatched: rows.filter(r=>r.unmatched).length
-  };
-  return {rows, summary};
-}
-
-async function confirmAndIssueSid(sidData){
-  const src = sidData || PENDING_SID;
-  if(!src) return;
-  const {site, rows, filename} = src;
-  if(STATE.processedSids[site]){
-    return {ok:false, msg:'تنبيه: تم تنفيذ SID لهذا الموقع مسبقاً بتاريخ '+STATE.processedSids[site].date+'. لا يمكن تنفيذه مرة أخرى.'};
-  }
-  const date = todayStr();
-  const issuedTagsThisSid = [];
-  const issuedUntaggedThisSid = [];
-
-  rows.forEach(r=>{
-    if(r.unmatched){
-      STATE.issues.push({id:nextId(), type:'UNMATCHED_MATERIAL', code:r.code, material:r.description, sid:site, detail:`الكود ${r.code} مطلوب في SID الموقع ${site} لكنه غير موجود إطلاقاً في رصيد المواد المستلمة`, date});
-      return;
-    }
-    if(r.issued<=0) return;
-    const stockEntry = STATE.stock[r.code];
-    const availableTags = stockEntry.tags.filter(t=>t.status==='available');
-    const tagsToAssign = availableTags.slice(0, r.issued);
-    tagsToAssign.forEach(t=>{
-      t.status='issued'; t.issued_to_sid=site; t.issued_date=date;
-      issuedTagsThisSid.push({code:r.code, description:r.description, tag:t.tag});
-      STATE.ledger.push({id:nextId(), date, type:'ISSUED', sid:site, site, code:r.code, description:r.description, tag:t.tag, qty:1, source:'مواد 4G المستلمة', notes:''});
-    });
-    const untaggedQty = r.issued - tagsToAssign.length;
-    if(untaggedQty>0){
-      issuedUntaggedThisSid.push({code:r.code, description:r.description, qty:untaggedQty});
-      STATE.ledger.push({id:nextId(), date, type:'ISSUED', sid:site, site, code:r.code, description:r.description, tag:'', qty:untaggedQty, source:'مواد 4G المستلمة', notes:''});
-    }
-    stockEntry.issued_quantity += r.issued;
-  });
-
-  STATE.processedSids[site] = {
-    date, filename,
-    materials_count: rows.length,
-    requested_units: rows.reduce((s,r)=>s+r.requested,0),
-    issued_units: rows.reduce((s,r)=>s+r.issued,0),
-    shortage_units: rows.reduce((s,r)=>s+r.shortage,0),
-    unmatched_count: rows.filter(r=>r.unmatched).length,
-    rows, issuedTags: issuedTagsThisSid, issuedUntagged: issuedUntaggedThisSid
-  };
-
-  await saveState(['stock','ledger','issues','processedSids']);
-  return {ok:true, site, rows, issuedTagsThisSid, issuedUntaggedThisSid, date};
-}
-
-/* حذف/عكس SID تم تنفيذه سابقاً — يعيد التاجات والكميات إلى الرصيد ويحذف السجل ليمكن رفعه من جديد */
-async function deleteSidRecord(site){
-  const rec = STATE.processedSids[site];
-  if(!rec) return {ok:false, msg:'لا يوجد SID منفَّذ بهذا الاسم.'};
-  const date = todayStr();
-  const perCode = {};
-  rec.rows.forEach(r=>{
-    if(r.unmatched || r.issued<=0) return;
-    perCode[r.code] = (perCode[r.code]||0) + r.issued;
-  });
-  (rec.issuedTags||[]).forEach(t=>{
-    const stockEntry = STATE.stock[t.code];
-    if(!stockEntry) return;
-    const tagObj = stockEntry.tags.find(x=>x.tag===t.tag && x.status==='issued' && x.issued_to_sid===site);
-    if(tagObj){ tagObj.status='available'; tagObj.issued_to_sid=null; tagObj.issued_date=null; }
-  });
-  Object.entries(perCode).forEach(([code, qty])=>{
-    const stockEntry = STATE.stock[code];
-    if(!stockEntry) return;
-    stockEntry.issued_quantity = Math.max(0, stockEntry.issued_quantity - qty);
-    STATE.ledger.push({id:nextId(), date, type:'ADJUSTMENT', sid:site, site, code, description:stockEntry.description, tag:'', qty:-qty, source:'إلغاء صرف', notes:`إلغاء صرف SID محذوف: ${site}`});
-  });
-  STATE.issues = STATE.issues.filter(i=>i.sid!==site);
-  delete STATE.processedSids[site];
-  await saveState(['stock','ledger','issues','processedSids']);
-  return {ok:true, msg:`تم إلغاء صرف SID الموقع ${site} وإعادة كل الكميات/التاجات للرصيد. يمكنك الآن رفعه من جديد.`};
-}
-
-/* ============================================================
-   3أ) مراجعة استلام SID — متعدد الملفات/المواقع (قراءة وتحليل فقط)
-   ملاحظة مهمة: هذا القسم مستقل تماماً عن آلية صرف SID أعلاه (parseSidFile/confirmAndIssueSid) —
-   لا يلمس STATE.stock ولا STATE.ledger ولا STATE.processedSids ولا التاجات إطلاقاً، ولا يُنفّذ أي
-   صرف فعلي. غرضه فقط مقارنة "الكمية المطلوبة" مع "الكمية الموجودة فعلياً في المستودع (EXIST IN DWH)"
-   كما وردت في نفس ملف/شيت SID المرفوع، لكل موقع (= اسم الـ Sheet)، عبر عدة ملفات وعدة مواقع دفعة واحدة.
-   يُخزَّن في STATE.sidReview (مفتاح Supabase عام جديد wms_sid_review_v1، بنفس آلية بقية مفاتيح STATE —
-   دون أي تعديل على مخطط قاعدة البيانات).
+   3) مراجعة استلام SID — متعدد الملفات/المواقع (قراءة وتحليل فقط)
+   ملاحظة: خانة/آلية "صرف SID" الفعلي القديمة (رفع ملف واحد لكل موقع، مطابقة الكود مع رصيد المواد
+   المستلمة فعلياً، خصم الكمية وتخصيص تاجات حقيقية) أُزيلت بالكامل من الواجهة بناءً على طلب صريح —
+   القسم الوحيد المتبقي لمعالجة ملفات SID هو هذا القسم: قراءة/مراجعة/تقارير فقط، لا يُنفّذ أي صرف فعلي
+   ولا يلمس STATE.stock ولا STATE.ledger ولا STATE.processedSids ولا التاجات إطلاقاً. غرضه فقط مقارنة
+   "الكمية المطلوبة" مع "الكمية الموجودة فعلياً في المستودع (EXIST IN DWH)" كما وردت في نفس ملف/شيت SID
+   المرفوع، لكل موقع (= اسم الـ Sheet)، عبر عدة ملفات وعدة مواقع دفعة واحدة. يُخزَّن في STATE.sidReview
+   (مفتاح Supabase عام wms_sid_review_v1، بنفس آلية بقية مفاتيح STATE — دون أي تعديل على مخطط قاعدة
+   البيانات). بيانات STATE.processedSids التاريخية (من عمليات صرف سابقة قبل إزالة الخانة) بقيت كما هي
+   دون أي حذف، ولا تزال تظهر في التقرير الشامل وسجل حركات المخزون كالمعتاد.
    ============================================================ */
 function sidrNormHeader(s){
   return trim(s).toLowerCase().replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
@@ -1820,10 +1682,21 @@ function sidrFindHeaderRowIdx(aoa){
    الكود الحقيقي)، Description (الوصف)، Quantity (مطلوب)، EXIST IN DWH (مستلم) — بالاسم أولاً، ثم بالمحتوى
    والترتيب عند الغموض (أول عمودين رقميين بنسبة ≥70%: الأيسر = مطلوب، الذي يليه يميناً = مستلم، حسب تعليمات
    المستخدم الصريحة)، مع ترك needsReview=true كلما لم تُحسَم الأعمدة الأساسية بالاسم صراحة. */
+/* يحذف فقط الصفوف الفارغة بالكامل من نهاية المصفوفة (امتداد غير مستخدم لنطاق الشيت المُعلَن في الملف) —
+   لا يحذف أي صف فارغ يقع بين صفوف بيانات فعلية، حتى تبقى "جميع الصفوف حتى آخر صف فيه بيانات" كما هي. */
+function sidrTrimTrailingEmptyRows(rows){
+  let end = rows.length;
+  while(end>0 && !(rows[end-1] && rows[end-1].some(c=>trim(c)!==''))) end--;
+  return rows.slice(0, end);
+}
 function sidrDetectColumns(aoa, headerRowIdx){
   const header = (aoa[headerRowIdx]||[]).map(c=>trim(c));
   const normHeader = header.map(c=>sidrNormHeader(c));
   const dataRows = aoa.slice(headerRowIdx+1).filter(r=> r && r.some(c=>trim(c)!==''));
+  /* نسخة كاملة غير مُنقّحة من كل الصفوف بعد صف العناوين (بكل أعمدتها الأصلية وبترتيبها كما في الملف،
+     بما فيها أي صفوف فارغة تقع وسط الجدول) — تُستخدم فقط لعرض "الملف الأصلي كاملاً" في شاشة المراجعة،
+     ولا تُستخدم إطلاقاً في حساب الكميات/النواقص (ذلك يعتمد حصراً على dataRows أعلاه كما كان تماماً). */
+  const rawAllRows = sidrTrimTrailingEmptyRows(aoa.slice(headerRowIdx+1));
   const sample = dataRows.slice(0,40);
   const colCount = Math.max(header.length, ...sample.map(r=>r.length), 1);
 
@@ -1866,6 +1739,7 @@ function sidrDetectColumns(aoa, headerRowIdx){
     byName: {qty:qtyByName, received:recvByName, desc:descByName},
     needsReview,
     dataRows,
+    rawAllRows,
   };
 }
 /* يستخرج صفوف البيانات الفعلية وفق تعيين الأعمدة الحالي (تلقائي أو بعد مراجعة يدوية) */
@@ -1967,6 +1841,8 @@ async function sidrCommitBatch(){
       fileName: entry.fileName, sheetName: entry.sheetName, site: trim(entry.site),
       importedAt: now, signature: entry.signature,
       rows: entry.rows, autoDetected: !entry.manuallyReviewed,
+      rawHeader: (entry.detection && entry.detection.header) || [],
+      rawRows: (entry.detection && entry.detection.rawAllRows) || [],
     });
   });
   await saveState(['sidReview']);
@@ -2538,7 +2414,7 @@ async function performRestore(backupObj){
   };
   Object.keys(fresh).forEach(k=>{ STATE[k] = fresh[k]; });
   // تصفير أي حالة مؤقتة في الذاكرة قد تشير لبيانات لم تعد موجودة
-  PENDING_SID = null; BATCH_SIDS = []; GOODS_BATCH = null; GOODS_SELECTED_KEY = null;
+  GOODS_BATCH = null; GOODS_SELECTED_KEY = null;
   await saveState(Object.keys(STORE_KEYS));
   return {ok:true, summary: backupSummary({data: fresh})};
 }
@@ -2576,60 +2452,6 @@ function issuesAoa(){
   const rows = STATE.issues.map(i=>[i.type, i.code, i.material||'', i.detail, i.date]);
   return [header, ...rows];
 }
-function sidAllocationAoa(site){
-  const rec = STATE.processedSids[site];
-  const header = ['الموقع (SID)','كود الصنف','الوصف','الكمية المطلوبة','المتوفر وقت التنفيذ','المصروف','النقص','ملاحظة'];
-  const rows = rec.rows.map(r=>[site, r.code, r.description, r.requested, r.available, r.issued, r.shortage,
-    r.unmatched ? 'صنف غير موجود في رصيد المستلمة' : (r.shortage>0?'متوفر جزئياً':'مصروف بالكامل')]);
-  return [header, ...rows];
-}
-function sidIssuedTagsAoa(site){
-  const rec = STATE.processedSids[site];
-  const header = ['الموقع (SID)','كود الصنف','الوصف','رقم التاج','تاريخ الصرف'];
-  const rows = rec.issuedTags.map(t=>[site, t.code, t.description, t.tag, rec.date]);
-  return [header, ...rows];
-}
-/* شيت "Daily report" — يطابق تماماً شكل النموذج المرفق (Daily_report_for_QALQ12.xlsx):
-   قسم علوي = مواد رُكِّبت بالموقع (لها تاج)، سطر فارغ، قسم سفلي = مواد فُكَّت من نفس الموقع.
-   التاج يُكتب كرقم فعلي (بتنسيق "# ?/?" كما في النموذج الأصلي) فقط إذا كان رقماً صحيحاً بدون أصفار بداية
-   محتمل ضياعها — غير ذلك يبقى نصاً حمايةً للبيانات. التاريخ يُكتب كتاريخ إكسل حقيقي بنفس تنسيق النموذج. */
-const JRE_LABEL = 'Ramallah Engineering warehouse (JRE)';
-function dailyReportTagValue(tagStr){
-  if(tagStr==='No Tag') return tagStr;
-  if(/^[0-9]+$/.test(tagStr) && String(Number(tagStr))===tagStr) return Number(tagStr);
-  return tagStr;
-}
-function dailyReportDateValue(dateStr){
-  const parts = String(dateStr).split('-').map(Number);
-  if(parts.length!==3 || parts.some(isNaN)) return dateStr;
-  return new Date(parts[0], parts[1]-1, parts[2]);
-}
-function dailyReportAoa(site){
-  const rec = STATE.processedSids[site];
-  const header = ['TAG','MATERIAL','FROM SITE','TO SITE','DATE','NOTE'];
-  const installedRows = (rec ? rec.issuedTags : []).map(t=>[dailyReportTagValue(t.tag), t.description, JRE_LABEL, site, dailyReportDateValue(rec.date), '']);
-  const siteNorm = site.trim().toUpperCase();
-  const removedRows = STATE.dismantled
-    .filter(d=> d.from.trim().toUpperCase()===siteNorm)
-    .map(d=>[dailyReportTagValue(d.has_tag ? d.tag : 'No Tag'), d.material, d.from, d.to, dailyReportDateValue(d.date_added), d.note]);
-  const rows = [header, ...installedRows, [], ...removedRows];
-  return rows;
-}
-/* يبني شيت Daily report بنفس تنسيق الخلايا الفعلي للنموذج (تنسيق رقم التاج، تنسيق التاريخ، عرض الأعمدة) */
-function buildDailyReportSheet(site){
-  const aoa = dailyReportAoa(site);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:21.5},{wch:28.7},{wch:36},{wch:14.6},{wch:15.9},{wch:26.9}];
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for(let R=range.s.r+1; R<=range.e.r; R++){
-    const tagCell = ws[XLSX.utils.encode_cell({r:R,c:0})];
-    if(tagCell && tagCell.t==='n') tagCell.z = '# ?/?';
-    const dateCell = ws[XLSX.utils.encode_cell({r:R,c:4})];
-    if(dateCell) dateCell.z = '[$-409]d\\-mmm;@';
-  }
-  return ws;
-}
-
 function dashboardAoa(){
   const totalCodes = Object.keys(STATE.stock).length;
   const totalReceived = Object.values(STATE.stock).reduce((s,x)=>s+x.total_quantity,0);
@@ -2687,56 +2509,6 @@ function exportSectionToExcel(headers, rows, sectionLabel, colWidths){
   downloadWorkbook([{name: safeSheetName(sectionLabel), ws: aoaSheet(aoa, colWidths)}], `مواد_${sectionLabel}_${todayStr()}.xlsx`);
 }
 
-function downloadSidReport(site){
-  const sheets = [
-    {name:'Dashboard', ws: aoaSheet(dashboardAoa(),[38,18])},
-    {name:'SID Allocation', ws: aoaSheet(sidAllocationAoa(site),[14,20,40,12,12,10,10,26])},
-    {name:'Issued Tags', ws: aoaSheet(sidIssuedTagsAoa(site),[14,20,40,18,14])},
-    {name:'Daily report', ws: buildDailyReportSheet(site)},
-    {name:'Current Stock', ws: aoaSheet(currentStockAoa(),[20,40,14,10,10,12,12])},
-    {name:'Material Ledger', ws: aoaSheet(ledgerAoa(null),[14,12,12,14,20,40,14,8,26,26])},
-    {name:'Dismantled Materials', ws: aoaSheet(dismantledAoa(),[26,14,30,14,10,26,14])},
-    {name:'Duplicate-Errors', ws: aoaSheet(issuesAoa(),[22,20,26,60,14])},
-  ];
-  downloadWorkbook(sheets, `SID_${site}_${todayStr()}.xlsx`);
-}
-function downloadDailyReportOnly(site){
-  const sheets = [{name:'Daily report', ws: buildDailyReportSheet(site)}];
-  downloadWorkbook(sheets, `Daily_report_${site}_${todayStr()}.xlsx`);
-}
-/* تقرير مجمّع لدفعة رفع متعددة الملفات — يشمل لوحة مؤشرات للدفعة، وشيت تخصيص + Daily report لكل موقع على حدة */
-function downloadBatchReport(sites){
-  const totalReq = sites.reduce((s,site)=>s+STATE.processedSids[site].requested_units,0);
-  const totalIss = sites.reduce((s,site)=>s+STATE.processedSids[site].issued_units,0);
-  const totalShort = sites.reduce((s,site)=>s+STATE.processedSids[site].shortage_units,0);
-  const totalUnmatched = sites.reduce((s,site)=>s+STATE.processedSids[site].unmatched_count,0);
-  const batchDashboard = [
-    ['تقرير دفعة SID مجمَّعة'],
-    ['تاريخ التنفيذ', todayStr()],
-    ['عدد المواقع المنفَّذة في هذه الدفعة', sites.length],
-    [],
-    ['الموقع','عدد الأصناف','مطلوب','مصروف','نقص','غير مطابق'],
-    ...sites.map(site=>{
-      const r = STATE.processedSids[site];
-      return [site, r.materials_count, r.requested_units, r.issued_units, r.shortage_units, r.unmatched_count];
-    }),
-    [],
-    ['الإجمالي', '', totalReq, totalIss, totalShort, totalUnmatched],
-  ];
-  const sheets = [
-    {name:'ملخص الدفعة', ws: aoaSheet(batchDashboard,[24,20,10,10,8,12])},
-  ];
-  sites.forEach(site=>{
-    sheets.push({name: safeSheetName('Alloc_'+site), ws: aoaSheet(sidAllocationAoa(site),[14,20,40,12,12,10,10,26])});
-  });
-  sites.forEach(site=>{
-    sheets.push({name: safeSheetName('Daily_'+site), ws: buildDailyReportSheet(site)});
-  });
-  sheets.push({name:'Current Stock', ws: aoaSheet(currentStockAoa(),[20,40,14,10,10,12,12])});
-  sheets.push({name:'Dismantled Materials', ws: aoaSheet(dismantledAoa(),[26,14,30,14,10,26,14])});
-  sheets.push({name:'Duplicate-Errors', ws: aoaSheet(issuesAoa(),[22,20,26,60,14])});
-  downloadWorkbook(sheets, `دفعة_SID_${sites.join('-').slice(0,40)}_${todayStr()}.xlsx`);
-}
 function downloadFullReport(){
   const sheets = [
     {name:'Dashboard', ws: aoaSheet(dashboardAoa(),[38,18])},
@@ -5710,200 +5482,10 @@ document.addEventListener('keydown', function(e){
   t.dispatchEvent(new Event('change', {bubbles:true}));
 }, true);
 
-/* ---- تبويب SID: مفتاح رئيسي يُبقي الطريقة الحالية (صرف SID) كما هي تماماً، ويضيف مراجعة استلام SID
-   متعددة المواقع كوضع عرض منفصل بجانبها — دون أي تغيير على منطق الصرف القديم. ---- */
-let SID_SUBVIEW = 'issue'; // 'issue' = الطريقة الحالية (صرف فعلي) | 'review' = مراجعة استلام SID الجديدة (قراءة/تقارير فقط)
-
+/* ---- تبويب SID: خانة/آلية "صرف SID" الفعلي القديمة أُزيلت بالكامل من الواجهة بناءً على طلب صريح
+   (الزر، القسم، وكل المنطق المرتبط بها) — تبويب "رفع SID" أصبح يعرض مباشرة قسم مراجعة استلام SID فقط. ---- */
 function renderSidTab(el){
-  el.innerHTML = `
-    <nav class="tabs" style="margin-bottom:14px;">
-      <button type="button" data-sidsub="issue" class="${SID_SUBVIEW==='issue'?'active':''}">📥 صرف SID (الطريقة الحالية)</button>
-      <button type="button" data-sidsub="review" class="${SID_SUBVIEW==='review'?'active':''}">📊 مراجعة استلام SID (متعدد المواقع)</button>
-    </nav>
-    <div id="sidSubviewArea"></div>
-  `;
-  el.querySelectorAll('[data-sidsub]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(SID_SUBVIEW===btn.dataset.sidsub) return;
-      SID_SUBVIEW = btn.dataset.sidsub;
-      renderSidTab(el);
-    });
-  });
-  const sub = document.getElementById('sidSubviewArea');
-  if(SID_SUBVIEW==='review') renderSidReviewSubview(sub);
-  else renderSidIssueSubview(sub);
-}
-
-/* ---- تبويب: رفع SID (يدعم رفع عدة ملفات دفعة واحدة) — الطريقة الحالية، دون أي تعديل في منطقها ---- */
-let BATCH_SIDS = []; // [{filename, site, items:[{code,description,category,qty}], parseError}]
-
-function renderSidIssueSubview(el){
-  el.innerHTML = `
-    ${renderIssuesInlineBanner(['UNMATCHED_MATERIAL'], 'sid')}
-    <div class="panel">
-      <h2>${L('sid_heading')}<button class="records-btn" id="btnRecordsSidHistory" type="button">📋 سجل SID المنفّذة</button></h2>
-      <div class="desc">يمكنك اختيار أكثر من ملف SID دفعة واحدة — كل ملف يمثّل موقعاً واحداً ويُعالَج على حدة، ثم يمكنك مراجعة/تعديل الكميات لكل موقع قبل التأكيد النهائي، وستحصل على تقرير مجمَّع واحد لكل المواقع المنفَّذة.</div>
-      <div class="filebox">
-        <label class="flabel">ملف/ملفات SID (.xlsx)</label>
-        <input type="file" id="sidFile" accept=".xlsx,.xls" multiple>
-      </div>
-      <div id="sidMsg"></div>
-      <div class="btnrow"><button class="primary" id="btnParseSid">فحص الملفات وتحضير المعاينة</button></div>
-    </div>
-    <div id="sidPreviewArea"></div>
-  `;
-  wireIssuesInlineBanner(el, 'sid');
-  document.getElementById('btnRecordsSidHistory').addEventListener('click', ()=>{
-    openRecordsModal('📋 '+L('tab_sidhistory'), renderSidHistoryTab);
-  });
-  document.getElementById('btnParseSid').addEventListener('click', async ()=>{
-    const inp = document.getElementById('sidFile');
-    if(!inp.files.length){ showMsg('sidMsg','warn','اختر ملف SID واحد أو أكثر أولاً.'); return; }
-    setBusy('btnParseSid', true, 'جارِ الفحص…');
-    BATCH_SIDS = [];
-    let okCount=0, failCount=0;
-    for(const file of inp.files){
-      try{
-        const res = await parseSidFile(file);
-        if(res.ok){
-          BATCH_SIDS.push({filename:file.name, site:res.siteGuess, items: res.items.map(it=>({...it})), parseError:null});
-          okCount++;
-        } else {
-          BATCH_SIDS.push({filename:file.name, site:guessSiteCodeFromFilename(file.name), items:[], parseError:res.msg});
-          failCount++;
-        }
-      }catch(e){
-        BATCH_SIDS.push({filename:file.name, site:guessSiteCodeFromFilename(file.name), items:[], parseError:e.message});
-        failCount++;
-      }
-    }
-    showMsg('sidMsg', failCount?'warn':'ok', `تم فحص ${inp.files.length} ملف: ${okCount} ناجح${failCount?`، ${failCount} به مشكلة (موضّحة أدناه)`:''}.`);
-    renderBatchPreview();
-    setBusy('btnParseSid', false, 'فحص الملفات وتحضير المعاينة');
-  });
-}
-
-function computeEntryAlloc(entry){
-  if(entry.parseError) return {rows:[], summary:null};
-  return buildAllocationPreview(entry.site, entry.items);
-}
-
-function renderBatchPreview(){
-  const area = document.getElementById('sidPreviewArea');
-  if(!BATCH_SIDS.length){ area.innerHTML=''; return; }
-
-  // إجمالي عبر كل الملفات الصالحة (تقديري وقت المعاينة)
-  let grand = {materials:0, requested:0, available:0, issued:0, shortage:0, unmatched:0, sites:0};
-  BATCH_SIDS.forEach(entry=>{
-    if(entry.parseError) return;
-    const dupInBatch = BATCH_SIDS.filter(e=>!e.parseError && e.site.trim().toUpperCase()===entry.site.trim().toUpperCase()).length>1;
-    const alreadyDone = !!STATE.processedSids[entry.site.trim()];
-    entry.blocked = dupInBatch || alreadyDone;
-    entry.blockedReason = alreadyDone ? `تم تنفيذ SID لهذا الموقع مسبقاً بتاريخ ${STATE.processedSids[entry.site.trim()].date}` : (dupInBatch ? 'نفس اسم الموقع مكرر أكثر من مرة ضمن هذه الدفعة' : '');
-    if(entry.blocked) return;
-    const {rows, summary} = computeEntryAlloc(entry);
-    grand.sites++; grand.materials+=summary.materials; grand.requested+=summary.requested;
-    grand.available+=summary.available; grand.issued+=summary.issued; grand.shortage+=summary.shortage; grand.unmatched+=summary.unmatched;
-  });
-
-  area.innerHTML = `
-    <div class="panel">
-      <h2>${L('sid_batch_summary_heading')} (${BATCH_SIDS.length} ملف)</h2>
-      <div class="kpi-grid">
-        <div class="kpi"><div class="num">${grand.sites}</div><div class="lbl">مواقع جاهزة للتنفيذ</div></div>
-        <div class="kpi"><div class="num">${grand.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
-        <div class="kpi"><div class="num">${grand.issued}</div><div class="lbl">إجمالي سيُصرف</div></div>
-        <div class="kpi ${grand.shortage>0?'warn':''}"><div class="num">${grand.shortage}</div><div class="lbl">إجمالي النقص</div></div>
-        <div class="kpi ${grand.unmatched>0?'bad':''}"><div class="num">${grand.unmatched}</div><div class="lbl">أصناف غير مطابقة</div></div>
-      </div>
-      <div class="msg info">الأرقام هنا تقديرية وقت المعاينة. إن طلب أكثر من ملف في نفس الدفعة نفس الصنف، تُحسم الأولوية فعلياً بترتيب التنفيذ عند الضغط على "تأكيد ومعالجة الكل".</div>
-      <div class="btnrow">
-        <button class="primary" id="btnConfirmBatch">تأكيد ومعالجة الكل</button>
-        <button class="secondary" id="btnCancelBatch">إلغاء الكل</button>
-      </div>
-      <div id="batchConfirmMsg"></div>
-    </div>
-    <div id="batchCards"></div>
-  `;
-  const cardsWrap = document.getElementById('batchCards');
-  BATCH_SIDS.forEach((entry, idx)=>{ cardsWrap.appendChild(buildEntryCard(entry, idx)); });
-
-  document.getElementById('btnCancelBatch').addEventListener('click', ()=>{ BATCH_SIDS=[]; area.innerHTML=''; });
-  document.getElementById('btnConfirmBatch').addEventListener('click', async ()=>{
-    const runnable = BATCH_SIDS.filter(e=>!e.parseError && !e.blocked);
-    if(!runnable.length){ showMsg('batchConfirmMsg','warn','لا يوجد أي موقع جاهز للتنفيذ.'); return; }
-    if(!confirm(`سيتم تنفيذ صرف ${runnable.length} موقع (${runnable.map(e=>e.site).join('، ')}). هل تريد المتابعة؟`)) return;
-    setBusy('btnConfirmBatch', true, 'جارِ التنفيذ…');
-    const doneSites = [];
-    for(const entry of runnable){
-      const {rows} = computeEntryAlloc(entry);
-      const result = await confirmAndIssueSid({site: entry.site.trim(), rows, filename: entry.filename});
-      if(result.ok) doneSites.push(result.site);
-    }
-    renderApp();
-    setTimeout(()=>{
-      if(doneSites.length){
-        if(doneSites.length===1) downloadSidReport(doneSites[0]);
-        else downloadBatchReport(doneSites);
-        alert(`تم تنفيذ الصرف بنجاح لـ ${doneSites.length} موقع: ${doneSites.join('، ')}. تم تنزيل التقرير تلقائياً.`);
-      } else {
-        alert('لم يُنفَّذ أي موقع.');
-      }
-    }, 50);
-  });
-}
-
-function buildEntryCard(entry, idx){
-  const div = document.createElement('div');
-  div.className = 'panel';
-  if(entry.parseError){
-    div.innerHTML = `<h2>❌ ${esc(entry.filename)}</h2><div class="msg bad">${esc(entry.parseError)}</div>`;
-    return div;
-  }
-  const {rows, summary} = computeEntryAlloc(entry);
-  div.innerHTML = `
-    <h2>${esc(entry.filename)} ${entry.blocked?'<span class="pill bad">متوقف</span>':''}</h2>
-    <label class="flabel">اسم الموقع / معرّف SID</label>
-    <input type="text" class="mono siteInput" data-idx="${idx}" value="${esc(entry.site)}" style="max-width:260px;">
-    ${entry.blocked?`<div class="msg bad" style="margin-top:10px;">${esc(entry.blockedReason)}</div>`:`
-    <div class="kpi-grid" style="margin-top:14px;">
-      <div class="kpi"><div class="num">${summary.materials}</div><div class="lbl">أصناف</div></div>
-      <div class="kpi"><div class="num">${summary.requested}</div><div class="lbl">مطلوب</div></div>
-      <div class="kpi"><div class="num">${summary.available}</div><div class="lbl">متوفر</div></div>
-      <div class="kpi"><div class="num">${summary.issued}</div><div class="lbl">سيُصرف</div></div>
-      <div class="kpi ${summary.shortage>0?'warn':''}"><div class="num">${summary.shortage}</div><div class="lbl">نقص</div></div>
-      <div class="kpi ${summary.unmatched>0?'bad':''}"><div class="num">${summary.unmatched}</div><div class="lbl">غير مطابق</div></div>
-    </div>
-    <div class="tablewrap"><table class="data">
-      <thead><tr><th>الكود</th><th>الوصف</th><th>مطلوب (قابل للتعديل)</th><th>متوفر</th><th>سيُصرف</th><th>نقص</th><th>الحالة</th></tr></thead>
-      <tbody>
-        ${rows.map((r,ri)=>`<tr>
-          <td class="code-cell">${esc(r.code)}</td>
-          <td>${esc(r.description)}</td>
-          <td><input type="text" inputmode="numeric" class="qtyInput mono" data-idx="${idx}" data-code="${esc(r.code)}" value="${r.requested}" style="width:80px;padding:5px 8px;"></td>
-          <td>${r.available}</td>
-          <td>${r.issued}</td>
-          <td>${r.shortage>0?`<span class="tag-warn">${r.shortage}</span>`:'0'}</td>
-          <td>${r.unmatched?'<span class="pill bad">غير مطابق</span>': r.shortage>0?'<span class="pill warn">جزئي</span>':'<span class="pill ok">كامل</span>'}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table></div>
-    `}
-  `;
-  div.querySelector('.siteInput').addEventListener('change', (e)=>{
-    BATCH_SIDS[idx].site = e.target.value;
-    renderBatchPreview();
-  });
-  div.querySelectorAll('.qtyInput').forEach(inp=>{
-    inp.addEventListener('change', (e)=>{
-      const code = e.target.dataset.code;
-      const newQty = toNum(e.target.value);
-      const item = BATCH_SIDS[idx].items.find(it=>it.code===code);
-      if(item) item.qty = newQty;
-      renderBatchPreview();
-    });
-  });
-  return div;
+  renderSidReviewSubview(el);
 }
 
 /* ============================================================
@@ -6011,7 +5593,8 @@ function renderSidrBatchPreview(){
     if(res.ok){
       alert(`تم استيراد ${res.importedCount} موقع بنجاح${res.skippedDup?`، وتم تجاهل ${res.skippedDup} شيت مطابق تماماً لاستيراد سابق`:''}.`);
       area.innerHTML = '';
-      const host = document.getElementById('sidSubviewArea');
+      SIDR_VIEW = 'sites';
+      const host = document.getElementById('tabContent');
       if(host) renderSidTab(host);
     } else {
       setBusy('btnSidrCommit', false, `✅ تأكيد استيراد الجاهز (${importable.length})`);
@@ -6124,6 +5707,7 @@ function openSidrColumnReviewModal(idx){
 let SIDR_SELECTED_SITE = null;
 let SIDR_SITE_SEARCH = '';
 let SIDR_SITE_SHORTAGE_ONLY = false;
+let SIDR_SITE_VIEW_MODE = 'summary'; // 'summary' = ملخص المواد والنواقص (كما كان تماماً) | 'raw' = عرض الملف الأصلي كاملاً كما في Excel
 
 function renderSidrSitesView(el){
   const sites = sidrSitesList();
@@ -6159,6 +5743,25 @@ function renderSidrSitesView(el){
   renderSidrSiteDetail();
 }
 
+/* يبني جدول "الملف الأصلي كاملاً" — كل الأعمدة وكل الصفوف كما في Excel تماماً، بدون أي حذف أو اختصار،
+   مع ترقيم صف Excel الحقيقي لكل صف لتسهيل الرجوع للملف الأصلي عند الحاجة. لا علاقة لهذا الجدول بحساب
+   النواقص إطلاقاً — عرض فقط. */
+function buildSidrRawFileTable(imp){
+  const header = imp.rawHeader || [];
+  const rows = imp.rawRows || [];
+  const colCount = Math.max(header.length, ...rows.map(r=>r.length), 1);
+  const excelHeaderRow = 12; // صف العناوين ثابت دائماً عند السطر 12 (راجع sidrFindHeaderRowIdx)
+  const theadHtml = `<tr><th>#</th>${Array.from({length:colCount}).map((_,c)=>`<th>${esc(trim(header[c]))||'&nbsp;'}</th>`).join('')}</tr>`;
+  const tbodyHtml = rows.map((r,ri)=>`<tr><td class="code-cell">${excelHeaderRow+1+ri}</td>${Array.from({length:colCount}).map((_,c)=>`<td>${esc(trim(r[c]))}</td>`).join('')}</tr>`).join('')
+    || `<tr><td colspan="${colCount+1}" class="empty">لا توجد بيانات محفوظة لهذا الاستيراد.</td></tr>`;
+  return `
+    <div class="desc">عرض كامل للملف الأصلي كما رُفع (جميع الأعمدة وجميع الصفوف من السطر ${excelHeaderRow+1} حتى آخر صف فيه بيانات، بنفس ترتيبها في Excel) — بدون أي معالجة أو حساب، للمراجعة البصرية فقط. العمود "#" هو رقم السطر الفعلي في ملف Excel الأصلي.</div>
+    <div class="tablewrap" style="max-height:70vh;"><table class="data">
+      <thead>${theadHtml}</thead>
+      <tbody>${tbodyHtml}</tbody>
+    </table></div>
+  `;
+}
 function renderSidrSiteDetail(){
   const area = document.getElementById('sidrSiteDetailArea');
   if(!area || !SIDR_SELECTED_SITE) return;
@@ -6173,6 +5776,17 @@ function renderSidrSiteDetail(){
     <div class="panel">
       <h2>${esc(imp.site)}</h2>
       <div class="desc">الملف: ${esc(imp.fileName)} (${esc(imp.sheetName)}) — تاريخ الاستيراد: ${esc(imp.importedAt.slice(0,10))}${imp.autoDetected?'':' — روجعت أعمدته يدوياً'}</div>
+      <nav class="tabs" style="margin:10px 0;">
+        <button type="button" data-sidrsiteview="summary" class="${SIDR_SITE_VIEW_MODE==='summary'?'active':''}">📊 ملخص المواد والنواقص</button>
+        <button type="button" data-sidrsiteview="raw" class="${SIDR_SITE_VIEW_MODE==='raw'?'active':''}">📄 الملف الأصلي كاملاً</button>
+      </nav>
+      ${SIDR_SITE_VIEW_MODE==='raw' ? `
+      <div class="btnrow">
+        <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
+        <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
+      </div>
+      ${buildSidrRawFileTable(imp)}
+      ` : `
       <div class="kpi-grid">
         <div class="kpi"><div class="num">${rows.length}</div><div class="lbl">عدد الأصناف المعروضة</div></div>
         <div class="kpi"><div class="num">${totals.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
@@ -6194,8 +5808,16 @@ function renderSidrSiteDetail(){
           </tr>`).join('') || `<tr><td colspan="7" class="empty">لا توجد نتائج مطابقة</td></tr>`}
         </tbody>
       </table></div>
+      `}
     </div>
   `;
+  area.querySelectorAll('[data-sidrsiteview]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(SIDR_SITE_VIEW_MODE===btn.dataset.sidrsiteview) return;
+      SIDR_SITE_VIEW_MODE = btn.dataset.sidrsiteview;
+      renderSidrSiteDetail();
+    });
+  });
   document.getElementById('btnSidrExportSite').addEventListener('click', ()=> sidrDownloadSiteDetail(imp.site));
   document.getElementById('btnSidrDeleteImport').addEventListener('click', async ()=>{
     if(!confirm(`هل أنت متأكد من حذف استيراد الموقع "${imp.site}"؟ هذا لا يؤثر على أي بيانات أخرى (الرصيد، صرف SID، السجلات)، ويمكنك رفعه من جديد لاحقاً.`)) return;
@@ -6795,48 +6417,6 @@ function renderGoodsBatchPreview(){
 
 
 /* ---- تبويب: سجل SID المنفَّذة ---- */
-function renderSidHistoryTab(el){
-  const entries = Object.entries(STATE.processedSids).sort((a,b)=>b[1].date.localeCompare(a[1].date));
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('sidhistory_heading')}</h2>
-      <div class="desc">كل SID يُنفَّذ مرة واحدة فقط. من هنا يمكنك تنزيل تقرير أي SID سابق مجدداً، أو تنزيل شيت "Daily report" وحده، أو إلغاء تنفيذ SID بالخطأ لإعادة رفعه.</div>
-      <div class="tablewrap"><table class="data">
-        <thead><tr><th>${L('sidhistory_th_site')}</th><th>${L('sidhistory_th_date')}</th><th>${L('sidhistory_th_file')}</th><th>${L('sidhistory_th_items')}</th><th>${L('sidhistory_th_requested')}</th><th>${L('sidhistory_th_issued')}</th><th>${L('sidhistory_th_shortage')}</th><th></th><th></th><th></th></tr></thead>
-        <tbody>
-          ${entries.map(([site,r])=>`<tr>
-            <td class="code-cell">${esc(site)}</td>
-            <td>${r.date}</td>
-            <td>${esc(r.filename)}</td>
-            <td>${r.materials_count}</td>
-            <td>${r.requested_units}</td>
-            <td>${r.issued_units}</td>
-            <td>${r.shortage_units>0?`<span class="tag-warn">${r.shortage_units}</span>`:'0'}</td>
-            <td><button class="secondary" data-dlsid="${esc(site)}">تنزيل التقرير</button></td>
-            <td><button class="secondary" data-dldaily="${esc(site)}">Daily report</button></td>
-            <td><button class="danger" data-delsid="${esc(site)}">إلغاء الصرف</button></td>
-          </tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد SID منفَّذة بعد</td></tr>'}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-  el.querySelectorAll('[data-dlsid]').forEach(btn=>{
-    btn.addEventListener('click', ()=>downloadSidReport(btn.dataset.dlsid));
-  });
-  el.querySelectorAll('[data-dldaily]').forEach(btn=>{
-    btn.addEventListener('click', ()=>downloadDailyReportOnly(btn.dataset.dldaily));
-  });
-  el.querySelectorAll('[data-delsid]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const site = btn.dataset.delsid;
-      if(!confirm(`هل أنت متأكد من إلغاء صرف SID الموقع ${site}؟ ستعود كل الكميات/التاجات المصروفة إلى الرصيد، ويمكنك رفع الملف من جديد بعدها. لا يمكن التراجع عن هذا الإجراء.`)) return;
-      const res = await deleteSidRecord(site);
-      alert(res.msg);
-      if(res.ok) renderApp();
-    });
-  });
-}
-
 /* ---- تبويب: المشاكل ---- */
 function renderIssuesTab(el){
   const rows = STATE.issues.slice().reverse();
