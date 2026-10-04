@@ -623,6 +623,51 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     #printRoot .p-total{margin-top:10pt;font-size:12pt;}
     #printRoot .p-sign{display:flex;justify-content:space-between;gap:20pt;margin-top:26pt;font-size:11.5pt;page-break-inside:avoid;}
   }
+  /* ===== طباعة تقرير SID (مراجعة حسب الموقع): تخطيط طباعة مستقل — لا يمس عرض الشاشة العادي ===== */
+  #printRoot.sr{direction:rtl;color:#000;background:#fff;font-family:'Cairo','Segoe UI',Tahoma,Arial,sans-serif;font-size:10pt;line-height:1.3;}
+  #printRoot.sr *{box-sizing:border-box;}
+  #printRoot.sr .sr-head{display:flex;justify-content:space-between;align-items:flex-end;gap:1em;border-bottom:2.2pt solid #000;padding-bottom:.35em;margin-bottom:.55em;}
+  #printRoot.sr .sr-org{font-size:1em;font-weight:600;color:#333;}
+  #printRoot.sr .sr-title{font-size:1.65em;font-weight:800;}
+  #printRoot.sr .sr-site{border:1.8pt solid #000;padding:.3em .75em;margin-bottom:.55em;display:flex;align-items:baseline;gap:.7em;background:#f2f2f2;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #printRoot.sr .sr-site span{font-size:1.05em;font-weight:600;}
+  #printRoot.sr .sr-site b{font-size:2.1em;font-weight:800;unicode-bidi:plaintext;word-break:break-word;}
+  #printRoot.sr table{width:100%;border-collapse:collapse;table-layout:fixed;}
+  #printRoot.sr .sr-meta td{border:.8pt solid #000;padding:.25em .55em;vertical-align:top;font-size:.95em;width:25%;}
+  #printRoot.sr .sr-meta span{display:block;font-size:.8em;color:#444;}
+  #printRoot.sr .sr-meta b{font-weight:700;word-break:break-word;overflow-wrap:anywhere;}
+  #printRoot.sr .sr-kpi{margin:.5em 0;}
+  #printRoot.sr .sr-kpi td{border:.8pt solid #000;text-align:center;padding:.25em .3em;width:25%;}
+  #printRoot.sr .sr-kpi b{display:block;font-size:1.5em;line-height:1.1;font-weight:800;}
+  #printRoot.sr .sr-kpi span{font-size:.85em;color:#333;}
+  #printRoot.sr .sr-kpi td.hot{background:#e4e4e4;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #printRoot.sr .sr-note{font-size:.88em;margin:.3em 0 .4em;}
+  #printRoot.sr .sr-table th{background:#222;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:.8pt solid #000;padding:.28em .3em;font-size:.92em;text-align:center;font-weight:700;}
+  #printRoot.sr .sr-table td{border:.6pt solid #444;padding:.2em .35em;font-size:.95em;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere;}
+  #printRoot.sr .sr-table td.c{text-align:center;}
+  #printRoot.sr .sr-table td.n{text-align:center;font-variant-numeric:tabular-nums;}
+  #printRoot.sr .sr-table tr.short td{background:#ececec;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:700;}
+  #printRoot.sr.raw{line-height:1.12;}
+  #printRoot.sr.raw .sr-head{margin-bottom:.3em;padding-bottom:.2em;}
+  #printRoot.sr.raw .sr-site{margin-bottom:.3em;padding:.15em .6em;}
+  #printRoot.sr.raw .sr-site b{font-size:1.6em;}
+  #printRoot.sr.raw .sr-meta td{padding:.12em .45em;}
+  #printRoot.sr.raw .sr-kpi{margin:.3em 0;}
+  #printRoot.sr.raw .sr-kpi td{padding:.1em .3em;}
+  #printRoot.sr.raw .sr-kpi b{font-size:1.2em;}
+  #printRoot.sr.raw .sr-note{margin:.15em 0 .25em;}
+  #printRoot.sr.raw .sr-table th{padding:.12em .3em;}
+  #printRoot.sr.raw .sr-table td{padding:.04em .3em;}
+  #printRoot.sr.raw .sr-foot{margin-top:.5em;}
+  #printRoot.sr .sr-table thead{display:table-header-group;}
+  #printRoot.sr .sr-table tr{break-inside:avoid;page-break-inside:avoid;}
+  #printRoot.sr .sr-st{font-weight:800;}
+  #printRoot.sr .sr-foot{display:flex;justify-content:space-between;gap:2em;margin-top:.9em;font-size:.95em;break-inside:avoid;page-break-inside:avoid;}
+  @media print{
+    body.printing-sidr{background:#fff !important;}
+    body.printing-sidr #app, body.printing-sidr .modal-overlay, body.printing-sidr .or-bell-panel, body.printing-sidr footer{display:none !important;}
+    body.printing-sidr #printRoot{display:block !important;}
+  }
 </style>
 </head>
 <body>
@@ -5911,6 +5956,7 @@ function renderSidrSiteDetail(){
       </nav>
       ${SIDR_SITE_VIEW_MODE==='raw' ? `
       <div class="btnrow">
+        <button class="secondary" id="btnSidrPrintSite">🖨 طباعة التقرير</button>
         <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
         <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
       </div>
@@ -5923,6 +5969,7 @@ function renderSidrSiteDetail(){
         <div class="kpi ${totals.shortage>0?'warn':''}"><div class="num">${totals.shortage}</div><div class="lbl">إجمالي النقص</div></div>
       </div>
       <div class="btnrow">
+        <button class="secondary" id="btnSidrPrintSite">🖨 طباعة التقرير</button>
         <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
         <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
       </div>
@@ -5947,6 +5994,7 @@ function renderSidrSiteDetail(){
       renderSidrSiteDetail();
     });
   });
+  document.getElementById('btnSidrPrintSite').addEventListener('click', sidrPrintSiteReport);
   document.getElementById('btnSidrExportSite').addEventListener('click', ()=> sidrDownloadSiteDetail(imp.site));
   document.getElementById('btnSidrDeleteImport').addEventListener('click', async ()=>{
     if(!confirm(`هل أنت متأكد من حذف استيراد الموقع "${imp.site}"؟ هذا لا يؤثر على أي بيانات أخرى (الرصيد، صرف SID، السجلات)، ويمكنك رفعه من جديد لاحقاً.`)) return;
@@ -5954,6 +6002,110 @@ function renderSidrSiteDetail(){
     alert(res.msg);
     if(res.ok){ SIDR_SELECTED_SITE=null; renderApp(); }
   });
+}
+
+/* ---- طباعة تقرير الموقع (مراجعة حسب الموقع): تقرير رسمي مبني من نفس البيانات المعروضة حالياً (نفس البحث/الفلتر)،
+   بتخطيط طباعة مستقل (#printRoot.sr) ويُضغط تلقائياً ليتّسع في صفحة A4 واحدة قدر الإمكان.
+   قراءة فقط: لا يعدّل أي بيانات أو حسابات. ---- */
+function sidrSiteDisplayedRows(imp){
+  let rows = sidrRowsWithStatus(imp.rows);
+  const q = trim(SIDR_SITE_SEARCH).toLowerCase();
+  if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
+  if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
+  return rows;
+}
+function sidrReportBdi(v){ return `<bdi>${esc(v)}</bdi>`; }
+function sidrSiteReportHtml(imp, mode){
+  const now = todayStr()+' '+nowTimeStr();
+  const kpiHtml = (n, req, rec, sh, nLabel)=>`<table class="sr-kpi"><tr>
+      <td><b>${n}</b><span>${nLabel}</span></td><td><b>${req}</b><span>إجمالي المطلوب</span></td>
+      <td><b>${rec}</b><span>إجمالي المستلم</span></td><td class="${sh>0?'hot':''}"><b>${sh}</b><span>إجمالي النقص</span></td></tr></table>`;
+  const head = `
+    <div class="sr-head"><div class="sr-org">نظام إدارة وترصيد مواد المستودع</div>
+      <div class="sr-title">${mode==='raw'?'تقرير مراجعة SID — الملف الأصلي كاملاً':'تقرير حالة المواد المسلَّمة في SID'}</div></div>
+    <div class="sr-site"><span>الموقع:</span><b>${esc(imp.site)}</b></div>`;
+  const metaCell = (l,v)=>`<td><span>${l}</span><b>${v}</b></td>`;
+  if(mode==='raw'){
+    const header = imp.rawHeader || [], rows = imp.rawRows || [];
+    const totalCols = Math.max(header.length, ...rows.map(r=>r.length), 1);
+    /* تُحذف الأعمدة الفارغة تماماً (لا عنوان ولا بيانات) كي يتّسع الجدول؛ لا يُفقد أي محتوى */
+    let cols = Array.from({length:totalCols},(_,c)=>c).filter(c=> trim(header[c])!=='' || rows.some(r=>trim(r[c])!==''));
+    if(!cols.length) cols = [0];
+    const colCount = cols.length;
+    const all = sidrRowsWithStatus(imp.rows);
+    const tot = all.reduce((s,r)=>({req:s.req+r.requested, rec:s.rec+r.received, sh:s.sh+r.shortage}), {req:0,rec:0,sh:0});
+    /* عرض كل عمود بحسب طول محتواه (بحدّ أدنى/أقصى) كي لا تلتفّ الأوصاف الطويلة على سطرين دون حاجة */
+    const wt = cols.map(c=>{ const lens = rows.map(r=>trim(r[c]).length).sort((x,y)=>x-y); const p90 = lens.length?lens[Math.floor((lens.length-1)*0.9)]:0; return Math.min(46, Math.max(5, p90, Math.min(trim(header[c]).length,16))); });
+    const wsum = wt.reduce((x,y)=>x+y,0);
+    const colW = wt.map(x=>(96*x/wsum).toFixed(2));
+    const body = rows.map((r,ri)=>`<tr><td class="c">${12+1+ri}</td>${cols.map(c=>`<td>${sidrReportBdi(trim(r[c]))}</td>`).join('')}</tr>`).join('')
+      || `<tr><td class="c" colspan="${colCount+1}">لا توجد بيانات محفوظة لهذا الاستيراد.</td></tr>`;
+    return {orient: colCount>7?'landscape':'portrait', html: `<div class="sr-wrap">${head}
+      <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell('تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('عدد الصفوف',rows.length)}</tr></table>
+      ${kpiHtml(all.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف')}
+      <div class="sr-note">نسخة كاملة من الملف الأصلي كما رُفع (جميع الأعمدة والصفوف) — "#" = رقم السطر في ملف Excel.</div>
+      <table class="sr-table"><colgroup><col style="width:4%">${colW.map(x=>`<col style="width:${x}%">`).join('')}</colgroup>
+        <thead><tr><th>#</th>${cols.map(c=>`<th>${sidrReportBdi(trim(header[c]))||'&nbsp;'}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
+      <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
+  }
+  const rows = sidrSiteDisplayedRows(imp);
+  const tot = rows.reduce((s,r)=>({req:s.req+r.requested, rec:s.rec+r.received, sh:s.sh+r.shortage}), {req:0,rec:0,sh:0});
+  const q = trim(SIDR_SITE_SEARCH);
+  const scope = [SIDR_SITE_SHORTAGE_ONLY?'المواد الناقصة فقط':'كل الأصناف', q?`بحث: «${q}»`:''].filter(Boolean).join(' — ');
+  const body = rows.map((r,i)=>`<tr class="${r.status==='ناقص'?'short':''}"><td class="c">${i+1}</td>
+      <td>${sidrReportBdi(r.productCode)}</td><td>${sidrReportBdi(r.productDescription)}</td><td>${sidrReportBdi(r.description)}</td>
+      <td class="n">${r.requested}</td><td class="n">${r.received}</td>
+      <td class="n">${r.shortage>0?r.shortage:(r.surplus>0?'+'+r.surplus:'0')}</td>
+      <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}</td></tr>`).join('')
+    || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
+  return {orient:'portrait', html: `<div class="sr-wrap">${head}
+    <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell('تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('نطاق العرض',esc(scope))}</tr></table>
+    ${kpiHtml(rows.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف المعروضة')}
+    <table class="sr-table"><colgroup><col style="width:4%"><col style="width:13%"><col style="width:17%"><col style="width:30%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:11%"></colgroup>
+      <thead><tr><th>#</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
+      <tbody>${body}</tbody></table>
+    <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
+}
+/* يضغط الخط تدريجياً حتى يتّسع التقرير في صفحة واحدة (هوامش 10mm)؛ إن لم يتّسع عند أصغر حجم مقروء يمتد لصفحة ثانية برأس جدول متكرر */
+function sidrFitOnePage(root, orient){
+  const pageW = orient==='landscape'?277:190, pageH = orient==='landscape'?190:277;   // الأبعاد المتاحة (mm) بعد الهوامش
+  const px = mm=>mm*96/25.4;
+  const limit = px(pageH)*0.975;
+  root.style.cssText = `display:block;position:fixed;left:-99999px;top:0;width:${pageW}mm;visibility:hidden;`;
+  let size = 11.5; const MIN = 6.5;
+  root.style.fontSize = size+'pt';
+  while(size > MIN && root.scrollHeight > limit){ size -= 0.25; root.style.fontSize = size+'pt'; }
+  const fits = root.scrollHeight <= limit;
+  root.style.cssText = '';
+  root.style.fontSize = size+'pt';
+  return {size, fits};
+}
+async function sidrPrepareSiteReport(mode){
+  const imp = sidrImportForSite(SIDR_SELECTED_SITE); if(!imp) return null;
+  const rep = sidrSiteReportHtml(imp, mode);
+  const old = document.getElementById('printRoot'); if(old) old.remove();
+  const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr'+(mode==='raw'?' raw':''); div.innerHTML = rep.html;
+  document.body.appendChild(div);
+  let st = document.getElementById('sidrPageStyle'); if(st) st.remove();
+  st = document.createElement('style'); st.id = 'sidrPageStyle';
+  st.textContent = `@media print{@page{size:A4 ${rep.orient};margin:10mm;}}`;
+  document.head.appendChild(st);
+  try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
+  const fit = sidrFitOnePage(div, rep.orient);
+  document.body.classList.add('printing-sidr');
+  return Object.assign({orient:rep.orient}, fit);
+}
+function sidrCleanupPrint(){
+  document.body.classList.remove('printing-sidr');
+  const p = document.getElementById('printRoot'); if(p) p.remove();
+  const st = document.getElementById('sidrPageStyle'); if(st) st.remove();
+  window.removeEventListener('afterprint', sidrCleanupPrint);
+}
+async function sidrPrintSiteReport(){
+  const info = await sidrPrepareSiteReport(SIDR_SITE_VIEW_MODE);
+  if(!info) return;
+  window.addEventListener('afterprint', sidrCleanupPrint);
+  setTimeout(()=>{ try{ window.print(); }catch(e){ sidrCleanupPrint(); } }, 60);
 }
 
 /* ---- 3) ملخص النواقص لكل المواقع ---- */
