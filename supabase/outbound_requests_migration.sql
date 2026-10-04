@@ -258,6 +258,13 @@ begin
             (v_item->>'qty')::numeric, nullif(left(trim(coalesce(v_item->>'note','')), 500), ''));
   end loop;
 
+  -- أي اسم مستلم يرد في البنود يُحفظ في قائمة المستلمين الدائمة (إن لم يكن موجوداً)
+  insert into public.outbound_recipients (name_key, name, created_by)
+    select distinct on (lower(regexp_replace(trim(i.recipient), '\s+', ' ', 'g')))
+           lower(regexp_replace(trim(i.recipient), '\s+', ' ', 'g')), regexp_replace(trim(i.recipient), '\s+', ' ', 'g'), v_uid
+      from public.outbound_request_items i where i.request_id = v_id and nullif(trim(coalesce(i.recipient,'')), '') is not null
+    on conflict (name_key) do nothing;
+
   -- تنبيه واحد فقط لكل طلب (unique على request_id) حتى لو أُعيد استدعاء الدالة
   insert into public.outbound_notifications (request_id, req_no, requester_name, title, body)
     values (v_id, v_req_no, v_name, '🔔 طلب إخراج جديد', v_name || ' أرسل طلب إخراج جديد')
@@ -518,6 +525,78 @@ begin
       check (material_src in ('goods','stock','custom'));
   end if;
 end $do$;
+
+
+-- ---------------------------------------------------------------------
+-- 12) المستلمون: قائمة دائمة مشتركة + المستلم المحدد حالياً لكل مستخدم على حدة
+--     • outbound_recipients: كل أسماء المستلمين (تُملأ تلقائياً من الطلبات السابقة + أي اسم جديد يُضاف).
+--     • outbound_user_prefs: المستلم الحالي لكل مستخدم (صف لكل مستخدم) — محفوظ في Supabase فلا يضيع
+--       بتحديث الصفحة أو تسجيل الخروج أو تغيير الجهاز، ولا يتأثر به أي مستخدم آخر.
+--     لا يمس الطلبات ولا المخزون ولا الصلاحيات.
+-- ---------------------------------------------------------------------
+create table if not exists public.outbound_recipients (
+  id         uuid primary key default gen_random_uuid(),
+  name_key   text not null unique,
+  name       text not null,
+  created_by uuid not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.outbound_user_prefs (
+  user_id    uuid primary key,
+  recipient  text,
+  updated_at timestamptz not null default now()
+);
+alter table public.outbound_recipients enable row level security;
+alter table public.outbound_user_prefs enable row level security;
+drop policy if exists outbound_recipients_select on public.outbound_recipients;
+create policy outbound_recipients_select on public.outbound_recipients for select to authenticated
+  using (public.can_request() or public.can_fulfill());
+drop policy if exists outbound_prefs_select on public.outbound_user_prefs;
+create policy outbound_prefs_select on public.outbound_user_prefs for select to authenticated
+  using (user_id = auth.uid());
+revoke all on public.outbound_recipients, public.outbound_user_prefs from anon, authenticated;
+grant select on public.outbound_recipients, public.outbound_user_prefs to authenticated;
+
+-- اختيار/إضافة مستلم وتثبيته كمستلم حالي للمستخدم (اسم فارغ = إلغاء التثبيت)
+create or replace function public.outbound_choose_recipient(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_name text; v_key text; v_row public.outbound_recipients; v_new boolean := false;
+begin
+  if auth.uid() is null then raise exception 'not authenticated'; end if;
+  if not (public.can_request() or public.can_fulfill()) then raise exception 'forbidden: outbound request permission required'; end if;
+  v_name := regexp_replace(trim(coalesce(p_name,'')), '\s+', ' ', 'g');
+  if v_name = '' then
+    insert into public.outbound_user_prefs (user_id, recipient) values (auth.uid(), null)
+      on conflict (user_id) do update set recipient = null, updated_at = now();
+    return jsonb_build_object('name', null, 'created', false);
+  end if;
+  if length(v_name) > 200 then raise exception 'invalid recipient name'; end if;
+  v_key := lower(v_name);
+  select * into v_row from public.outbound_recipients where name_key = v_key;
+  if not found then
+    insert into public.outbound_recipients (name_key, name, created_by) values (v_key, v_name, auth.uid())
+      on conflict (name_key) do nothing returning * into v_row;
+    v_new := found;
+    if not v_new then select * into v_row from public.outbound_recipients where name_key = v_key; end if;
+  end if;
+  insert into public.outbound_user_prefs (user_id, recipient) values (auth.uid(), v_row.name)
+    on conflict (user_id) do update set recipient = excluded.recipient, updated_at = now();
+  return jsonb_build_object('name', v_row.name, 'created', v_new);
+end;
+$$;
+revoke all on function public.outbound_choose_recipient(text) from public;
+revoke execute on function public.outbound_choose_recipient(text) from anon;
+grant execute on function public.outbound_choose_recipient(text) to authenticated;
+
+-- تعبئة أولية: كل أسماء المستلمين الواردة في الطلبات السابقة (إدراج فقط في الجدول الجديد؛ لا تعديل ولا حذف)
+insert into public.outbound_recipients (name_key, name, created_by)
+  select distinct on (lower(regexp_replace(trim(i.recipient), '\s+', ' ', 'g')))
+         lower(regexp_replace(trim(i.recipient), '\s+', ' ', 'g')), regexp_replace(trim(i.recipient), '\s+', ' ', 'g'), r.requester_id
+    from public.outbound_request_items i join public.outbound_requests r on r.id = i.request_id
+   where nullif(trim(coalesce(i.recipient,'')), '') is not null
+   order by lower(regexp_replace(trim(i.recipient), '\s+', ' ', 'g')), r.created_at
+  on conflict (name_key) do nothing;
 
 
 -- ---------------------------------------------------------------------

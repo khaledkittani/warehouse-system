@@ -6975,7 +6975,7 @@ function outreqFresh(){
     perms:{loaded:false, can_request:false, can_fulfill:false},
     available:true, err:'', loaded:false, loading:false,
     view:'list', selectedId:null, mode:'items',
-    reqs:[], favs:[], top:[], custom:[], notifs:[], notifOpen:false,
+    reqs:[], favs:[], top:[], custom:[], recipients:[], prefs:{recipient:''}, notifs:[], notifOpen:false,
     filters:{q:'', site:'', material:'', status:'', from:'', to:''},
     draft:null, cmp:{mat:null, qty:'1', site:'', recipient:'', note:''},
     checks:{}, busy:false, flash:null, sitesCache:null, pollTimer:null
@@ -7007,6 +7007,7 @@ function outreqErrMsg(raw, status){
   if(/qty exceeds remaining/i.test(m)) return 'الكمية أكبر من المتبقي في هذا البند (ربما نُفِّذ جزء منه للتو من مستخدم آخر).';
   if(/request is (completed|cancelled)/i.test(m)) return 'الطلب مكتمل أو ملغي ولا يقبل تنفيذاً إضافياً.';
   if(/site required/i.test(m)) return 'الموقع مطلوب لكل بند.';
+  if(/invalid recipient name/i.test(m)) return 'اسم المستلم غير صالح.';
   if(/unknown custom material/i.test(m)) return 'هذه المادة الجديدة غير مسجّلة — أضفها من قائمة البحث أولاً.';
   if(/invalid material name/i.test(m)) return 'اسم المادة غير صالح.';
   if(/invalid qty/i.test(m)) return 'كمية غير صحيحة.';
@@ -7066,6 +7067,12 @@ async function outreqLoadFavs(){
   try{ OUTREQ.favs = await outreqGet('outbound_favorites?select=material_src,material_key,material_name&order=pinned_at.desc'); }catch(e){}
   try{ OUTREQ.top = await outreqRpc('outbound_top_materials', {p_limit:50}); }catch(e){}
   try{ OUTREQ.custom = await outreqGet('outbound_custom_materials?select=name_key,name&order=name.asc'); }catch(e){}
+  try{ OUTREQ.recipients = await outreqGet('outbound_recipients?select=name_key,name&order=name.asc'); }catch(e){}
+  try{
+    const pr = await outreqGet(`outbound_user_prefs?select=recipient&user_id=eq.${CURRENT_SESSION.user.id}`);
+    OUTREQ.prefs.recipient = (pr[0] && pr[0].recipient) || '';
+    if(!trim(OUTREQ.cmp.recipient)) OUTREQ.cmp.recipient = OUTREQ.prefs.recipient; /* المستلم المثبَّت لهذا المستخدم يبقى هو المحدد في كل طلب جديد */
+  }catch(e){}
 }
 async function outreqInit(){
   outreqReset();
@@ -7240,7 +7247,9 @@ function outreqSuggest(input, dd, getItems, renderItem, onPick, getHeader){
   };
   const run = ()=>{ items = getItems(input.value); hl = 0; paint(); };
   input.addEventListener('input', run);
-  input.addEventListener('focus', run);
+  let mute = false;   /* تركيز برمجي (مثل فتح الشاشة) لا يفتح القائمة فوق الحقول التي تحتها؛ تُفتح بالنقر/الكتابة/Tab */
+  input.addEventListener('focus', ()=>{ if(mute){ mute=false; return; } run(); });
+  input.addEventListener('click', ()=>{ if(dd.style.display==='none') run(); });
   input.addEventListener('keydown', e=>{
     if(e.key==='ArrowDown'){ e.preventDefault(); hl = Math.min(hl+1, items.length-1); paint(); }
     else if(e.key==='ArrowUp'){ e.preventDefault(); hl = Math.max(hl-1, 0); paint(); }
@@ -7255,7 +7264,7 @@ function outreqSuggest(input, dd, getItems, renderItem, onPick, getHeader){
     e.preventDefault();
     const it = items[Number(row.dataset.i)]; dd.style.display='none'; onPick(it, 'click');
   });
-  return {refresh: run};
+  return {refresh: run, focusQuiet: ()=>{ mute = true; input.focus(); setTimeout(()=>{ mute=false; }, 0); }};
 }
 
 /* ============================================================
@@ -7416,7 +7425,7 @@ function outreqPaintNew(root){
         <div class="or-f or-f-add"><label class="flabel">&nbsp;</label><button class="primary" id="orAdd" style="width:100%;">＋ إضافة للطلب</button></div>
       </div>
       <div class="or-optrow">
-        <input type="text" id="orRecipient" placeholder="المستلم (اختياري)" value="${esc(cmp.recipient)}">
+        <div class="qm-search-wrap"><input type="text" id="orRecipient" autocomplete="off" placeholder="المستلم (اختياري) — اضغط للاختيار أو أضف جديداً" value="${esc(cmp.recipient)}"><div id="orRecipientDd" class="qm-dropdown" style="display:none;"></div></div>
         <input type="text" id="orLineNote" placeholder="ملاحظة على البند (اختياري)" value="${esc(cmp.note)}">
       </div>
       <div id="orSiteChips"></div>
@@ -7458,12 +7467,44 @@ function outreqPaintNew(root){
   siteInp.addEventListener('input', ()=>{ cmp.site = siteInp.value; });
   qtyInp.addEventListener('input', ()=>{ cmp.qty = qtyInp.value; });
   qtyInp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); if(trim(cmp.site)){ outreqTryAdd(); } else siteInp.focus(); } });
-  $('orRecipient').addEventListener('input', e=>{ cmp.recipient = e.target.value; });
+  /* المستلم: قائمة قابلة للبحث والإضافة؛ الاختيار يُثبَّت للمستخدم (Supabase) ويبقى للطلبات التالية */
+  const recInp = $('orRecipient');
+  const recSug = outreqSuggest(recInp, $('orRecipientDd'), q=>outreqRecipientSuggestions(q),
+    r=> r.none ? `<span class="or-hint">✕ بدون مستلم</span>`
+      : r.isNew ? `<span style="color:var(--accent);font-weight:600;">➕ إضافة مستلم جديد «<b>${esc(r.name)}</b>»</span>`
+      : `<span>${outreqSquash(r.name)===outreqSquash(cmp.recipient)?'✓':'👤'} <b>${outreqBdi(r.name)}</b></span>`,
+    async r=>{ recInp.blur(); await outreqChooseRecipient(r.none ? '' : r.name); });
+  recInp.addEventListener('focus', ()=>{ recInp.select(); });
+  recInp.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement!==recInp) recInp.value = cmp.recipient || ''; }, 220); });
   $('orLineNote').addEventListener('input', e=>{ cmp.note = e.target.value; });
   $('orAdd').addEventListener('click', ()=>outreqTryAdd());
-  matInp.focus();
+  OUTREQ.matSug = matSug; matSug.focusQuiet();
 }
 function outreqSyncSite(){ const d = outreqLoadDraft(); d.site = OUTREQ.cmp.site; outreqSaveDraft(); }
+/* ---------- المستلمون ---------- */
+function outreqRecipientSuggestions(q){
+  const t = trim(q), sq = outreqSquash(t), cur = outreqSquash(OUTREQ.cmp.recipient);
+  const all = (OUTREQ.recipients||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const showAll = !sq || sq===cur;            /* خانة فارغة أو تعرض الاسم المثبَّت حالياً: كل الأسماء المحفوظة */
+  const toks = sq.split(/\s+/).filter(Boolean);
+  let list = showAll ? all : all.filter(r=>{ const h = outreqNorm(r.name); return toks.every(x=>h.includes(x)); });
+  const out = list.map(r=>({name:r.name}));
+  if(showAll && cur) out.unshift({none:true});
+  if(sq && !all.some(r=>outreqSquash(r.name)===sq)) out.push({isNew:true, name:t.replace(/\s+/g,' ')});
+  return out;
+}
+async function outreqChooseRecipient(name){
+  const cmp = OUTREQ.cmp, inp = document.getElementById('orRecipient');
+  try{
+    const r = await outreqRpc('outbound_choose_recipient', {p_name:name});
+    const nm = r.name || '';
+    if(nm && !(OUTREQ.recipients||[]).some(x=>x.name_key===nm.toLowerCase())) OUTREQ.recipients.push({name_key:nm.toLowerCase(), name:nm});
+    cmp.recipient = nm; OUTREQ.prefs.recipient = nm;
+    if(inp) inp.value = nm;
+    outreqNewMsg('', '');
+    return true;
+  }catch(e){ outreqNewMsg('bad', 'تعذّر حفظ المستلم: '+e.message); if(inp) inp.value = cmp.recipient || ''; return false; }
+}
 async function outreqAddCustom(name){
   try{
     const r = await outreqRpc('outbound_add_custom_material', {p_name:name});
@@ -7496,12 +7537,12 @@ function outreqTryAdd(){
   d.site = site;
   outreqSaveDraft();
   // نُبقي الموقع (مثبّتاً) لإضافة مواد أخرى لنفس الموقع بسرعة، ونفرّغ المادة والكمية والمستلم والملاحظة
-  Object.assign(OUTREQ.cmp, {mat:null, qty:'1', site, recipient:'', note:''}); // تعديل في مكانه: مستمعو الحقول يحملون نفس المرجع
+  Object.assign(OUTREQ.cmp, {mat:null, qty:'1', site, note:''}); /* المستلم يبقى ثابتاً (مثبَّت للمستخدم) */ // تعديل في مكانه: مستمعو الحقول يحملون نفس المرجع
   const $ = id=>document.getElementById(id);
-  $('orMat').value=''; $('orQty').value='1'; $('orRecipient').value=''; $('orLineNote').value=''; $('orMatInfo').textContent='';
+  $('orMat').value=''; $('orQty').value='1'; $('orLineNote').value=''; $('orMatInfo').textContent='';
   outreqNewMsg('', '');
   outreqRenderLines();
-  $('orMat').focus();
+  if(OUTREQ.matSug) OUTREQ.matSug.focusQuiet(); else $('orMat').focus();
   return true;
 }
 function outreqRenderChips(){
@@ -7570,7 +7611,7 @@ function outreqRenderLines(){
   if(sc){
     sc.innerHTML = order.length ? `<div class="or-chips"><div><span class="or-chips-lbl">مواقع هذا الطلب</span>${order.map(s=>`<button type="button" class="or-chip" data-site="${esc(s)}">📍 ${outreqBdi(s)}</button>`).join('')}</div></div>` : '';
     sc.querySelectorAll('[data-site]').forEach(b=>b.addEventListener('click', ()=>{
-      OUTREQ.cmp.site = b.dataset.site; document.getElementById('orSite').value = b.dataset.site; outreqSyncSite(); document.getElementById('orMat').focus();
+      OUTREQ.cmp.site = b.dataset.site; document.getElementById('orSite').value = b.dataset.site; outreqSyncSite(); if(OUTREQ.matSug) OUTREQ.matSug.focusQuiet(); else document.getElementById('orMat').focus();
     }));
   }
 }
