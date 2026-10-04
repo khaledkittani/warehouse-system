@@ -95,7 +95,7 @@ create table if not exists public.outbound_request_items (
   id            uuid primary key default gen_random_uuid(),
   request_id    uuid not null references public.outbound_requests(id) on delete restrict,
   line_no       int  not null,
-  material_src  text not null check (material_src in ('goods','stock')),  -- goods = مخزون المستودع، stock = مواد 4G
+  material_src  text not null check (material_src in ('goods','stock','custom')),  -- goods = مخزون المستودع، stock = مواد 4G، custom = مادة جديدة أضافها طالب الإخراج (outbound_custom_materials)
   material_key  text not null,           -- مفتاح المادة الأصلية في الكتالوج (لا نسخ مكررة)
   material_name text not null,
   site          text not null,
@@ -226,7 +226,8 @@ begin
   for v_item in select * from jsonb_array_elements(p_items) loop
     v_mat  := nullif(trim(coalesce(v_item->>'material_key','')), '');
     v_site := nullif(trim(coalesce(v_item->>'site','')), '');
-    if coalesce(v_item->>'material_src','') not in ('goods','stock') then raise exception 'invalid material_src'; end if;
+    if coalesce(v_item->>'material_src','') not in ('goods','stock','custom') then raise exception 'invalid material_src'; end if;
+    if v_item->>'material_src' = 'custom' and not exists (select 1 from public.outbound_custom_materials c where c.name_key = trim(v_item->>'material_key')) then raise exception 'unknown custom material'; end if;
     if v_mat is null or nullif(trim(coalesce(v_item->>'material_name','')), '') is null then raise exception 'material required'; end if;
     if v_site is null then raise exception 'site required'; end if;
     begin v_qty := (v_item->>'qty')::numeric; exception when others then raise exception 'invalid qty'; end;
@@ -377,16 +378,22 @@ $$;
 -- ---------------------------------------------------------------------
 create or replace function public.outbound_top_materials(p_limit int default 8)
 returns table (material_src text, material_key text, material_name text, uses bigint)
-language sql stable security invoker set search_path = public as $$
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not authenticated'; end if;
+  if not (public.can_request() or public.can_fulfill()) then raise exception 'forbidden: outbound request permission required'; end if;
+  -- الأكثر استخداماً من كل طلبات الإخراج السابقة (عدد مرات ورود المادة كبند)، بدون أي بيانات طلب أو طالب
+  return query
   select i.material_src, i.material_key,
-         (array_agg(i.material_name order by r.created_at desc))[1] as material_name,
-         count(*) as uses
+         (array_agg(i.material_name order by r.created_at desc))[1],
+         count(*)::bigint
     from public.outbound_request_items i
     join public.outbound_requests r on r.id = i.request_id
-   where r.requester_id = auth.uid() and r.status <> 'cancelled'
+   where r.status <> 'cancelled'
    group by i.material_src, i.material_key
    order by count(*) desc, max(r.created_at) desc
-   limit greatest(1, least(coalesce(p_limit, 8), 50));
+   limit greatest(1, least(coalesce(p_limit, 8), 100));
+end;
 $$;
 
 revoke all on function public.outbound_create_request(jsonb, text, uuid)        from public;
@@ -454,6 +461,63 @@ revoke delete, truncate, references, trigger on public.wms_state from anon, auth
 revoke insert, update on public.wms_state from anon;
 revoke insert, update, delete, truncate, references, trigger on public.profiles from anon, authenticated;
 revoke insert, update, delete, truncate, references, trigger on public.wms_backups from anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 11) مواد جديدة يضيفها طالب الإخراج (لا تمس مخزون النظام ولا الأرصدة)
+--     مخزون النظام blob واحد في wms_state يكتبه المدير/موظف المستودع فقط، ولا يجوز لمن يملك can_request
+--     كتابته (ولا يُحمد خطر الكتابة فوق حركات مخزون متزامنة). لذلك تُحفظ المادة الجديدة في جدول صغير
+--     مستقل، وتُدمج مع كتالوج المخزون في بحث الطلب. الاسم الموحَّد (بدون تكرار) هو المفتاح.
+--     بند من مادة جديدة يُنفَّذ بلا خصم من أي رصيد (لا رصيد لها أصلاً).
+-- ---------------------------------------------------------------------
+create table if not exists public.outbound_custom_materials (
+  id         uuid primary key default gen_random_uuid(),
+  name_key   text not null unique,      -- الاسم بحروف صغيرة ومسافات موحّدة (منع التكرار)
+  name       text not null,
+  created_by uuid not null,
+  created_at timestamptz not null default now()
+);
+alter table public.outbound_custom_materials enable row level security;
+drop policy if exists outbound_custom_select on public.outbound_custom_materials;
+create policy outbound_custom_select on public.outbound_custom_materials for select to authenticated
+  using (public.can_request() or public.can_fulfill());
+revoke all on public.outbound_custom_materials from anon, authenticated;
+grant select on public.outbound_custom_materials to authenticated;
+
+create or replace function public.outbound_add_custom_material(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_name text; v_key text; v_row public.outbound_custom_materials; v_new boolean := false;
+begin
+  if auth.uid() is null then raise exception 'not authenticated'; end if;
+  if not (public.can_request() or public.can_fulfill()) then raise exception 'forbidden: outbound request permission required'; end if;
+  v_name := regexp_replace(trim(coalesce(p_name,'')), '\s+', ' ', 'g');
+  if v_name = '' or length(v_name) > 200 then raise exception 'invalid material name'; end if;
+  v_key := lower(v_name);
+  select * into v_row from public.outbound_custom_materials where name_key = v_key;
+  if not found then
+    insert into public.outbound_custom_materials (name_key, name, created_by) values (v_key, v_name, auth.uid())
+      on conflict (name_key) do nothing returning * into v_row;
+    v_new := found;
+    if not v_new then select * into v_row from public.outbound_custom_materials where name_key = v_key; end if;
+  end if;
+  return jsonb_build_object('key', v_row.name_key, 'name', v_row.name, 'created', v_new);
+end;
+$$;
+revoke all on function public.outbound_add_custom_material(text) from public;
+revoke execute on function public.outbound_add_custom_material(text) from anon;
+grant execute on function public.outbound_add_custom_material(text) to authenticated;
+
+-- السماح بـ 'custom' في بنود الطلبات القائمة (للتثبيتات السابقة لهذا التعديل)
+do $do$
+begin
+  if exists (select 1 from pg_constraint where conrelid='public.outbound_request_items'::regclass and contype='c'
+             and pg_get_constraintdef(oid) like '%material_src%' and pg_get_constraintdef(oid) not like '%custom%') then
+    alter table public.outbound_request_items drop constraint outbound_request_items_material_src_check;
+    alter table public.outbound_request_items add constraint outbound_request_items_material_src_check
+      check (material_src in ('goods','stock','custom'));
+  end if;
+end $do$;
 
 
 -- ---------------------------------------------------------------------

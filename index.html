@@ -571,6 +571,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .or-star{cursor:pointer;font-size:15px;padding:0 4px;}
   .or-chips{margin:0 0 12px;display:flex;flex-direction:column;gap:6px;}
   .or-chips-lbl{font-size:12px;font-weight:700;color:var(--muted);margin-inline-end:8px;}
+  .or-dd-head{padding:5px 12px;font-size:12px;font-weight:700;color:var(--muted);background:var(--paper);border-bottom:1px solid var(--line);}
   .or-chip{font-family:'Cairo',sans-serif;font-size:13px;font-weight:600;background:#faf8f2;border:1.5px solid var(--line);border-radius:18px;padding:5px 12px;margin:2px 3px;cursor:pointer;}
   .or-chip:hover{border-color:var(--steel);background:#eef4f3;}
   .or-chip.fav{background:var(--amber-bg);border-color:#e7cd9c;}
@@ -6974,7 +6975,7 @@ function outreqFresh(){
     perms:{loaded:false, can_request:false, can_fulfill:false},
     available:true, err:'', loaded:false, loading:false,
     view:'list', selectedId:null, mode:'items',
-    reqs:[], favs:[], top:[], notifs:[], notifOpen:false,
+    reqs:[], favs:[], top:[], custom:[], notifs:[], notifOpen:false,
     filters:{q:'', site:'', material:'', status:'', from:'', to:''},
     draft:null, cmp:{mat:null, qty:'1', site:'', recipient:'', note:''},
     checks:{}, busy:false, flash:null, sitesCache:null, pollTimer:null
@@ -7006,6 +7007,8 @@ function outreqErrMsg(raw, status){
   if(/qty exceeds remaining/i.test(m)) return 'الكمية أكبر من المتبقي في هذا البند (ربما نُفِّذ جزء منه للتو من مستخدم آخر).';
   if(/request is (completed|cancelled)/i.test(m)) return 'الطلب مكتمل أو ملغي ولا يقبل تنفيذاً إضافياً.';
   if(/site required/i.test(m)) return 'الموقع مطلوب لكل بند.';
+  if(/unknown custom material/i.test(m)) return 'هذه المادة الجديدة غير مسجّلة — أضفها من قائمة البحث أولاً.';
+  if(/invalid material name/i.test(m)) return 'اسم المادة غير صالح.';
   if(/invalid qty/i.test(m)) return 'كمية غير صحيحة.';
   if(/not authenticated|JWT/i.test(m)) return 'انتهت الجلسة — سجّل الدخول من جديد.';
   return m || ('خطأ غير متوقع (HTTP '+status+')');
@@ -7061,7 +7064,8 @@ async function outreqLoadNotifs(){
 async function outreqLoadFavs(){
   if(!outreqCanRequest()) return;
   try{ OUTREQ.favs = await outreqGet('outbound_favorites?select=material_src,material_key,material_name&order=pinned_at.desc'); }catch(e){}
-  try{ OUTREQ.top = await outreqRpc('outbound_top_materials', {p_limit:8}); }catch(e){}
+  try{ OUTREQ.top = await outreqRpc('outbound_top_materials', {p_limit:50}); }catch(e){}
+  try{ OUTREQ.custom = await outreqGet('outbound_custom_materials?select=name_key,name&order=name.asc'); }catch(e){}
 }
 async function outreqInit(){
   outreqReset();
@@ -7150,34 +7154,52 @@ function outreqMaterialList(){
   Object.keys(gc).forEach(k=>{ const c=gc[k]; out.push({src:'goods', key:k, name:c.name||k, code:c.code||'', rem:(c.totalIn||0)-(c.totalOut||0), unit:c.unit||''}); });
   const st = STATE.stock || {};
   Object.keys(st).forEach(k=>{ const s=st[k]; out.push({src:'stock', key:k, name:s.description||k, code:s.code||k, rem:(s.total_quantity||0)-(s.issued_quantity||0), unit:''}); });
+  (OUTREQ.custom||[]).forEach(c=>out.push({src:'custom', key:c.name_key, name:c.name, code:'', rem:null, unit:''})); /* مواد أضافها طالبو الإخراج — لا تمس مخزون النظام */
   return out;
 }
+function outreqIcon(src){ return src==='stock' ? '📡' : (src==='custom' ? '🆕' : '📦'); }
 function outreqMatKey(src, key){ return src+'|'+key; }
 function outreqFavSet(){ const s = new Set(); OUTREQ.favs.forEach(f=>s.add(outreqMatKey(f.material_src, f.material_key))); return s; }
 function outreqTopMap(){ const m = {}; OUTREQ.top.forEach(t=>{ m[outreqMatKey(t.material_src, t.material_key)] = Number(t.uses)||0; }); return m; }
+function outreqSquash(s){ return outreqNorm(trim(s)).replace(/\s+/g,' '); }
+/* نفس أسلوب بحث رصد التاجات: خانة فارغة = أكثر 10 مواد استخداماً في طلبات الإخراج السابقة (الأكثر أولاً)،
+   وعند الكتابة = تصفية فورية من قائمة المواد الموجودة (كل كلمة مكتوبة يجب أن تظهر في الاسم أو الكود). */
 function outreqSearchMaterials(q){
   const all = outreqMaterialList();
-  const favs = outreqFavSet(), top = outreqTopMap();
+  const top = outreqTopMap(), favs = outreqFavSet();
   const nq = outreqNorm(trim(q));
   const toks = nq.split(/\s+/).filter(Boolean);
-  let list;
   if(!toks.length){
-    list = all.filter(m=> favs.has(outreqMatKey(m.src,m.key)) || top[outreqMatKey(m.src,m.key)]);
-  } else {
-    list = all.filter(m=>{ const hay = outreqNorm(m.name+' '+m.code); return toks.every(t=>hay.includes(t)); });
+    /* الترتيب كما يحسبه Supabase: عدد الاستخدامات تنازلياً ثم الأحدث استخداماً عند التساوي */
+    const rank = {}; OUTREQ.top.forEach((t,ix)=>{ rank[outreqMatKey(t.material_src,t.material_key)] = ix; });
+    return all.filter(m=>top[outreqMatKey(m.src,m.key)])
+      .sort((a,b)=> top[outreqMatKey(b.src,b.key)]-top[outreqMatKey(a.src,a.key)] || rank[outreqMatKey(a.src,a.key)]-rank[outreqMatKey(b.src,b.key)])
+      .slice(0,10);
   }
   const score = m=>{
     const k = outreqMatKey(m.src,m.key); let s = 0;
     if(favs.has(k)) s += 10000;
     s += (top[k]||0)*100;
     const n = outreqNorm(m.name);
-    if(nq && n.startsWith(nq)) s += 50;
-    if(nq && outreqNorm(m.code)===nq) s += 80;
+    if(n.startsWith(nq)) s += 50;
+    if(outreqNorm(m.code)===nq) s += 80;
     return s;
   };
-  return list.map(m=>({m, s:score(m)})).sort((a,b)=> b.s-a.s || a.m.name.localeCompare(b.m.name)).slice(0,12).map(x=>x.m);
+  return all.filter(m=>{ const hay = outreqNorm(m.name+' '+m.code); return toks.every(t=>hay.includes(t)); })
+    .map(m=>({m, s:score(m)})).sort((a,b)=> b.s-a.s || a.m.name.localeCompare(b.m.name)).slice(0,10).map(x=>x.m);
+}
+/* قائمة الخانة: النتائج + (عند كتابة اسم غير موجود تماماً) خيار "+ إضافة مادة جديدة" */
+function outreqMaterialSuggestions(q){
+  const res = outreqSearchMaterials(q); const t = trim(q);
+  const out = res.slice();
+  if(t){
+    const sq = outreqSquash(t);
+    if(!outreqMaterialList().some(m=>outreqSquash(m.name)===sq)) out.push({isNew:true, name:t.replace(/\s+/g,' ')});
+  }
+  return out;
 }
 function outreqFindMaterial(src, key){
+  if(src==='custom'){ const c=(OUTREQ.custom||[]).find(x=>x.name_key===key); return c ? {src, key, name:c.name, code:'', rem:null, unit:''} : null; }
   if(src==='goods'){ const c=(STATE.goodsCatalog||{})[key]; return c ? {src, key, name:c.name||key, code:c.code||'', rem:(c.totalIn||0)-(c.totalOut||0), unit:c.unit||''} : null; }
   const s=(STATE.stock||{})[key]; return s ? {src, key, name:s.description||key, code:s.code||key, rem:(s.total_quantity||0)-(s.issued_quantity||0), unit:''} : null;
 }
@@ -7208,12 +7230,13 @@ function outreqSearchSites(q){
 }
 
 /* ---------- مكوّن اقتراحات خفيف (سهم/Enter/Esc/نقر) ---------- */
-function outreqSuggest(input, dd, getItems, renderItem, onPick){
+function outreqSuggest(input, dd, getItems, renderItem, onPick, getHeader){
   let items = [], hl = 0;
   const paint = ()=>{
     if(!items.length){ dd.innerHTML = ''; dd.style.display='none'; return; }
     dd.style.display = 'block';
-    dd.innerHTML = items.map((it,i)=>`<div class="qm-dropdown-item ${i===hl?'hl':''}" data-i="${i}">${renderItem(it)}</div>`).join('');
+    const head = getHeader ? getHeader(input.value) : '';
+    dd.innerHTML = (head ? `<div class="or-dd-head">${head}</div>` : '') + items.map((it,i)=>`<div class="qm-dropdown-item ${i===hl?'hl':''}" data-i="${i}">${renderItem(it)}</div>`).join('');
   };
   const run = ()=>{ items = getItems(input.value); hl = 0; paint(); };
   input.addEventListener('input', run);
@@ -7406,10 +7429,18 @@ function outreqPaintNew(root){
 
   const matInp = $('orMat'), siteInp = $('orSite'), qtyInp = $('orQty');
   const favs = ()=>outreqFavSet();
-  const matSug = outreqSuggest(matInp, $('orMatDd'), q=>outreqSearchMaterials(q),
-    m=>{ const fav = favs().has(outreqMatKey(m.src,m.key));
-      return `<span><span class="or-star ${fav?'on':''}" data-favtoggle="${esc(outreqMatKey(m.src,m.key))}" title="${fav?'إزالة من المفضلة':'تثبيت في المفضلة'}">${fav?'⭐':'☆'}</span> ${m.src==='stock'?'📡':'📦'} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code)}</span></span><span class="rem">${outreqNum(m.rem)}</span>`; },
-    (m, how)=>{ outreqPickMaterial(m); qtyInp.focus(); qtyInp.select(); });
+  const matSug = outreqSuggest(matInp, $('orMatDd'), q=>outreqMaterialSuggestions(q),
+    m=>{
+      if(m.isNew) return `<span style="color:var(--accent);font-weight:600;">➕ إضافة مادة جديدة «<b>${esc(m.name)}</b>»</span>`;
+      if(m.src==='custom') return `<span>🆕 <b>${outreqBdi(m.name)}</b> <span class="or-hint">مادة جديدة</span></span>`;
+      const fav = favs().has(outreqMatKey(m.src,m.key));
+      return `<span><span class="or-star ${fav?'on':''}" data-favtoggle="${esc(outreqMatKey(m.src,m.key))}" title="${fav?'إزالة من المفضلة':'تثبيت في المفضلة'}">${fav?'⭐':'☆'}</span> ${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code)}</span></span><span class="rem">${outreqNum(m.rem)}</span>`; },
+    async (m, how)=>{
+      if(m.isNew){ const ok = await outreqAddCustom(m.name); if(!ok) return; }
+      else outreqPickMaterial(m);
+      qtyInp.focus(); qtyInp.select();
+    },
+    q=> trim(q) ? '' : 'الأكثر استخداماً في الطلبات السابقة');
   $('orMatDd').addEventListener('mousedown', e=>{
     const t = e.target.closest('[data-favtoggle]'); if(!t) return;
     e.preventDefault(); e.stopPropagation();
@@ -7433,11 +7464,21 @@ function outreqPaintNew(root){
   matInp.focus();
 }
 function outreqSyncSite(){ const d = outreqLoadDraft(); d.site = OUTREQ.cmp.site; outreqSaveDraft(); }
+async function outreqAddCustom(name){
+  try{
+    const r = await outreqRpc('outbound_add_custom_material', {p_name:name});
+    if(!(OUTREQ.custom||[]).some(c=>c.name_key===r.key)) OUTREQ.custom.push({name_key:r.key, name:r.name});
+    outreqPickMaterial({src:'custom', key:r.key, name:r.name, code:'', rem:null, unit:''});
+    outreqNewMsg('', '');
+    return true;
+  }catch(e){ outreqNewMsg('bad', 'تعذّر إضافة المادة الجديدة: '+e.message); return false; }
+}
 function outreqPickMaterial(m){
   OUTREQ.cmp.mat = {src:m.src, key:m.key, name:m.name};
   const inp = document.getElementById('orMat'); if(inp) inp.value = m.name;
   const info = document.getElementById('orMatInfo');
-  if(info) info.textContent = `${m.src==='stock'?'مواد 4G':'مخزون المستودع'} · ${m.code||'—'} · الرصيد الحالي: ${outreqNum(m.rem)} ${m.unit||''}`;
+  if(info && m.src==='custom') info.textContent = 'مادة جديدة — غير مسجّلة في المخزون (لا يُخصم لها رصيد عند التنفيذ)';
+  else if(info) info.textContent = `${m.src==='stock'?'مواد 4G':'مخزون المستودع'} · ${m.code||'—'} · الرصيد الحالي: ${outreqNum(m.rem)} ${m.unit||''}`;
 }
 function outreqNewMsg(kind, text){
   const el = document.getElementById('orNewMsg'); if(!el) return;
@@ -7467,7 +7508,7 @@ function outreqRenderChips(){
   const box = document.getElementById('orChips'); if(!box) return;
   const favs = OUTREQ.favs.map(f=>({src:f.material_src, key:f.material_key, name:f.material_name, fav:true}));
   const favSet = outreqFavSet();
-  const tops = OUTREQ.top.filter(t=>!favSet.has(outreqMatKey(t.material_src,t.material_key))).map(t=>({src:t.material_src, key:t.material_key, name:t.material_name, fav:false}));
+  const tops = []; /* الأكثر استخداماً صارت تظهر في قائمة خانة المادة نفسها */
   const chip = c=>{
     const m = outreqFindMaterial(c.src, c.key);
     if(!m) return '';
@@ -7508,7 +7549,7 @@ function outreqRenderLines(){
     ${d.lines.length ? `<div class="tablewrap" style="max-height:none;"><table class="data" id="orLinesTable">
       <thead><tr><th>المادة</th><th>الكمية</th><th>المستلم</th><th>ملاحظة</th><th></th></tr></thead>
       <tbody>${order.map(s=>`<tr class="or-site-row"><td colspan="5">📍 <b>${outreqBdi(s)}</b> <span class="or-hint">(${bySite[s].length} بند)</span></td></tr>` + bySite[s].map(l=>`
-        <tr><td>${l.src==='stock'?'📡':'📦'} ${outreqBdi(l.name)}</td>
+        <tr><td>${outreqIcon(l.src)} ${outreqBdi(l.name)}</td>
         <td><input type="text" class="or-qty-edit" data-lid="${esc(l.id)}" value="${outreqNum(l.qty)}" inputmode="decimal" style="width:80px;"></td>
         <td>${esc(l.recipient||'—')}</td><td>${esc(l.note||'—')}</td>
         <td><button class="danger" data-rm="${esc(l.id)}" style="padding:3px 10px;">✕</button></td></tr>`).join('')).join('')}</tbody></table></div>` : `<div class="empty">لم تُضَف بنود بعد — اختر مادة ثم الكمية ثم الموقع.</div>`}
@@ -7559,6 +7600,7 @@ async function outreqSubmitDraft(){
    تفاصيل الطلب + شاشة التنفيذ (مرتَّبة حسب المادة)
    ============================================================ */
 function outreqMaterialBalance(src, key){
+  if(src==='custom') return Infinity; /* مادة جديدة بلا رصيد: لا قيد على الكمية ولا خصم من المخزون */
   const m = outreqFindMaterial(src, key); return m ? m.rem : null;
 }
 function outreqPaintDetail(root){
@@ -7609,7 +7651,7 @@ function outreqPaintItems(r){
   body.innerHTML = `<div class="tablewrap" style="max-height:none;"><table class="data" id="orItemsTable">
     <thead><tr><th>#</th><th>المادة</th><th>الموقع</th><th>المستلم</th><th>المطلوب</th><th>تم الإخراج</th><th>المتبقي</th><th>الحالة</th></tr></thead>
     <tbody>${r.items.map(i=>{ const s = outreqLineStatus(r,i); return `<tr>
-      <td>${i.line_no}</td><td>${i.material_src==='stock'?'📡':'📦'} ${outreqBdi(i.material_name)}${i.note?`<div class="or-hint">${esc(i.note)}</div>`:''}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'—')}</td>
+      <td>${i.line_no}</td><td>${outreqIcon(i.material_src)} ${outreqBdi(i.material_name)}${i.note?`<div class="or-hint">${esc(i.note)}</div>`:''}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'—')}</td>
       <td>${outreqNum(i.qty_requested)}</td><td>${outreqNum(i.qty_done)}</td><td>${outreqNum(i.qty_requested-i.qty_done)}</td><td><span class="pill ${s.c}">${s.t}</span></td></tr>`; }).join('')}</tbody></table></div>`;
 }
 function outreqExecHistoryHtml(r){
@@ -7641,10 +7683,10 @@ function outreqPaintPick(r){
       const lowCls = (bal!==null && bal < (req-done)) ? 'bad' : 'ok';
       return `<div class="or-group">
         <div class="or-group-head">
-          <div><b>${g.src==='stock'?'📡':'📦'} ${outreqBdi(g.name)}</b></div>
+          <div><b>${outreqIcon(g.src)} ${outreqBdi(g.name)}</b></div>
           <div class="or-group-meta">
             <span>مطلوب <b>${outreqNum(req)}</b></span><span>تم <b>${outreqNum(done)}</b></span><span>متبقٍ <b>${outreqNum(req-done)}</b></span>
-            <span class="pill ${lowCls}">الرصيد: ${bal===null?'غير موجودة في المخزون':outreqNum(bal)}</span>
+            <span class="pill ${lowCls}">${bal===Infinity?'مادة جديدة — بلا خصم من المخزون':'الرصيد: '+(bal===null?'غير موجودة في المخزون':outreqNum(bal))}</span>
             ${!closed ? `<button type="button" class="secondary" data-checkall="${esc(g.k)}" style="padding:3px 10px;font-size:12px;">☑ تحديد الكل</button>` : ''}
           </div>
         </div>
@@ -7700,6 +7742,7 @@ function outreqSavedRemotely(){ return SUPABASE_ONLINE !== false; }
 async function outreqApplyInventory(item, qty, req){
   const reqNo = req.req_no;
   const note = `طلب إخراج ${reqNo} — ${req.requester_name}${item.recipient?' — المستلم: '+item.recipient:''}`;
+  if(item.material_src==='custom') return {ok:true, entries:[], ref:'بدون خصم مخزون (مادة جديدة)'}; /* لا رصيد لها: يُسجَّل التنفيذ فقط */
   if(item.material_src==='goods'){
     const res = await submitGoodsQuickEntry({key:item.material_key, qty, direction:'OUT', source:'طلب إخراج '+reqNo, site:item.site, note, reqNo});
     if(!res.ok) return {ok:false, msg:res.msg};
