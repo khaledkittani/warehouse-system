@@ -645,6 +645,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-note{font-size:.88em;margin:.3em 0 .4em;}
   #printRoot.sr .sr-table th{background:#222;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:.8pt solid #000;padding:.28em .3em;font-size:.92em;text-align:center;font-weight:700;}
   #printRoot.sr .sr-table td{border:.6pt solid #444;padding:.2em .35em;font-size:.95em;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere;}
+  #printRoot.sr .sr-rnote{font-weight:400;font-size:.8em;}
   #printRoot.sr .sr-table td.c{text-align:center;}
   #printRoot.sr .sr-table td.n{text-align:center;font-variant-numeric:tabular-nums;}
   #printRoot.sr .sr-table tr.short td{background:#ececec;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:700;}
@@ -1880,7 +1881,13 @@ function sidrBuildRows(detection){
     const requested = (cols.qty!==null && cols.qty!==undefined) ? sidrToNum(r[cols.qty]) : 0;
     const received = (cols.received!==null && cols.received!==undefined) ? sidrToNum(r[cols.received]) : 0;
     if(requested<=0 && received<=0) return;
-    rows.push({productCode: catVal, productDescription: pdescVal, description: descVal, requested, received});
+    const row = {productCode: catVal, productDescription: pdescVal, description: descVal, requested, received};
+    /* ملاحظة نصية ملاصقة للكمية المستلمة (مثل "1 FROM BULK") تُحفظ كملاحظة للعرض فقط — لا تدخل في الحساب ولا في التوقيع */
+    if(cols.received!==null && cols.received!==undefined){
+      const rawRecv = r[cols.received];
+      if(trim(rawRecv)!=='' && !(isFinite(Number(String(rawRecv).replace(/,/g,'').trim())))) row.note = trim(rawRecv);
+    }
+    rows.push(row);
   });
   return rows;
 }
@@ -5829,8 +5836,8 @@ function buildSidrEntryCard(entry, idx){
   return div;
 }
 
-function openSidrColumnReviewModal(idx){
-  const entry = SIDR_BATCH[idx];
+function openSidrColumnReviewModal(idx, entryOverride, onDone){
+  const entry = entryOverride || SIDR_BATCH[idx];
   const det = entry.detection;
   if(!det){ alert('تعذّر عرض الأعمدة لهذا الشيت.'); return; }
   const sampleRows = det.dataRows.slice(0,5);
@@ -5873,7 +5880,7 @@ function openSidrColumnReviewModal(idx){
       }
       sidrRebuildWithManualCols(entry, manualCols);
       closeModal();
-      renderSidrBatchPreview();
+      if(onDone) onDone(); else renderSidrBatchPreview();
     });
   }, {maxWidth:'760px'});
 }
@@ -5995,7 +6002,7 @@ function renderSidrSiteDetail(){
       renderSidrSiteDetail();
     });
   });
-  document.getElementById('btnSidrPrintSite').addEventListener('click', sidrPrintSiteReport);
+  document.getElementById('btnSidrPrintSite').addEventListener('click', ()=>sidrPrintSiteReport());
   document.getElementById('btnSidrExportSite').addEventListener('click', ()=> sidrDownloadSiteDetail(imp.site));
   document.getElementById('btnSidrDeleteImport').addEventListener('click', async ()=>{
     if(!confirm(`هل أنت متأكد من حذف استيراد الموقع "${imp.site}"؟ هذا لا يؤثر على أي بيانات أخرى (الرصيد، صرف SID، السجلات)، ويمكنك رفعه من جديد لاحقاً.`)) return;
@@ -6008,15 +6015,16 @@ function renderSidrSiteDetail(){
 /* ---- طباعة تقرير الموقع (مراجعة حسب الموقع): تقرير رسمي مبني من نفس البيانات المعروضة حالياً (نفس البحث/الفلتر)،
    بتخطيط طباعة مستقل (#printRoot.sr) ويُضغط تلقائياً ليتّسع في صفحة A4 واحدة قدر الإمكان.
    قراءة فقط: لا يعدّل أي بيانات أو حسابات. ---- */
-function sidrSiteDisplayedRows(imp){
+function sidrSiteDisplayedRows(imp, opts){
+  const search = opts ? opts.search : SIDR_SITE_SEARCH, shortOnly = opts ? opts.shortageOnly : SIDR_SITE_SHORTAGE_ONLY;
   let rows = sidrRowsWithStatus(imp.rows);
-  const q = trim(SIDR_SITE_SEARCH).toLowerCase();
+  const q = trim(search).toLowerCase();
   if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
-  if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
+  if(shortOnly) rows = rows.filter(r=>r.status==='ناقص');
   return rows;
 }
 function sidrReportBdi(v){ return `<bdi>${esc(v)}</bdi>`; }
-function sidrSiteReportHtml(imp, mode){
+function sidrSiteReportHtml(imp, mode, opts){
   const now = todayStr()+' '+nowTimeStr();
   const kpiHtml = (n, req, rec, sh, nLabel)=>`<table class="sr-kpi"><tr>
       <td><b>${n}</b><span>${nLabel}</span></td><td><b>${req}</b><span>إجمالي المطلوب</span></td>
@@ -6049,18 +6057,18 @@ function sidrSiteReportHtml(imp, mode){
         <thead><tr><th>#</th>${cols.map(c=>`<th>${sidrReportBdi(trim(header[c]))||'&nbsp;'}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
       <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
   }
-  const rows = sidrSiteDisplayedRows(imp);
+  const rows = sidrSiteDisplayedRows(imp, opts);
   const tot = rows.reduce((s,r)=>({req:s.req+r.requested, rec:s.rec+r.received, sh:s.sh+r.shortage}), {req:0,rec:0,sh:0});
-  const q = trim(SIDR_SITE_SEARCH);
-  const scope = [SIDR_SITE_SHORTAGE_ONLY?'المواد الناقصة فقط':'كل الأصناف', q?`بحث: «${q}»`:''].filter(Boolean).join(' — ');
+  const q = trim(opts ? opts.search : SIDR_SITE_SEARCH);
+  const scope = [(opts ? opts.shortageOnly : SIDR_SITE_SHORTAGE_ONLY)?'المواد الناقصة فقط':'كل الأصناف', q?`بحث: «${q}»`:''].filter(Boolean).join(' — ');
   const body = rows.map((r,i)=>`<tr class="${r.status==='ناقص'?'short':''}"><td class="c">${i+1}</td>
       <td>${sidrReportBdi(r.productCode)}</td><td>${sidrReportBdi(r.productDescription)}</td><td>${sidrReportBdi(r.description)}</td>
       <td class="n">${r.requested}</td><td class="n">${r.received}</td>
       <td class="n">${r.shortage>0?r.shortage:(r.surplus>0?'+'+r.surplus:'0')}</td>
-      <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}</td></tr>`).join('')
+      <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}${r.note?`<br><span class="sr-rnote">${sidrReportBdi(r.note)}</span>`:''}</td></tr>`).join('')
     || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
   return {orient:'portrait', html: `<div class="sr-wrap">${head}
-    <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell('تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('نطاق العرض',esc(scope))}</tr></table>
+    <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell(opts&&opts.dateLabel?opts.dateLabel:'تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('نطاق العرض',esc(scope))}</tr></table>
     ${kpiHtml(rows.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف المعروضة')}
     <table class="sr-table"><colgroup><col style="width:4%"><col style="width:13%"><col style="width:17%"><col style="width:30%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:11%"></colgroup>
       <thead><tr><th>#</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
@@ -6081,9 +6089,9 @@ function sidrFitOnePage(root, orient){
   root.style.fontSize = size+'pt';
   return {size, fits};
 }
-async function sidrPrepareSiteReport(mode){
-  const imp = sidrImportForSite(SIDR_SELECTED_SITE); if(!imp) return null;
-  const rep = sidrSiteReportHtml(imp, mode);
+async function sidrPrepareSiteReport(mode, impOverride, opts){
+  const imp = impOverride || sidrImportForSite(SIDR_SELECTED_SITE); if(!imp) return null;
+  const rep = sidrSiteReportHtml(imp, mode, opts);
   const old = document.getElementById('printRoot'); if(old) old.remove();
   const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr'+(mode==='raw'?' raw':''); div.innerHTML = rep.html;
   document.body.appendChild(div);
@@ -6102,11 +6110,164 @@ function sidrCleanupPrint(){
   const st = document.getElementById('sidrPageStyle'); if(st) st.remove();
   window.removeEventListener('afterprint', sidrCleanupPrint);
 }
-async function sidrPrintSiteReport(){
-  const info = await sidrPrepareSiteReport(SIDR_SITE_VIEW_MODE);
+async function sidrPrintSiteReport(impOverride, opts){
+  const info = await sidrPrepareSiteReport(impOverride ? 'summary' : SIDR_SITE_VIEW_MODE, impOverride, opts);
   if(!info) return;
   window.addEventListener('afterprint', sidrCleanupPrint);
   setTimeout(()=>{ try{ window.print(); }catch(e){ sidrCleanupPrint(); } }, 60);
+}
+
+/* ---- 3-أ) تحليل Sheet واحد من ملف Excel بشكل مستقل ----
+   كل Sheet يُعالَج وحده في الذاكرة فقط: لا يُحفظ ولا يُدمج مع أي استيراد سابق ولا يدخل في "الملخص العام" أدناه
+   إلا إذا ضغطت صراحةً "إضافة هذا الشيت إلى الملخص العام". رفع ملف آخر يستبدل التحليل الحالي فقط. */
+let SIDR_SOLO = null; // {fileName, loadedAt, sheets:[{fileName,sheetName,site,rows,detection,needsReview,error}], selected, search, shortageOnly, msg}
+function sidrSoloEntry(){ return SIDR_SOLO && SIDR_SOLO.selected!==null ? SIDR_SOLO.sheets[SIDR_SOLO.selected] : null; }
+function sidrSoloImp(entry){ return {id:'SOLO', fileName:entry.fileName, sheetName:entry.sheetName, site:entry.site, importedAt:SIDR_SOLO.loadedAt, rows:entry.rows, rawHeader:[], rawRows:[]}; }
+function sidrSoloOpts(){ return {search:SIDR_SOLO.search, shortageOnly:SIDR_SOLO.shortageOnly, dateLabel:'تاريخ قراءة الملف'}; }
+function sidrSoloStats(entry){
+  const all = sidrRowsWithStatus(entry.rows||[]);
+  return {items:all.length, requested:all.reduce((s,r)=>s+r.requested,0), received:all.reduce((s,r)=>s+r.received,0),
+          shortage:all.reduce((s,r)=>s+r.shortage,0), shortItems:all.filter(r=>r.status==='ناقص').length};
+}
+function sidrSoloAoa(entry){
+  const rows = sidrSiteDisplayedRows(sidrSoloImp(entry), sidrSoloOpts());
+  const header = ['الموقع / الـ Sheet','Product code','Product description','Description (اسم/وصف المادة)','الكمية المطلوبة','الكمية المستلمة','كمية النقص / الزيادة','الحالة','ملاحظات'];
+  const body = rows.map(r=>[entry.site, r.productCode, r.productDescription, r.description, r.requested, r.received, r.shortage>0?r.shortage:(r.surplus>0?('+'+r.surplus):0), r.status, r.note||'']);
+  const tot = rows.reduce((s,r)=>({q:s.q+r.requested, r:s.r+r.received, sh:s.sh+r.shortage}), {q:0,r:0,sh:0});
+  body.push(['','','','الإجمالي', tot.q, tot.r, tot.sh, '', '']);
+  return [header, ...body];
+}
+function sidrSoloExport(entry){
+  downloadWorkbook([{name: safeSheetName(entry.site), ws: aoaSheet(sidrSoloAoa(entry),[18,16,30,30,14,14,16,12,22])}],
+    `ملخص_نواقص_${safeSheetName(entry.site)}_${todayStr()}.xlsx`);
+}
+/* إضافة اختيارية وصريحة لشيت واحد إلى الملخص العام (تستخدم نفس منطق الاستيراد الحالي: استبدال/تجاهل التطابق) */
+async function sidrSoloAddToGlobal(entry){
+  if(entry.error || entry.needsReview || !entry.rows.length) return {ok:false, msg:'هذا الشيت غير جاهز للإضافة (راجع تعيين الأعمدة أولاً أو لا توجد صفوف).'};
+  const saved = SIDR_BATCH;
+  const copy = Object.assign({}, entry, {skip:false});
+  SIDR_BATCH = [copy];
+  sidrAnnotateBatchActions();
+  if(copy.action==='duplicate'){ SIDR_BATCH = saved; return {ok:false, msg:copy.actionNote}; }
+  const q = copy.action==='replace' ? `${copy.actionNote}\nهل تريد استبداله وإضافته إلى الملخص العام؟` : `سيُضاف الموقع "${copy.site}" إلى الملخص العام (ويُحفظ). هل تريد المتابعة؟`;
+  if(!confirm(q)){ SIDR_BATCH = saved; return {ok:false, msg:'أُلغيت الإضافة.', cancelled:true}; }
+  const res = await sidrCommitBatch();
+  SIDR_BATCH = saved;
+  return res;
+}
+function renderSidrSoloArea(){
+  const el = document.getElementById('sidrSoloArea'); if(!el) return;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>📂 ملخص نواقص Sheet من ملف Excel (مستقل — بدون دمج)</h2>
+      <div class="desc">ارفع ملف Excel، ثم اختر من القائمة الـ Sheet المطلوب؛ يُستخرج ملخص النواقص لهذا الـ Sheet وحده، دون دمجه مع أي ملف أو Sheet آخر ودون حفظه في النظام. يمكنك لاحقاً رفع ملف آخر ومعالجة أي Sheet منه بنفس الطريقة. الدمج مع "الملخص العام" أدناه يتم فقط إذا ضغطت زر الإضافة صراحةً.</div>
+      <div class="filebox">
+        <label class="flabel">ملف Excel (.xlsx / .xls)</label>
+        <input type="file" id="sidrSoloFile" accept=".xlsx,.xls">
+      </div>
+      <div class="btnrow"><button class="primary" id="btnSidrSoloRead">قراءة الملف وعرض قائمة الـ Sheets</button></div>
+      <div id="sidrSoloMsg"></div>
+      <div id="sidrSoloSheets"></div>
+      <div id="sidrSoloResult"></div>
+    </div>`;
+  document.getElementById('btnSidrSoloRead').addEventListener('click', async ()=>{
+    const inp = document.getElementById('sidrSoloFile');
+    if(!inp.files.length){ showMsg('sidrSoloMsg','warn','اختر ملف Excel أولاً.'); return; }
+    setBusy('btnSidrSoloRead', true, 'جارِ القراءة…');
+    try{
+      const res = await sidrParseWorkbookFile(inp.files[0]);
+      SIDR_SOLO = {fileName: res.fileName, loadedAt: new Date().toISOString(), sheets: res.sheets.map(sh=>Object.assign({fileName:res.fileName}, sh)), selected:null, search:'', shortageOnly:true};
+      renderSidrSoloArea();
+      showMsg('sidrSoloMsg','ok',`تمت قراءة الملف "${res.fileName}": ${res.sheets.length} Sheet — اختر Sheet من القائمة أدناه.`);
+    }catch(e){
+      setBusy('btnSidrSoloRead', false, 'قراءة الملف وعرض قائمة الـ Sheets');
+      showMsg('sidrSoloMsg','bad','تعذّرت قراءة الملف: '+e.message);
+    }
+  });
+  if(!SIDR_SOLO) return;
+  renderSidrSoloSheets();
+  renderSidrSoloResult();
+}
+function renderSidrSoloSheets(){
+  const wrap = document.getElementById('sidrSoloSheets'); if(!wrap || !SIDR_SOLO) return;
+  wrap.innerHTML = `
+    <h3 style="margin-top:14px;">الـ Sheets الموجودة في الملف: ${esc(SIDR_SOLO.fileName)} (${SIDR_SOLO.sheets.length})</h3>
+    <div class="tablewrap"><table class="data">
+      <thead><tr><th>#</th><th>اسم الـ Sheet / الموقع</th><th>عدد الأصناف</th><th>إجمالي المطلوب</th><th>إجمالي المستلم</th><th>إجمالي النقص</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>
+        ${SIDR_SOLO.sheets.map((sh,i)=>{
+          const st = sidrSoloStats(sh);
+          const stat = sh.error ? '<span class="pill bad">به مشكلة</span>' : sh.needsReview ? '<span class="pill warn">الأعمدة بحاجة لمراجعة</span>' : '<span class="pill ok">جاهز</span>';
+          return `<tr data-sidrsolo-row="${i}" style="${SIDR_SOLO.selected===i?'background:rgba(37,99,235,.10);':''}">
+            <td>${i+1}</td><td><b>${esc(sh.sheetName)}</b></td>
+            <td>${sh.error?'—':st.items}</td><td>${sh.error?'—':st.requested}</td><td>${sh.error?'—':st.received}</td>
+            <td>${sh.error?'—':(st.shortage>0?`<span class="tag-warn">${st.shortage}</span>`:'0')}</td><td>${stat}</td>
+            <td><button class="${SIDR_SOLO.selected===i?'primary':'secondary'}" data-sidrsolo-pick="${i}" type="button" style="padding:4px 12px;font-size:12px;">${SIDR_SOLO.selected===i?'✔ المحدد':'اختيار'}</button></td></tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>`;
+  wrap.querySelectorAll('[data-sidrsolo-pick]').forEach(b=>b.addEventListener('click', ()=>{
+    SIDR_SOLO.selected = Number(b.dataset.sidrsoloPick); SIDR_SOLO.search=''; SIDR_SOLO.shortageOnly=true;
+    renderSidrSoloSheets(); renderSidrSoloResult();
+  }));
+}
+function renderSidrSoloResult(){
+  const wrap = document.getElementById('sidrSoloResult'); if(!wrap) return;
+  const entry = sidrSoloEntry();
+  if(!entry){ wrap.innerHTML = SIDR_SOLO ? '<div class="desc" style="margin-top:12px;">اختر Sheet من القائمة لعرض ملخص نواقصه.</div>' : ''; return; }
+  const head = `<div class="sr-solo-head" style="margin-top:16px;padding:10px 14px;border:2px solid var(--border,#888);border-radius:8px;">
+      <div style="font-size:12px;opacity:.8;">الموقع / الـ Sheet</div><div style="font-size:22px;font-weight:800;" dir="auto">${esc(entry.site)}</div>
+      <div style="font-size:12px;opacity:.8;">الملف: ${esc(entry.fileName)}</div></div>`;
+  if(entry.error){ wrap.innerHTML = head + `<div class="msg bad" style="margin-top:10px;">${esc(entry.error)}</div>`; return; }
+  const st = sidrSoloStats(entry);
+  const review = entry.needsReview ? `<div class="msg warn" style="margin-top:10px;">${entry.rows.length?'تم تحديد الأعمدة تلقائياً لكن بثقة منخفضة — راجع التعيين للتأكد من صحة الأرقام.':'تعذّر تحديد أعمدة الكمية تلقائياً لهذا الشيت — حدّدها يدوياً.'}
+      <div class="btnrow" style="margin-top:8px;"><button class="secondary" id="btnSidrSoloReview" type="button">🛠️ مراجعة تعيين الأعمدة</button></div></div>` : '';
+  wrap.innerHTML = head + review + (entry.rows.length ? `
+    <div class="kpi-grid" style="margin-top:12px;">
+      <div class="kpi"><div class="num">${st.items}</div><div class="lbl">عدد الأصناف</div></div>
+      <div class="kpi"><div class="num">${st.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
+      <div class="kpi"><div class="num">${st.received}</div><div class="lbl">إجمالي المستلم</div></div>
+      <div class="kpi ${st.shortage?'warn':''}"><div class="num">${st.shortage}</div><div class="lbl">إجمالي النقص (${st.shortItems} صنف)</div></div>
+    </div>
+    <div class="grid2" style="margin-top:10px;">
+      <input type="text" id="sidrSoloSearch" placeholder="ابحث باسم المادة أو الكود..." value="${esc(SIDR_SOLO.search)}">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sidrSoloShortOnly" ${SIDR_SOLO.shortageOnly?'checked':''}> إظهار المواد الناقصة فقط</label>
+    </div>
+    <div class="btnrow" style="margin-top:10px;">
+      <button class="secondary" id="btnSidrSoloExport" type="button">📥 تصدير Excel</button>
+      <button class="secondary" id="btnSidrSoloPrint" type="button">🖨 طباعة</button>
+      ${entry.needsReview?'':'<button class="secondary" id="btnSidrSoloAdd" type="button">➕ إضافة هذا الشيت إلى الملخص العام (اختياري)</button>'}
+    </div>
+    <div id="sidrSoloAddMsg"></div>
+    <div id="sidrSoloTable"></div>` : '');
+  const rv = document.getElementById('btnSidrSoloReview');
+  if(rv) rv.addEventListener('click', ()=> openSidrColumnReviewModal(null, entry, ()=>{ renderSidrSoloSheets(); renderSidrSoloResult(); }));
+  if(!entry.rows.length) return;
+  const si = document.getElementById('sidrSoloSearch');
+  const deb = debounce(()=>{ const pos = si.selectionStart; renderSidrSoloTable(); const i2 = document.getElementById('sidrSoloSearch'); if(i2){ i2.focus(); try{ i2.setSelectionRange(pos,pos); }catch(e){} } });
+  si.addEventListener('input', ()=>{ SIDR_SOLO.search = si.value; deb(); });
+  document.getElementById('sidrSoloShortOnly').addEventListener('change', e=>{ SIDR_SOLO.shortageOnly = e.target.checked; renderSidrSoloTable(); });
+  document.getElementById('btnSidrSoloExport').addEventListener('click', ()=>sidrSoloExport(entry));
+  document.getElementById('btnSidrSoloPrint').addEventListener('click', ()=>sidrPrintSiteReport(sidrSoloImp(entry), sidrSoloOpts()));
+  const add = document.getElementById('btnSidrSoloAdd');
+  if(add) add.addEventListener('click', async ()=>{
+    const res = await sidrSoloAddToGlobal(entry);
+    if(res.ok){ alert(`تمت إضافة "${entry.site}" إلى الملخص العام.`); const host = document.getElementById('tabContent'); if(host) renderSidTab(host); }
+    else if(!res.cancelled) showMsg('sidrSoloAddMsg','warn',res.msg);
+  });
+  renderSidrSoloTable();
+}
+function renderSidrSoloTable(){
+  const area = document.getElementById('sidrSoloTable'); const entry = sidrSoloEntry(); if(!area || !entry) return;
+  const rows = sidrSiteDisplayedRows(sidrSoloImp(entry), sidrSoloOpts());
+  area.innerHTML = `<div class="tablewrap" style="margin-top:10px;"><table class="data">
+    <thead><tr><th>#</th><th>Product code</th><th>Product description</th><th>Description (اسم/وصف المادة)</th><th>المطلوب</th><th>المستلم</th><th>النقص / الزيادة</th><th>الحالة / ملاحظات</th></tr></thead>
+    <tbody>${rows.map((r,i)=>`<tr>
+      <td>${i+1}</td><td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td>
+      <td>${r.requested}</td><td>${r.received}</td>
+      <td>${r.shortage>0?`<span class="tag-warn">${r.shortage}</span>`:(r.surplus>0?'+'+r.surplus:'0')}</td>
+      <td>${r.status}${r.note?` <span class="desc" style="display:inline;">(${esc(r.note)})</span>`:''}</td></tr>`).join('') || `<tr><td colspan="8" class="empty">${SIDR_SOLO.shortageOnly?'لا توجد نواقص مطابقة 🎉':'لا توجد نتائج'}</td></tr>`}</tbody>
+  </table></div>`;
 }
 
 /* ---- 3) ملخص النواقص لكل المواقع ---- */
@@ -6118,6 +6279,7 @@ function renderSidrSummaryView(el){
   const g = sidrGlobalSummary();
   const sites = sidrSitesList();
   el.innerHTML = `
+    <div id="sidrSoloArea"></div>
     <div class="panel">
       <h2>ملخص النواقص لجميع المواقع</h2>
       <div class="kpi-grid">
@@ -6147,6 +6309,7 @@ function renderSidrSummaryView(el){
     </div>
     <div id="sidrSummaryTableArea"></div>
   `;
+  renderSidrSoloArea();
   if(!sites.length) return;
   const searchInp = document.getElementById('sidrSummarySearch');
   const debouncedSummary = debounce(()=>{
