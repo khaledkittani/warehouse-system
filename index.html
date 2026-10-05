@@ -599,29 +599,30 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     .or-bell-panel{right:8px;top:48px;}
   }
   @media print{
-    @page{size:A4 portrait;margin:14mm 12mm;}
     body.printing-outreq{background:#fff !important;}
     body.printing-outreq #app, body.printing-outreq .modal-overlay, body.printing-outreq .or-bell-panel, body.printing-outreq footer{display:none !important;}
-    body.printing-outreq #printRoot{display:block !important;color:#000;font-family:'Cairo','Segoe UI',Tahoma,Arial,sans-serif;direction:rtl;}
+    body.printing-outreq #printRoot{display:block !important;color:#000;font-family:'Cairo','Segoe UI',Tahoma,Arial,sans-serif;direction:rtl;font-size:11pt;line-height:1.25;}
     #printRoot .p-wrap{width:100%;}
-    #printRoot h1{font-size:24pt;text-align:center;margin:0 0 10pt;border-bottom:2.5pt solid #000;padding-bottom:6pt;}
+    #printRoot h1{font-size:17pt;text-align:center;margin:0 0 4pt;border-bottom:2pt solid #000;padding-bottom:3pt;line-height:1.2;}
     #printRoot table{width:100%;border-collapse:collapse;table-layout:fixed;}
-    #printRoot .p-meta td{border:1pt solid #000;padding:5pt 8pt;font-size:12pt;width:25%;vertical-align:top;}
-    #printRoot .p-meta span{display:block;font-size:9.5pt;color:#333;}
-    #printRoot .p-meta b{font-size:13pt;word-break:break-word;}
-    #printRoot .p-note{margin:8pt 0;font-size:11.5pt;border:1pt dashed #555;padding:5pt 8pt;}
-    #printRoot .p-table{margin-top:10pt;}
-    #printRoot .p-table th{background:#222 !important;color:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:11pt;padding:6pt 5pt;border:1pt solid #000;text-align:center;}
-    #printRoot .p-table td{border:1pt solid #444;padding:6pt 6pt;font-size:12pt;word-break:break-word;overflow-wrap:anywhere;vertical-align:middle;}
+    #printRoot .p-meta td{border:.8pt solid #000;padding:2pt 6pt;font-size:10.5pt;width:25%;vertical-align:middle;}
+    #printRoot .p-meta span{display:block;font-size:8.5pt;color:#333;line-height:1.15;}
+    #printRoot .p-meta b{font-size:11.5pt;word-break:break-word;line-height:1.2;}
+    #printRoot .p-note{margin:4pt 0 0;font-size:10pt;border:.8pt dashed #555;padding:2.5pt 6pt;}
+    #printRoot .p-table{margin-top:5pt;}
+    #printRoot .p-table th{background:#222 !important;color:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:10pt;padding:3pt 4pt;border:.8pt solid #000;text-align:center;}
+    #printRoot .p-table td{border:.8pt solid #444;padding:3.8pt 5pt;font-size:12pt;word-break:break-word;overflow-wrap:anywhere;vertical-align:middle;}
     #printRoot .p-table thead{display:table-header-group;}
     #printRoot .p-table tr{page-break-inside:avoid;break-inside:avoid;}
     #printRoot .p-table td.c{text-align:center;}
-    #printRoot .p-table td.b{font-weight:800;font-size:14pt;}
-    #printRoot .p-table td.box{font-size:18pt;line-height:1;}
-    #printRoot .p-grp td{background:#e6e6e6 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:800;font-size:12.5pt;page-break-after:avoid;break-after:avoid;}
-    #printRoot .p-sub{font-weight:500;font-size:10.5pt;color:#333;}
-    #printRoot .p-total{margin-top:10pt;font-size:12pt;}
-    #printRoot .p-sign{display:flex;justify-content:space-between;gap:20pt;margin-top:26pt;font-size:11.5pt;page-break-inside:avoid;}
+    #printRoot .p-table td.b{font-weight:800;font-size:13pt;}
+    #printRoot .p-table td.box{font-size:14pt;line-height:1;}
+    #printRoot .p-table td.done{font-weight:700;font-size:13pt;}
+    #printRoot .p-table tr.p-end td{border:none;padding:0;}
+    #printRoot .p-table tbody.p-tail{break-inside:avoid;page-break-inside:avoid;}
+    #printRoot .p-endwrap{break-inside:avoid;page-break-inside:avoid;}
+    #printRoot .p-total{margin-top:5pt;font-size:10.5pt;}
+    #printRoot .p-sign{display:flex;justify-content:space-between;gap:16pt;margin-top:12pt;font-size:10.5pt;page-break-inside:avoid;break-inside:avoid;}
   }
   /* ===== طباعة تقرير SID (مراجعة حسب الموقع): تخطيط طباعة مستقل — لا يمس عرض الشاشة العادي ===== */
   #printRoot.sr{direction:rtl;color:#000;background:#fff;font-family:'Cairo','Segoe UI',Tahoma,Arial,sans-serif;font-size:10pt;line-height:1.3;}
@@ -8095,14 +8096,19 @@ document.addEventListener('click', (e)=>{
    ============================================================ */
 function outreqPrintHtml(r){
   const t = outreqTotals(r);
-  const groups = outreqGroups(r);
+  const groups = outreqGroups(r);   // الترتيب حسب المادة كما كان — بدون صفوف عناوين مجموعات منفصلة
   let n = 0;
-  const rows = groups.map(g=>{
-    const head = `<tr class="p-grp"><td colspan="7">${outreqBdi(g.name)} <span class="p-sub">— إجمالي المطلوب: ${outreqNum(g.items.reduce((s,i)=>s+i.qty_requested,0))}</span></td></tr>`;
-    return head + g.items.map(i=>{ n++; return `<tr>
-      <td class="c">${n}</td><td>${outreqBdi(g.name)}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'')}</td>
-      <td class="c b">${outreqNum(i.qty_requested)}</td><td class="c">${i.qty_done>0?outreqNum(i.qty_done):''}</td><td class="c box">☐</td></tr>`; }).join('');
-  }).join('');
+  const flat = [];
+  groups.forEach(g=>g.items.forEach(i=>flat.push({name:g.name, i})));
+  const rowHtml = ({name,i})=>{ n++; return `<tr>
+      <td class="c">${n}</td><td>${outreqBdi(name)}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'')}</td>
+      <td class="c b">${outreqNum(i.qty_requested)}</td>${i.qty_done>0?`<td class="c done">${outreqNum(i.qty_done)}</td>`:`<td class="c box">☐</td>`}</tr>`; };
+  const endBlock = `<div class="p-endwrap"><div class="p-total">عدد البنود: <b>${r.items.length}</b> &nbsp;|&nbsp; إجمالي الكمية المطلوبة: <b>${outreqNum(t.req)}</b></div>
+    <div class="p-sign"><div>اسم المنفِّذ / التوقيع: ................................</div><div>اسم المستلم / التوقيع: ................................</div></div></div>`;
+  /* آخر بند يبقى مع التوقيعات في نفس الصفحة (لا صفحة أخيرة فارغة إلا من التوقيع) */
+  const KEEP = 2;   // آخر بندين يبقيان مع التوقيعات
+  const head = flat.slice(0,-KEEP).map(rowHtml).join('');
+  const last = flat.slice(-KEEP).map(rowHtml).join('');
   return `<div class="p-wrap">
     <h1>طلب إخراج بضاعة</h1>
     <table class="p-meta"><tr>
@@ -8111,9 +8117,9 @@ function outreqPrintHtml(r){
       <td><span>التاريخ</span><b>${outreqFmt(r.created_at)}</b></td>
       <td><span>الحالة</span><b>${esc(OUTREQ_STATUS[r.status]||r.status)}</b></td></tr></table>
     ${r.note?`<div class="p-note">ملاحظة: ${esc(r.note)}</div>`:''}
-    <table class="p-table"><thead><tr><th style="width:6%">#</th><th style="width:30%">المادة</th><th style="width:24%">الموقع</th><th style="width:16%">المستلم</th><th style="width:8%">المطلوب</th><th style="width:8%">تم</th><th style="width:8%">تم الإخراج</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="p-total">عدد البنود: <b>${r.items.length}</b> &nbsp;|&nbsp; إجمالي الكمية المطلوبة: <b>${outreqNum(t.req)}</b></div>
-    <div class="p-sign"><div>اسم المنفِّذ / التوقيع: ................................</div><div>اسم المستلم / التوقيع: ................................</div></div>
+    <table class="p-table"><colgroup><col style="width:5%"><col style="width:38%"><col style="width:21%"><col style="width:14%"><col style="width:10%"><col style="width:12%"></colgroup>
+      <thead><tr><th>#</th><th>المادة</th><th>الموقع</th><th>المستلم</th><th>المطلوب</th><th>تم الإخراج</th></tr></thead>
+      <tbody>${head}</tbody><tbody class="p-tail">${last}<tr class="p-end"><td colspan="6">${endBlock}</td></tr></tbody></table>
   </div>`;
 }
 function outreqPrint(id){
@@ -8121,8 +8127,15 @@ function outreqPrint(id){
   const old = document.getElementById('printRoot'); if(old) old.remove();
   const div = document.createElement('div'); div.id = 'printRoot'; div.innerHTML = outreqPrintHtml(r);
   document.body.appendChild(div);
+  /* @page خاص بطباعة الطلب فقط (يُحقن عند الطباعة ويُزال بعدها): A4 عمودي، هوامش صغيرة، وتذييل "Page x of y" + اسم النظام */
+  let st = document.getElementById('outreqPageStyle'); if(st) st.remove();
+  st = document.createElement('style'); st.id = 'outreqPageStyle';
+  st.textContent = `@media print{@page{size:A4 portrait;margin:9mm 10mm 13mm;
+    @bottom-center{content:"Page " counter(page) " of " counter(pages);font:9pt Arial,sans-serif;color:#333;}
+    @bottom-right{content:"نظام إدارة وترصيد مواد المستودع";font:9pt 'Cairo','Segoe UI',Tahoma,Arial,sans-serif;color:#333;}}}`;
+  document.head.appendChild(st);
   document.body.classList.add('printing-outreq');
-  const cleanup = ()=>{ document.body.classList.remove('printing-outreq'); const p = document.getElementById('printRoot'); if(p) p.remove(); window.removeEventListener('afterprint', cleanup); };
+  const cleanup = ()=>{ document.body.classList.remove('printing-outreq'); const p = document.getElementById('printRoot'); if(p) p.remove(); const s2 = document.getElementById('outreqPageStyle'); if(s2) s2.remove(); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
   setTimeout(()=>{ try{ window.print(); }catch(e){} }, 50);
 }
