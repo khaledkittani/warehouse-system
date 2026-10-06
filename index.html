@@ -645,6 +645,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-note{font-size:.88em;margin:.3em 0 .4em;}
   #printRoot.sr .sr-table th{background:#222;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:.8pt solid #000;padding:.28em .3em;font-size:.92em;text-align:center;font-weight:700;}
   #printRoot.sr .sr-table td{border:.6pt solid #444;padding:.2em .35em;font-size:.95em;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere;}
+  .sidr-recv{width:84px;padding:4px 6px;font-family:'IBM Plex Mono',monospace;font-size:13px;text-align:center;border:1px solid var(--line);border-radius:4px;background:#fff;}
+  .sidr-recv:focus{outline:none;border-color:var(--steel);box-shadow:0 0 0 2px rgba(31,95,92,.18);}
+  .sidr-recv.edited{background:var(--amber-bg);border-color:#d9b36a;font-weight:700;}
+  .sidr-recv-reset{border:none;background:none;cursor:pointer;font-size:15px;padding:0 4px;color:var(--steel-dark);}
   #printRoot.sr .sr-rnote{font-weight:400;font-size:.8em;}
   #printRoot.sr .sr-table td.c{text-align:center;}
   #printRoot.sr .sr-table td.n{text-align:center;font-variant-numeric:tabular-nums;}
@@ -5899,9 +5903,7 @@ function renderSidrSitesView(el){
       <h2>مراجعة حسب الموقع</h2>
       ${sites.length ? `
       <div class="grid2">
-        <select id="sidrSiteSelect">
-          ${sites.map(s=>`<option value="${esc(s)}" ${SIDR_SELECTED_SITE===s?'selected':''}>${esc(s)}</option>`).join('')}
-        </select>
+        <div class="qm-search-wrap"><input type="text" id="sidrSiteCombo" autocomplete="off" placeholder="اكتب اسم الموقع أو اختر من القائمة…" value="${esc(SIDR_SELECTED_SITE)}"><div id="sidrSiteDd" class="qm-dropdown" style="display:none;"></div></div>
         <input type="text" id="sidrSiteSearch" placeholder="ابحث باسم المادة أو الكود..." value="${esc(SIDR_SITE_SEARCH)}">
       </div>
       <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;">
@@ -5912,7 +5914,26 @@ function renderSidrSitesView(el){
     <div id="sidrSiteDetailArea"></div>
   `;
   if(!sites.length) return;
-  document.getElementById('sidrSiteSelect').addEventListener('change', (e)=>{ SIDR_SELECTED_SITE = e.target.value; renderSidrSiteDetail(); });
+  /* اختيار الموقع بالكتابة: تظهر مواقع مطابقة لما تكتبه (أو كل المواقع عند النقر)، سهم/Enter/نقر للاختيار */
+  const siteInp = document.getElementById('sidrSiteCombo');
+  const siteNorm = v=>trim(v).toLowerCase();
+  const shortCount = (site)=>{ const imp = sidrImportForSite(site); return imp ? sidrRowsWithStatus(imp.rows).filter(r=>r.status==='ناقص').length : 0; };
+  const pickSite = (site)=>{ SIDR_SELECTED_SITE = site; siteInp.value = site; siteInp.blur(); renderSidrSiteDetail(); };
+  outreqSuggest(siteInp, document.getElementById('sidrSiteDd'), q=>{
+      const all = sidrSitesList(); const n = siteNorm(q);
+      if(!n || n===siteNorm(SIDR_SELECTED_SITE)) return all;   // الحقل يعرض الموقع الحالي ⇒ اعرض كل المواقع
+      return all.filter(s=>siteNorm(s).includes(n)).sort((a,b)=> (siteNorm(a).startsWith(n)?0:1)-(siteNorm(b).startsWith(n)?0:1) || a.localeCompare(b));
+    },
+    s=>{ const c = shortCount(s); return `<span><b>${esc(s)}</b>${s===SIDR_SELECTED_SITE?' <span class="or-hint">(المحدد)</span>':''}</span><span class="rem">${c?`نواقص: ${c}`:'مكتمل'}</span>`; },
+    s=>pickSite(s),
+    q=>{ const n = siteNorm(q); const cnt = (!n || n===siteNorm(SIDR_SELECTED_SITE)) ? sites.length : sidrSitesList().filter(s=>siteNorm(s).includes(n)).length; return `اختر الموقع (${cnt} من ${sites.length})`; });
+  siteInp.addEventListener('focus', ()=>{ try{ siteInp.select(); }catch(e){} });
+  siteInp.addEventListener('change', ()=>{   // كتابة اسم كامل مطابق ثم الخروج من الحقل ⇒ يُختار مباشرة؛ وإلا يُستعاد الموقع الحالي
+    const exact = sidrSitesList().find(s=>siteNorm(s)===siteNorm(siteInp.value));
+    if(exact && exact!==SIDR_SELECTED_SITE){ SIDR_SELECTED_SITE = exact; siteInp.value = exact; renderSidrSiteDetail(); }
+    else if(!exact){ setTimeout(()=>{ if(document.activeElement!==siteInp) siteInp.value = SIDR_SELECTED_SITE; }, 200); }
+  });
+  siteInp.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement!==siteInp && siteNorm(siteInp.value)!==siteNorm(SIDR_SELECTED_SITE) && !sidrSitesList().some(s=>siteNorm(s)===siteNorm(siteInp.value))) siteInp.value = SIDR_SELECTED_SITE; }, 250); });
   const searchInp = document.getElementById('sidrSiteSearch');
   const debouncedSiteDetail = debounce(()=>{
     const pos = searchInp.selectionStart;
@@ -5949,10 +5970,12 @@ function renderSidrSiteDetail(){
   if(!area || !SIDR_SELECTED_SITE) return;
   const imp = sidrImportForSite(SIDR_SELECTED_SITE);
   if(!imp){ area.innerHTML=''; return; }
-  let rows = sidrRowsWithStatus(imp.rows);
+  let rows = sidrRowsWithStatus(imp.rows).map((r,i)=>Object.assign(r,{_i:i}));   // _i = موضع الصف الأصلي (لتعديل المستلم)
   const q = trim(SIDR_SITE_SEARCH).toLowerCase();
   if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
   if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
+  const canEditRecv = CURRENT_ROLE==='admin';
+  const editedCount = imp.rows.filter(r=>r.origReceived!==undefined).length;
   const totals = rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received, shortage:s.shortage+r.shortage}), {requested:0,received:0,shortage:0});
   area.innerHTML = `
     <div class="panel">
@@ -5981,12 +6004,16 @@ function renderSidrSiteDetail(){
         <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
         <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
       </div>
+      ${canEditRecv?`<div class="desc" style="margin:8px 0;">✏️ يمكنك تعديل خانة <b>المستلم</b> مباشرة عند استلام مواد إضافية لهذا الموقع (اكتب الرقم ثم Enter). يُحفظ التعديل تلقائياً ويُحدّث النقص والتقارير والملخص العام. الخلايا المعدّلة تظهر بلون مميّز${editedCount?` (${editedCount} معدّلة حالياً)`:''}، وزر ↩ يعيد القيمة الأصلية من الملف.</div><div id="sidrRecvMsg"></div>`:''}
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
+        <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم${canEditRecv?' ✏️':''}</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
         <tbody>
           ${rows.map(r=>`<tr>
             <td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td>
-            <td>${r.requested}</td><td>${r.received}</td>
+            <td>${r.requested}</td>
+            <td class="sidr-recv-cell">${canEditRecv
+              ? `<input type="number" class="sidr-recv${r.origReceived!==undefined?' edited':''}" data-ri="${r._i}" value="${r.received}" min="0" step="any" inputmode="decimal" title="${r.origReceived!==undefined?`القيمة الأصلية في الملف: ${r.origReceived}`:'اكتب الكمية المستلمة ثم Enter'}">${r.origReceived!==undefined?`<button type="button" class="sidr-recv-reset" data-ri="${r._i}" title="استرجاع القيمة الأصلية من الملف (${r.origReceived})">↩</button>`:''}`
+              : r.received}${r.note?` <span class="or-hint">(${esc(r.note)})</span>`:''}</td>
             <td>${r.shortage>0?`<span class="tag-warn">${r.shortage}</span>`:(r.surplus>0?`+${r.surplus}`:'0')}</td>
             <td>${r.status==='ناقص'?'<span class="pill warn">ناقص</span>':r.status==='زيادة'?'<span class="pill bad">زيادة</span>':'<span class="pill ok">مكتمل</span>'}</td>
           </tr>`).join('') || `<tr><td colspan="7" class="empty">لا توجد نتائج مطابقة</td></tr>`}
@@ -6010,6 +6037,48 @@ function renderSidrSiteDetail(){
     alert(res.msg);
     if(res.ok){ SIDR_SELECTED_SITE=null; renderApp(); }
   });
+  /* تعديل المستلم مباشرة داخل الجدول */
+  const commitRecv = async (ri, val, focusRi)=>{
+    const res = await sidrSetReceived(imp.id, ri, val);
+    if(!res.ok){ showMsg('sidrRecvMsg','bad',res.msg); renderSidrSiteDetail(); return; }
+    const sc = document.querySelector('#sidrSiteDetailArea .tablewrap'); const top = sc ? sc.scrollTop : 0;
+    renderSidrSiteDetail();
+    const sc2 = document.querySelector('#sidrSiteDetailArea .tablewrap'); if(sc2) sc2.scrollTop = top;
+    if(focusRi!==undefined && focusRi!==null){ const nx = document.querySelector(`#sidrSiteDetailArea input.sidr-recv[data-ri="${focusRi}"]`); if(nx){ nx.focus(); try{ nx.select(); }catch(e){} } }
+  };
+  area.querySelectorAll('input.sidr-recv').forEach(inp=>{
+    inp.addEventListener('focus', ()=>{ try{ inp.select(); }catch(e){} });
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        const all = Array.from(area.querySelectorAll('input.sidr-recv')); const nxt = all[all.indexOf(inp)+1];
+        inp.dataset.nextri = nxt ? nxt.dataset.ri : '';
+        inp.blur();   // يُطلق حدث change إن تغيّرت القيمة
+        if(inp.dataset.committed!=='1' && nxt) nxt.focus();
+      } else if(e.key==='Escape'){ inp.value = inp.defaultValue; inp.blur(); }
+    });
+    inp.addEventListener('change', ()=>{
+      inp.dataset.committed = '1';
+      const raw = trim(inp.value); const v = Number(raw);
+      commitRecv(Number(inp.dataset.ri), (raw===''||!isFinite(v))?NaN:v, inp.dataset.nextri!==undefined&&inp.dataset.nextri!==''?inp.dataset.nextri:null);
+    });
+  });
+  area.querySelectorAll('.sidr-recv-reset').forEach(b=>b.addEventListener('click', ()=>{
+    const row = imp.rows[Number(b.dataset.ri)]; if(!row || row.origReceived===undefined) return;
+    commitRecv(Number(b.dataset.ri), row.origReceived, null);
+  }));
+}
+/* يعدّل الكمية المستلمة لصف داخل استيراد محفوظ (للمواد الإضافية المستلمة لاحقاً).
+   تُحفظ القيمة الأصلية من الملف في origReceived لإمكانية الاسترجاع؛ باقي البيانات والتوقيع الأصلي للملف لا يتغيّران. */
+async function sidrSetReceived(impId, ri, val){
+  const imp = STATE.sidReview.imports.find(i=>i.id===impId); const row = imp && imp.rows[ri];
+  if(!row) return {ok:false, msg:'تعذّر العثور على هذا الصف (ربما حُذف الاستيراد).'};
+  if(typeof val!=='number' || !isFinite(val) || val<0) return {ok:false, msg:'قيمة غير صالحة — أدخل رقماً صفراً أو أكبر.'};
+  if(row.origReceived===undefined) row.origReceived = row.received;
+  row.received = val;
+  if(row.origReceived===val){ delete row.origReceived; delete row.editedAt; } else { row.editedAt = new Date().toISOString(); }
+  await saveState(['sidReview']);
+  return {ok:true};
 }
 
 /* ---- طباعة تقرير الموقع (مراجعة حسب الموقع): تقرير رسمي مبني من نفس البيانات المعروضة حالياً (نفس البحث/الفلتر)،
