@@ -592,6 +592,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .or-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;}
   .or-check input{width:20px;height:20px;}
   .or-exec-bar{position:sticky;bottom:0;background:#fff;padding:10px 0;border-top:1px solid var(--line);align-items:center;}
+  .or-steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px;}
+  .or-step{font-size:12.5px;font-weight:700;padding:4px 12px;border-radius:14px;background:#eceae2;color:var(--muted);border:1px solid var(--line);}
+  .or-step.on{background:#d6ead6;color:#1f5a2a;border-color:#a9cfa9;}
+  .or-step.half{background:var(--amber-bg);color:#7a5200;border-color:#e7cd9c;}
+  .or-step.bad{background:#f6d8d4;color:#8a1f14;border-color:#e3aaa3;}
+  .or-step-sep{color:var(--muted);font-weight:700;}
+  .or-src{font-size:12.5px;line-height:1.5;}
+  .or-tpl-comps{font-size:13px;line-height:1.6;}
   #printRoot{display:none;}
   @media (max-width:760px){
     .or-filters{grid-template-columns:1fr 1fr;}
@@ -618,6 +626,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     #printRoot .p-table td.b{font-weight:800;font-size:13pt;}
     #printRoot .p-table td.box{font-size:14pt;line-height:1;}
     #printRoot .p-table td.done{font-weight:700;font-size:13pt;}
+    #printRoot .p-sub{font-size:9pt;color:#333;}
     #printRoot .p-table tr.p-end td{border:none;padding:0;}
     #printRoot .p-table tbody.p-tail{break-inside:avoid;page-break-inside:avoid;}
     #printRoot .p-endwrap{break-inside:avoid;page-break-inside:avoid;}
@@ -7351,8 +7360,8 @@ async function applySeedDataIfPresent(){
      ثم يُسجَّل في الطلب عبر outbound_record_execution؛ وإذا فشل التسجيل تُعكَس حركة المخزون بحركة تصحيحية (لا حذف).
    • الملف SQL: supabase/outbound_requests_migration.sql (يُنفَّذ يدوياً من Supabase بعد المراجعة).
    ============================================================ */
-const OUTREQ_STATUS = {pending:'بانتظار التنفيذ', in_progress:'قيد التنفيذ', partial:'منفذ جزئياً', completed:'مكتمل', cancelled:'ملغي'};
-const OUTREQ_STATUS_CLS = {pending:'warn', in_progress:'info', partial:'warn', completed:'ok', cancelled:'bad'};
+const OUTREQ_STATUS = {pending:'مرسل', in_progress:'قيد التنفيذ', split:'مفصول — جاهز للتنفيذ', partial:'منفذ جزئياً', completed:'تم التنفيذ', cancelled:'ملغي'};
+const OUTREQ_STATUS_CLS = {pending:'warn', in_progress:'info', split:'info', partial:'warn', completed:'ok', cancelled:'bad'};
 const OUTREQ_DRAFT_KEY = 'wms_outreq_draft_v1';
 let OUTREQ = outreqFresh();
 function outreqFresh(){
@@ -7363,7 +7372,8 @@ function outreqFresh(){
     reqs:[], favs:[], top:[], custom:[], recipients:[], prefs:{recipient:''}, notifs:[], notifOpen:false,
     filters:{q:'', site:'', material:'', status:'', from:'', to:''},
     draft:null, cmp:{mat:null, qty:'1', site:'', recipient:'', note:''},
-    checks:{}, busy:false, flash:null, sitesCache:null, pollTimer:null
+    checks:{}, busy:false, flash:null, sitesCache:null, pollTimer:null,
+    tpl:[], tplAvailable:true, tplEdit:null, tplQ:'', split:{reqId:null, preview:null, links:{}}
   };
 }
 function outreqReset(){
@@ -7384,8 +7394,17 @@ function outreqViewerTabs(){
 /* ---------- طبقة الاتصال ---------- */
 function outreqErrMsg(raw, status){
   const m = String(raw||'');
-  if(status===404 || /PGRST20[25]|Could not find the (function|table)|does not exist/i.test(m))
+  if(status===404 || /PGRST20[25]|Could not find the (function|table)|does not exist/i.test(m)){
+    if(/outbound_(save_template|set_template_state|split_request|record_line_execution|undo_line_execution|templates|exec_)/i.test(m))
+      return 'ميزة قوالب الإخراج غير مفعّلة بعد في قاعدة البيانات — شغّل ملف supabase/outbound_templates_migration.sql من Supabase أولاً.';
     return 'ميزة طلبات الإخراج غير مفعّلة بعد في قاعدة البيانات — شغّل ملف supabase/outbound_requests_migration.sql من Supabase أولاً.';
+  }
+  if(/request is split/i.test(m)) return 'هذا الطلب تم فصله — نفّذه من «مواد التنفيذ».';
+  if(/template already exists/i.test(m)) return 'يوجد قالب لهذه المادة بالفعل — افتحه وعدّله.';
+  if(/template needs at least one component/i.test(m)) return 'أضف مادة واحدة على الأقل إلى القالب.';
+  if(/duplicate component/i.test(m)) return 'مادة مكررة داخل القالب — اجمع كمياتها في سطر واحد.';
+  if(/already has executions|cannot be split/i.test(m)) return 'لا يمكن فصل هذا الطلب (بدأ تنفيذه أو أُغلق).';
+  if(/line superseded/i.test(m)) return 'تم استبدال مواد التنفيذ بفصل أحدث — حدّث الصفحة.';
   if(/forbidden: outbound request/i.test(m)) return 'ليس لديك صلاحية إنشاء طلبات إخراج.';
   if(/forbidden: fulfill/i.test(m)) return 'ليس لديك صلاحية تنفيذ الطلبات.';
   if(/forbidden: admin/i.test(m)) return 'هذا الإجراء للمدير فقط.';
@@ -7414,7 +7433,7 @@ async function outreqGet(path){
   const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${path}`, {headers: supabaseAuthHeaders()});
   if(!res.ok){
     const t = await res.text().catch(()=> '');
-    const err = new Error(outreqErrMsg(t, res.status)); err.status = res.status; throw err;
+    const err = new Error(outreqErrMsg(t, res.status)); err.status = res.status; err.raw = t; throw err;
   }
   return res.json();
 }
@@ -7427,10 +7446,18 @@ async function outreqLoadPerms(){
 }
 async function outreqLoadRequests(){
   try{
-    const rows = await outreqGet('outbound_requests?select=*,outbound_request_items(*),outbound_executions(*)&order=created_at.desc&limit=500');
+    let rows = null;
+    if(outreqCanFulfill() && OUTREQ.tplAvailable !== false){
+      /* موظف المستودع/المدير: يشمل مواد التنفيذ (بعد الفصل) وسجل تنفيذها. طالب الإخراج لا يطلب هذه الجداول أصلاً (وRLS تمنعها). */
+      try{ rows = await outreqGet('outbound_requests?select=*,outbound_request_items(*),outbound_executions(*),outbound_exec_lines(*),outbound_exec_runs(*)&order=created_at.desc&limit=500'); }
+      catch(e){ if(e.status===404 || /PGRST200|relationship/i.test(e.raw||'')){ OUTREQ.tplAvailable = false; rows = null; } else throw e; }  /* قاعدة البيانات بدون migration القوالب: يعمل النظام القديم كما هو */
+    }
+    if(!rows) rows = await outreqGet('outbound_requests?select=*,outbound_request_items(*),outbound_executions(*)&order=created_at.desc&limit=500');
     OUTREQ.reqs = rows.map(r=>({
       id:r.id, req_no:r.req_no, requester_id:r.requester_id, requester_name:r.requester_name, status:r.status, note:r.note||'',
-      created_at:r.created_at, updated_at:r.updated_at,
+      created_at:r.created_at, updated_at:r.updated_at, split_at:r.split_at||null, split_by_name:r.split_by_name||'',
+      lines:(r.outbound_exec_lines||[]).filter(l=>!l.superseded_at).map(l=>Object.assign({}, l, {qty_required:Number(l.qty_required), qty_done:Number(l.qty_done)})).sort((a,b)=>a.line_no-b.line_no),
+      runs:(r.outbound_exec_runs||[]).filter(u=>!u.voided_at).map(u=>Object.assign({}, u, {qty:Number(u.qty)})).sort((a,b)=>String(a.executed_at).localeCompare(String(b.executed_at))),
       items:(r.outbound_request_items||[]).map(i=>Object.assign({}, i, {qty_requested:Number(i.qty_requested), qty_done:Number(i.qty_done)})).sort((a,b)=>a.line_no-b.line_no),
       execs:(r.outbound_executions||[]).filter(e=>!e.voided_at).map(e=>Object.assign({}, e, {qty:Number(e.qty)})).sort((a,b)=>String(a.executed_at).localeCompare(String(b.executed_at)))
     }));
@@ -7459,12 +7486,26 @@ async function outreqLoadFavs(){
     if(!trim(OUTREQ.cmp.recipient)) OUTREQ.cmp.recipient = OUTREQ.prefs.recipient; /* المستلم المثبَّت لهذا المستخدم يبقى هو المحدد في كل طلب جديد */
   }catch(e){}
 }
+/* قوالب الإخراج + المواد المطلوبة الجديدة: لموظف المستودع/المدير فقط (RLS تمنع طالب الإخراج من قراءة القوالب) */
+async function outreqLoadTemplates(){
+  if(!outreqCanFulfill() || OUTREQ.tplAvailable === false) return;
+  try{
+    const rows = await outreqGet('outbound_templates?select=*,outbound_template_components(*)&deleted_at=is.null&order=req_name.asc');
+    OUTREQ.tpl = rows.map(t=>({
+      id:t.id, req_src:t.req_src, req_key:t.req_key, req_name:t.req_name, active:!!t.active, note:t.note||'', updated_at:t.updated_at, created_by_name:t.created_by_name||'',
+      comps:(t.outbound_template_components||[]).filter(c=>!c.removed_at).map(c=>({src:c.mat_src, key:c.mat_key, name:c.mat_name, qty:Number(c.qty_per_unit), sort_no:c.sort_no||0})).sort((a,b)=>a.sort_no-b.sort_no)
+    }));
+  }catch(e){ if(e.status===404 || /PGRST205|PGRST200|does not exist/i.test(e.raw||'')) OUTREQ.tplAvailable = false; }
+  if(!outreqCanRequest()){   /* موظف مستودع بلا صلاحية طلب: يحتاج المواد الجديدة ليراها في قوائم القوالب */
+    try{ OUTREQ.custom = await outreqGet('outbound_custom_materials?select=name_key,name&order=name.asc'); }catch(e){}
+  }
+}
 async function outreqInit(){
   outreqReset();
   if(!SUPABASE_ENABLED || !CURRENT_SESSION) return;
   await outreqLoadPerms();
   if(!outreqHasAccess()) return;
-  await Promise.all([outreqLoadNotifs(), outreqLoadFavs()]);
+  await Promise.all([outreqLoadNotifs(), outreqLoadFavs(), outreqLoadTemplates()]);
   OUTREQ.pollTimer = setInterval(outreqPoll, 20000);
   if(!outreqIsAdmin()) VIEWER_ACTIVE_TAB = 'outreq';
   if(!outreqIsAdmin() && OUTREQ.perms.can_request && !OUTREQ.perms.can_fulfill) OUTREQ.view = 'list';
@@ -7681,13 +7722,17 @@ function outreqPaint(){
     root.innerHTML = `<div class="panel"><div class="msg warn">${esc(OUTREQ.err)}</div></div>`; return;
   }
   if(OUTREQ.view==='new' && outreqCanRequest()) return outreqPaintNew(root);
+  if(OUTREQ.view==='templates' && outreqCanFulfill() && OUTREQ.tplAvailable!==false) return outreqPaintTemplates(root);
+  if(OUTREQ.view==='tpl' && outreqCanFulfill() && OUTREQ.tplAvailable!==false && OUTREQ.tplEdit) return outreqPaintTplEdit(root);
   if(OUTREQ.view==='detail' && outreqReq(OUTREQ.selectedId)) return outreqPaintDetail(root);
   OUTREQ.view = 'list';
   outreqPaintList(root);
 }
 function outreqGo(view, id){
   OUTREQ.view = view; if(id!==undefined) OUTREQ.selectedId = id;
-  OUTREQ.flash = (view==='detail' || view==='list') ? OUTREQ.flash : null;
+  if(view==='detail') OUTREQ.mode = outreqDefaultMode(outreqReq(OUTREQ.selectedId));   /* طلب مفصول يفتح على «مواد التنفيذ» */
+  if(view==='detail' && OUTREQ.split.reqId!==OUTREQ.selectedId) OUTREQ.split = {reqId:null, preview:null, links:{}};
+  OUTREQ.flash = (view==='detail' || view==='list' || view==='templates') ? OUTREQ.flash : null;
   outreqPaint();
   window.scrollTo({top:0});
 }
@@ -7711,7 +7756,7 @@ function outreqPaintList(root){
   const mineOnly = !outreqCanFulfill();
   const rows = outreqFiltered();
   const f = OUTREQ.filters;
-  const open = OUTREQ.reqs.filter(r=>r.status==='pending'||r.status==='in_progress'||r.status==='partial').length;
+  const open = OUTREQ.reqs.filter(r=>r.status==='pending'||r.status==='in_progress'||r.status==='split'||r.status==='partial').length;
   root.innerHTML = `
     <div class="panel">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
@@ -7721,10 +7766,12 @@ function outreqPaintList(root){
         </div>
         <div class="btnrow" style="margin:0;">
           ${outreqCanRequest() ? `<button class="primary" id="orNew">➕ طلب إخراج جديد</button>` : ''}
+          ${outreqCanFulfill() && OUTREQ.tplAvailable!==false ? `<button class="secondary" id="orTpl">🧩 قوالب الإخراج</button>` : ''}
           <button class="secondary" id="orRefresh">🔄 تحديث</button>
         </div>
       </div>
       ${outreqFlashHtml()}
+      ${outreqCanFulfill() && OUTREQ.tplAvailable===false ? `<div class="msg warn">قوالب الإخراج وفصل المواد غير مفعّلة بعد في قاعدة البيانات — شغّل ملف supabase/outbound_templates_migration.sql من Supabase (الطلبات تعمل بالطريقة المباشرة حتى ذلك الحين).</div>` : ''}
       ${outreqIsAdmin() ? outreqNotifBannerHtml() : ''}
       <div class="or-filters">
         <input type="text" id="orfQ" placeholder="🔎 رقم الطلب أو اسم مقدم الطلب" value="${esc(f.q)}">
@@ -7751,6 +7798,7 @@ function outreqPaintList(root){
     </div>`;
   const $ = id=>document.getElementById(id);
   if($('orNew')) $('orNew').addEventListener('click', ()=>{ OUTREQ.flash=null; outreqGo('new'); });
+  if($('orTpl')) $('orTpl').addEventListener('click', async ()=>{ OUTREQ.flash=null; await outreqLoadTemplates(); outreqGo('templates'); });
   $('orRefresh').addEventListener('click', async ()=>{ await outreqRefresh(); });
   const bind = (id, key, ev)=>{ const e = $(id); e.addEventListener(ev||'input', debounce(()=>{ OUTREQ.filters[key] = e.value; outreqRepaintTableOnly(); }, 150)); };
   bind('orfQ','q'); bind('orfSite','site'); bind('orfMat','material');
@@ -7828,7 +7876,7 @@ function outreqPaintNew(root){
       if(m.isNew) return `<span style="color:var(--accent);font-weight:600;">➕ إضافة مادة جديدة «<b>${esc(m.name)}</b>»</span>`;
       if(m.src==='custom') return `<span>🆕 <b>${outreqBdi(m.name)}</b> <span class="or-hint">مادة جديدة</span></span>`;
       const fav = favs().has(outreqMatKey(m.src,m.key));
-      return `<span><span class="or-star ${fav?'on':''}" data-favtoggle="${esc(outreqMatKey(m.src,m.key))}" title="${fav?'إزالة من المفضلة':'تثبيت في المفضلة'}">${fav?'⭐':'☆'}</span> ${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code)}</span></span><span class="rem">${outreqNum(m.rem)}</span>`; },
+      return `<span><span class="or-star ${fav?'on':''}" data-favtoggle="${esc(outreqMatKey(m.src,m.key))}" title="${fav?'إزالة من المفضلة':'تثبيت في المفضلة'}">${fav?'⭐':'☆'}</span> ${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code)}</span></span>${outreqCanFulfill() ? `<span class="rem">${outreqNum(m.rem)}</span>` : ''}`; },
     async (m, how)=>{
       if(m.isNew){ const ok = await outreqAddCustom(m.name); if(!ok) return; }
       else outreqPickMaterial(m);
@@ -7890,11 +7938,14 @@ async function outreqChooseRecipient(name){
     return true;
   }catch(e){ outreqNewMsg('bad', 'تعذّر حفظ المستلم: '+e.message); if(inp) inp.value = cmp.recipient || ''; return false; }
 }
+async function outreqAddCustomRaw(name){
+  const r = await outreqRpc('outbound_add_custom_material', {p_name:name});
+  if(!(OUTREQ.custom||[]).some(c=>c.name_key===r.key)) OUTREQ.custom.push({name_key:r.key, name:r.name});
+  return {src:'custom', key:r.key, name:r.name, code:'', rem:null, unit:''};
+}
 async function outreqAddCustom(name){
   try{
-    const r = await outreqRpc('outbound_add_custom_material', {p_name:name});
-    if(!(OUTREQ.custom||[]).some(c=>c.name_key===r.key)) OUTREQ.custom.push({name_key:r.key, name:r.name});
-    outreqPickMaterial({src:'custom', key:r.key, name:r.name, code:'', rem:null, unit:''});
+    outreqPickMaterial(await outreqAddCustomRaw(name));
     outreqNewMsg('', '');
     return true;
   }catch(e){ outreqNewMsg('bad', 'تعذّر إضافة المادة الجديدة: '+e.message); return false; }
@@ -7903,8 +7954,11 @@ function outreqPickMaterial(m){
   OUTREQ.cmp.mat = {src:m.src, key:m.key, name:m.name};
   const inp = document.getElementById('orMat'); if(inp) inp.value = m.name;
   const info = document.getElementById('orMatInfo');
-  if(info && m.src==='custom') info.textContent = 'مادة جديدة — غير مسجّلة في المخزون (لا يُخصم لها رصيد عند التنفيذ)';
-  else if(info) info.textContent = `${m.src==='stock'?'مواد 4G':'مخزون المستودع'} · ${m.code||'—'} · الرصيد الحالي: ${outreqNum(m.rem)} ${m.unit||''}`;
+  if(!info) return;
+  /* طالب الإخراج لا يرى أرصدة ولا تفاصيل المخزون الداخلي؛ موظف المستودع/المدير يراها */
+  if(!outreqCanFulfill()) info.textContent = m.src==='custom' ? 'مادة جديدة أضفتَها لطلبك' : '';
+  else if(m.src==='custom') info.textContent = 'مادة جديدة — غير مسجّلة في المخزون (تُربط بقالب أو بمادة مخزون عند الفصل)';
+  else info.textContent = `${m.src==='stock'?'مواد 4G':'مخزون المستودع'} · ${m.code||'—'} · الرصيد الحالي: ${outreqNum(m.rem)} ${m.unit||''}`;
 }
 function outreqNewMsg(kind, text){
   const el = document.getElementById('orNewMsg'); if(!el) return;
@@ -8029,20 +8083,42 @@ function outreqMaterialBalance(src, key){
   if(src==='custom') return Infinity; /* مادة جديدة بلا رصيد: لا قيد على الكمية ولا خصم من المخزون */
   const m = outreqFindMaterial(src, key); return m ? m.rem : null;
 }
+function outreqDefaultMode(r){ return (r && outreqCanFulfill() && r.lines && r.lines.length) ? 'split' : 'items'; }
+function outreqHasSplit(r){ return !!(r && r.lines && r.lines.length); }
+/* مراحل الطلب الواضحة: مرسل ← مفصول (جاهز للتنفيذ) ← تم التنفيذ */
+function outreqStepsHtml(r){
+  if(r.status==='cancelled') return `<div class="or-steps"><span class="or-step bad">✖ ملغي</span></div>`;
+  const split = !!r.split_at, done = r.status==='completed', part = r.status==='partial';
+  return `<div class="or-steps" id="orSteps"><span class="or-step on">① مرسل</span><span class="or-step-sep">‹</span>
+    <span class="or-step ${split?'on':''}">② مفصول — جاهز للتنفيذ</span><span class="or-step-sep">‹</span>
+    <span class="or-step ${done?'on':(part?'half':'')}">③ ${part?'منفذ جزئياً':'تم التنفيذ'}</span></div>`;
+}
 function outreqPaintDetail(root){
   const r = outreqReq(OUTREQ.selectedId);
   const t = outreqTotals(r);
   const canF = outreqCanFulfill();
   const closed = r.status==='completed' || r.status==='cancelled';
+  const hasSplit = outreqHasSplit(r);
+  const sp = OUTREQ.split.reqId===r.id ? OUTREQ.split : null;
+  const hasPreview = !!(sp && sp.preview);
+  const legacyExec = r.execs.length>0;
+  const canSplit = canF && OUTREQ.tplAvailable!==false && ['pending','in_progress','split'].includes(r.status) && !legacyExec && !(hasSplit && r.runs.length);
+  const canExec = canF && hasSplit && (r.status==='split' || r.status==='partial');
+  if(!canF) OUTREQ.mode = 'items';
+  if(OUTREQ.mode==='split' && !hasSplit && !hasPreview) OUTREQ.mode = 'items';
+  if(OUTREQ.mode==='pick' && (hasSplit || hasPreview)) OUTREQ.mode = hasSplit ? 'split' : 'items';
   const notif = outreqIsAdmin() ? OUTREQ.notifs.find(n=>n.request_id===r.id) : null;
   root.innerHTML = `
     <div class="panel">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         <button class="secondary" id="orBack">← رجوع للطلبات</button>
         <div class="btnrow" style="margin:0;">
-          ${canF && r.status==='pending' ? `<button class="secondary" id="orStart">▶ بدء التنفيذ</button>` : ''}
+          ${canSplit ? `<button class="secondary" id="orSplit">✂️ ${hasSplit?'إعادة فصل المواد':'فصل المواد'}</button>` : ''}
+          ${canExec ? `<button class="primary" id="orExecAll">▶ تنفيذ الإخراج</button>` : ''}
+          ${canF && r.status==='pending' && !hasSplit && !hasPreview ? `<button class="secondary" id="orStart">▶ بدء التنفيذ</button>` : ''}
           ${canF && !closed ? `<button class="danger" id="orCancel">✖ إلغاء الطلب</button>` : ''}
-          <button class="primary" id="orPrint">🖨️ طباعة الطلب</button>
+          <button class="${canExec?'secondary':'primary'}" id="orPrint">🖨️ ${canF?'طباعة طلب المهندس':'طباعة الطلب'}</button>
+          ${canF && hasSplit ? `<button class="primary" id="orPrintExec">🖨️ طباعة مواد التنفيذ</button>` : ''}
         </div>
       </div>
       ${outreqFlashHtml()}
@@ -8052,39 +8128,53 @@ function outreqPaintDetail(root){
         <div><span>مقدم الطلب</span><b>${esc(r.requester_name)}</b></div>
         <div><span>التاريخ والوقت</span><b>${outreqFmt(r.created_at)}</b></div>
         <div><span>الحالة</span><b>${outreqPill(r.status)}</b></div>
-        <div><span>الإجمالي</span><b>${outreqNum(t.req)} / تم ${outreqNum(t.done)} / متبقٍ ${outreqNum(t.remaining)}</b></div>
+        ${canF ? `<div><span>الإجمالي</span><b>${outreqNum(t.req)} / تم ${outreqNum(t.done)} / متبقٍ ${outreqNum(t.remaining)}</b></div>` : ''}
         <div><span>آخر تحديث</span><b>${outreqFmt(r.updated_at)}</b></div>
+        ${r.split_at ? `<div><span>تم الفصل</span><b>${outreqFmt(r.split_at)}${r.split_by_name?' · '+esc(r.split_by_name):''}</b></div>` : ''}
       </div>
+      ${outreqStepsHtml(r)}
       ${r.note ? `<div class="msg info">📝 ${esc(r.note)}</div>` : ''}
       ${canF ? `<div class="or-modes">
-        <button type="button" class="${OUTREQ.mode==='items'?'active':''}" data-mode="items">📋 جدول البنود</button>
-        <button type="button" class="${OUTREQ.mode==='pick'?'active':''}" data-mode="pick">🧰 شاشة التنفيذ (حسب المادة)</button>
+        <button type="button" class="${OUTREQ.mode==='items'?'active':''}" data-mode="items">📋 طلب المهندس</button>
+        ${hasSplit || hasPreview ? `<button type="button" class="${OUTREQ.mode==='split'?'active':''}" data-mode="split">📦 مواد التنفيذ${hasPreview&&!hasSplit?' (معاينة)':''}</button>` : ''}
+        ${!hasSplit && !hasPreview ? `<button type="button" class="${OUTREQ.mode==='pick'?'active':''}" data-mode="pick">🧰 تنفيذ مباشر بدون فصل (حسب المادة)</button>` : ''}
       </div>` : ''}
       <div id="orBody"></div>
     </div>
-    <div class="panel"><h3 style="margin-top:0;">🕘 سجل التنفيذ</h3>${outreqExecHistoryHtml(r)}</div>`;
+    ${canF || r.execs.length ? `<div class="panel"><h3 style="margin-top:0;">🕘 سجل التنفيذ</h3>${outreqExecHistoryHtml(r)}</div>` : ''}`;
   const $ = id=>document.getElementById(id);
   $('orBack').addEventListener('click', ()=>{ OUTREQ.flash=null; outreqGo('list'); });
-  $('orPrint').addEventListener('click', ()=>outreqPrint(r.id));
+  $('orPrint').addEventListener('click', ()=>outreqPrint(r.id, 'request'));
+  if($('orPrintExec')) $('orPrintExec').addEventListener('click', ()=>outreqPrint(r.id, 'exec'));
+  if($('orSplit')) $('orSplit').addEventListener('click', ()=>outreqSplitStart(r.id));
+  if($('orExecAll')) $('orExecAll').addEventListener('click', ()=>outreqExecuteSplit(r.id));
   if($('orStart')) $('orStart').addEventListener('click', ()=>outreqSetStatus(r.id, 'in_progress'));
   if($('orCancel')) $('orCancel').addEventListener('click', ()=>{ if(confirm(`إلغاء الطلب ${r.req_no}؟ لا يمكن التراجع عن الإلغاء، وما نُفِّذ منه يبقى مسجلاً في المخزون.`)) outreqSetStatus(r.id, 'cancelled'); });
   if($('orResolveHere')) $('orResolveHere').addEventListener('click', ()=>outreqResolveNotif(notif.id));
   root.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click', ()=>{ OUTREQ.mode = b.dataset.mode; outreqPaintDetail(root); }));
-  if(canF && OUTREQ.mode==='pick') outreqPaintPick(r); else outreqPaintItems(r);
+  if(canF && OUTREQ.mode==='split') outreqPaintSplit(r);
+  else if(canF && OUTREQ.mode==='pick') outreqPaintPick(r);
+  else outreqPaintItems(r);
 }
 function outreqPaintItems(r){
   const body = document.getElementById('orBody');
+  const canF = outreqCanFulfill();
   body.innerHTML = `<div class="tablewrap" style="max-height:none;"><table class="data" id="orItemsTable">
-    <thead><tr><th>#</th><th>المادة</th><th>الموقع</th><th>المستلم</th><th>المطلوب</th><th>تم الإخراج</th><th>المتبقي</th><th>الحالة</th></tr></thead>
-    <tbody>${r.items.map(i=>{ const s = outreqLineStatus(r,i); return `<tr>
-      <td>${i.line_no}</td><td>${outreqIcon(i.material_src)} ${outreqBdi(i.material_name)}${i.note?`<div class="or-hint">${esc(i.note)}</div>`:''}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'—')}</td>
+    <thead><tr><th>#</th><th>المادة المطلوبة</th><th>الموقع</th><th>المستلم</th><th>المطلوب</th><th>تم الإخراج</th><th>المتبقي</th><th>الحالة</th></tr></thead>
+    <tbody>${r.items.map(i=>{ const s = outreqLineStatus(r,i); const tp = canF && !outreqHasSplit(r) ? outreqTplFor(i.material_src, i.material_key) : null; return `<tr>
+      <td>${i.line_no}</td><td>${outreqIcon(i.material_src)} ${outreqBdi(i.material_name)}${tp?` <span class="pill info" title="له قالب إخراج: ${tp.comps.length} مادة">🧩 قالب</span>`:''}${i.note?`<div class="or-hint">${esc(i.note)}</div>`:''}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'—')}</td>
       <td>${outreqNum(i.qty_requested)}</td><td>${outreqNum(i.qty_done)}</td><td>${outreqNum(i.qty_requested-i.qty_done)}</td><td><span class="pill ${s.c}">${s.t}</span></td></tr>`; }).join('')}</tbody></table></div>`;
 }
 function outreqExecHistoryHtml(r){
-  if(!r.execs.length) return `<div class="empty" style="padding:14px;">لا يوجد تنفيذ بعد.</div>`;
   const byId = {}; r.items.forEach(i=>byId[i.id]=i);
+  const lineById = {}; (r.lines||[]).forEach(l=>lineById[l.id]=l);
+  const rows = [];
+  (r.runs||[]).forEach(u=>{ const l = lineById[u.line_id]||{}; rows.push({at:u.executed_at, name:l.mat_name||'', site:'', qty:u.qty, by:u.executed_by_name, ref:u.ledger_ref}); });
+  r.execs.forEach(e=>{ const i = byId[e.item_id]||{}; rows.push({at:e.executed_at, name:i.material_name||'', site:i.site||'', qty:e.qty, by:e.executed_by_name, ref:e.ledger_ref}); });
+  if(!rows.length) return `<div class="empty" style="padding:14px;">لا يوجد تنفيذ بعد.</div>`;
+  rows.sort((a,b)=>String(b.at).localeCompare(String(a.at)));
   return `<div class="tablewrap" style="max-height:none;"><table class="data"><thead><tr><th>الوقت</th><th>المادة</th><th>الموقع</th><th>الكمية</th><th>نفّذه</th><th>مرجع حركة المخزون</th></tr></thead><tbody>${
-    r.execs.slice().reverse().map(e=>{ const i = byId[e.item_id]||{}; return `<tr><td>${outreqFmt(e.executed_at)}</td><td>${esc(i.material_name||'')}</td><td>${esc(i.site||'')}</td><td>${outreqNum(e.qty)}</td><td>${esc(e.executed_by_name||'')}</td><td class="code-cell">${esc(e.ledger_ref||'—')}</td></tr>`; }).join('')}</tbody></table></div>`;
+    rows.map(e=>`<tr><td>${outreqFmt(e.at)}</td><td>${esc(e.name)}</td><td>${esc(e.site||'—')}</td><td>${outreqNum(e.qty)}</td><td>${esc(e.by||'')}</td><td class="code-cell">${esc(e.ref||'—')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 /* شاشة التنفيذ: قائمة تحضير مرتبة حسب المادة؛ تحتها المواقع/المستلمون والكميات */
@@ -8268,6 +8358,365 @@ async function outreqSetStatus(id, status){
 }
 
 /* ============================================================
+   🧩 قوالب الإخراج (موظف المستودع / المدير): مادة يطلبها المهندس ← مواد المستودع الفعلية وكمية كل وحدة
+   ============================================================ */
+function outreqTplFor(src, key){ return (OUTREQ.tpl||[]).find(t=>t.active && t.req_src===src && t.req_key===key) || null; }
+function outreqTplAny(src, key){ return (OUTREQ.tpl||[]).find(t=>t.req_src===src && t.req_key===key) || null; }
+function outreqInventoryList(){ return outreqMaterialList().filter(m=>m.src==='goods' || m.src==='stock'); }
+/* بحث مواد المخزون الفعلي (للمكوّنات) — يشمل كل مادة لها رصيد حتى لو لم تكن في قائمة المواد المطلوبة */
+function outreqSearchInventory(q){
+  const toks = outreqNorm(trim(q)).split(/\s+/).filter(Boolean);
+  if(!toks.length) return [];
+  const nq = outreqNorm(trim(q));
+  return outreqInventoryList().filter(m=>{ const h = outreqNorm(m.name+' '+m.code); return toks.every(t=>h.includes(t)); })
+    .map(m=>({m, s:(outreqNorm(m.name).startsWith(nq)?2:0)+(outreqNorm(m.code)===nq?3:0)})).sort((a,b)=>b.s-a.s || a.m.name.localeCompare(b.m.name)).slice(0,12).map(x=>x.m);
+}
+function outreqTplCompsText(t, max){
+  const c = t.comps.map(x=>`${outreqBdi(x.name)} ×${outreqNum(x.qty)}`);
+  return (max && c.length>max ? c.slice(0,max).join('، ')+` … (+${c.length-max})` : c.join('، '));
+}
+function outreqTplRowsHtml(){
+  const q = outreqNorm(trim(OUTREQ.tplQ));
+  const list = (OUTREQ.tpl||[]).filter(t=>!q || outreqNorm(t.req_name+' '+t.comps.map(c=>c.name).join(' ')).includes(q));
+  if(!list.length) return `<tr><td colspan="5" class="empty">${(OUTREQ.tpl||[]).length ? 'لا توجد قوالب مطابقة.' : 'لا توجد قوالب بعد — أنشئ قالباً لمادة يطلبها المهندسون وتتكوّن من عدة مواد مستودع.'}</td></tr>`;
+  return list.map(t=>`<tr class="or-tpl-row" data-tid="${esc(t.id)}">
+    <td><b>${outreqIcon(t.req_src)} ${outreqBdi(t.req_name)}</b>${t.note?`<div class="or-hint">${esc(t.note)}</div>`:''}</td>
+    <td><div class="or-tpl-comps">${outreqTplCompsText(t, 8)}</div><div class="or-hint">${t.comps.length} مادة</div></td>
+    <td><span class="pill ${t.active?'ok':'warn'}">${t.active?'فعّال':'معطّل'}</span></td>
+    <td>${outreqFmt(t.updated_at)}</td>
+    <td style="white-space:nowrap;"><button class="secondary" data-tedit="${esc(t.id)}" style="padding:4px 10px;">✏️ تعديل</button>
+      <button class="secondary" data-ttoggle="${esc(t.id)}" style="padding:4px 10px;">${t.active?'⏸ تعطيل':'▶ تفعيل'}</button>
+      <button class="danger" data-tdel="${esc(t.id)}" style="padding:4px 10px;">🗑 حذف</button></td></tr>`).join('');
+}
+function outreqWireTplRows(root){
+  root.querySelectorAll('[data-tedit]').forEach(b=>b.addEventListener('click', ()=>outreqTplOpen(b.dataset.tedit)));
+  root.querySelectorAll('[data-ttoggle]').forEach(b=>b.addEventListener('click', ()=>outreqTplState(b.dataset.ttoggle, 'toggle')));
+  root.querySelectorAll('[data-tdel]').forEach(b=>b.addEventListener('click', ()=>outreqTplState(b.dataset.tdel, 'remove')));
+}
+function outreqPaintTemplates(root){
+  root.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <h2 style="margin:0;">🧩 قوالب الإخراج</h2>
+        <div class="btnrow" style="margin:0;"><button class="primary" id="tplNew">➕ قالب جديد</button><button class="secondary" id="tplBack">← رجوع للطلبات</button></div>
+      </div>
+      <div class="desc">القالب يحوّل المادة التي يطلبها المهندس إلى المواد الفعلية التي تخرج من المستودع، بكمية كل مادة لكل وحدة مطلوبة. يُطبَّق عند «فصل المواد» فقط، ولا يؤثر على الطلبات التي فُصلت سابقاً. المهندس لا يرى القوالب.</div>
+      ${outreqFlashHtml()}
+      <div style="margin:10px 0;"><input type="text" id="tplQ" placeholder="🔎 ابحث في القوالب (اسم المادة المطلوبة أو أي مادة داخل القالب)" value="${esc(OUTREQ.tplQ)}"></div>
+      <div class="tablewrap" style="max-height:none;"><table class="data" id="tplTable">
+        <thead><tr><th>المادة المطلوبة</th><th>مواد المستودع في القالب (الكمية لكل وحدة)</th><th>الحالة</th><th>آخر تعديل</th><th></th></tr></thead>
+        <tbody>${outreqTplRowsHtml()}</tbody></table></div>
+    </div>`;
+  const $ = id=>document.getElementById(id);
+  $('tplBack').addEventListener('click', ()=>{ OUTREQ.flash=null; outreqGo('list'); });
+  $('tplNew').addEventListener('click', ()=>outreqTplNew());
+  $('tplQ').addEventListener('input', debounce(()=>{ OUTREQ.tplQ = $('tplQ').value; const tb = root.querySelector('#tplTable tbody'); tb.innerHTML = outreqTplRowsHtml(); outreqWireTplRows(root); }, 120));
+  outreqWireTplRows(root);
+}
+function outreqTplNew(){ OUTREQ.tplEdit = {id:null, req:null, active:true, note:'', comps:[], mult:'1'}; OUTREQ.flash = null; outreqGo('tpl'); }
+function outreqTplOpen(id){
+  const t = OUTREQ.tpl.find(x=>x.id===id); if(!t) return;
+  OUTREQ.tplEdit = {id, req:{src:t.req_src, key:t.req_key, name:t.req_name}, active:t.active, note:t.note||'', comps:t.comps.map(c=>({src:c.src, key:c.key, name:c.name, qty:String(c.qty)})), mult:'1'};
+  OUTREQ.flash = null; outreqGo('tpl');
+}
+async function outreqTplState(id, action){
+  const t = OUTREQ.tpl.find(x=>x.id===id); if(!t || OUTREQ.busy) return;
+  if(action==='remove' && !confirm(`حذف قالب «${t.req_name}»؟\nالطلبات التي فُصلت سابقاً لن تتأثر، والطلبات القادمة ستخرج هذه المادة كما طُلبت.`)) return;
+  OUTREQ.busy = true;
+  try{
+    await outreqRpc('outbound_set_template_state', {p_id:id, p_action: action==='toggle' ? (t.active?'disable':'enable') : 'remove'});
+    await outreqLoadTemplates();
+    outreqFlash('ok', action==='remove' ? 'تم حذف القالب.' : (t.active ? 'تم تعطيل القالب (لن يُستخدم عند الفصل).' : 'تم تفعيل القالب.'));
+  }catch(e){ outreqFlash('bad', e.message); }
+  OUTREQ.busy = false; outreqPaint();
+}
+function outreqTplMsg(kind, text){
+  const el = document.getElementById('tplMsg'); if(!el) return;
+  el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : '';
+}
+function outreqTplPvText(c){
+  const m = Number(String(OUTREQ.tplEdit.mult).replace(',','.')) || 0, q = Number(String(c.qty).replace(',','.')) || 0;
+  return outreqNum(m*q);
+}
+function outreqTplRenderComps(){
+  const e = OUTREQ.tplEdit, box = document.getElementById('tplComps'); if(!box) return;
+  box.innerHTML = e.comps.length ? `<div class="tablewrap" style="max-height:none;"><table class="data">
+    <thead><tr><th>#</th><th>مادة المستودع</th><th>الكمية لكل وحدة</th><th>عند طلب ×<span id="tplMultLbl">${esc(e.mult)}</span></th><th></th></tr></thead>
+    <tbody>${e.comps.map((c,ix)=>`<tr><td>${ix+1}</td><td>${outreqIcon(c.src)} ${outreqBdi(c.name)} <span class="or-hint">${c.src==='stock'?'مواد 4G':'مخزون المستودع'}</span></td>
+      <td><input type="text" class="tpl-qty" data-ix="${ix}" inputmode="decimal" value="${esc(c.qty)}" style="width:90px;"></td>
+      <td class="tpl-pv" data-ix="${ix}"><b>${outreqTplPvText(c)}</b></td>
+      <td><button class="danger" data-crm="${ix}" style="padding:3px 10px;">✕</button></td></tr>`).join('')}</tbody></table></div>`
+    : `<div class="empty" style="padding:14px;">لا توجد مواد في القالب بعد — ابحث عن مادة مستودع بالأسفل لإضافتها.</div>`;
+  box.querySelectorAll('.tpl-qty').forEach(inp=>inp.addEventListener('input', ()=>{
+    const ix = Number(inp.dataset.ix); e.comps[ix].qty = inp.value;
+    const pv = box.querySelector(`.tpl-pv[data-ix="${ix}"]`); if(pv) pv.innerHTML = `<b>${outreqTplPvText(e.comps[ix])}</b>`;
+  }));
+  box.querySelectorAll('[data-crm]').forEach(b=>b.addEventListener('click', ()=>{ e.comps.splice(Number(b.dataset.crm), 1); outreqTplRenderComps(); }));
+}
+function outreqPaintTplEdit(root){
+  const e = OUTREQ.tplEdit;
+  root.innerHTML = `
+    <div class="panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <h2 style="margin:0;">${e.id?'✏️ تعديل قالب إخراج':'➕ قالب إخراج جديد'}</h2>
+        <button class="secondary" id="tplCancel">← رجوع للقوالب</button>
+      </div>
+      <div id="tplMsg"></div>
+      <label class="flabel">1) المادة المطلوبة <span class="or-hint">(المادة التي يكتبها/يختارها المهندس في الطلب)</span></label>
+      <div class="qm-search-wrap"><input type="text" id="tplReq" autocomplete="off" placeholder="ابحث عن المادة المطلوبة أو اكتب اسماً جديداً…" value="${esc(e.req?e.req.name:'')}"><div id="tplReqDd" class="qm-dropdown" style="display:none;"></div></div>
+      <div class="or-optrow" style="margin-top:10px;">
+        <input type="text" id="tplNote" placeholder="ملاحظة على القالب (اختياري)" value="${esc(e.note)}">
+        <label class="or-check"><input type="checkbox" id="tplActive" ${e.active?'checked':''}> <span>القالب فعّال (يُطبَّق عند الفصل)</span></label>
+      </div>
+      <h3 style="margin:16px 0 6px;">2) مواد المستودع في القالب <span class="or-hint">— الكمية لكل وحدة واحدة من المادة المطلوبة</span></h3>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span class="or-hint">معاينة الكميات لطلب</span><input type="text" id="tplMult" inputmode="decimal" value="${esc(e.mult)}" style="width:70px;"><span class="or-hint">وحدة</span></div>
+      <div id="tplComps"></div>
+      <div class="qm-search-wrap" style="margin-top:10px;"><input type="text" id="tplComp" autocomplete="off" placeholder="➕ ابحث عن مادة مستودع لإضافتها (اسم أو كود)…"><div id="tplCompDd" class="qm-dropdown" style="display:none;"></div></div>
+      <div class="btnrow">
+        <button class="primary" id="tplSave">💾 حفظ القالب</button>
+        <button class="secondary" id="tplCancel2">إلغاء</button>
+      </div>
+    </div>`;
+  const $ = id=>document.getElementById(id);
+  const back = ()=>{ OUTREQ.tplEdit = null; outreqGo('templates'); };
+  $('tplCancel').addEventListener('click', back); $('tplCancel2').addEventListener('click', back);
+  outreqTplRenderComps();
+  $('tplNote').addEventListener('input', ev=>{ e.note = ev.target.value; });
+  $('tplActive').addEventListener('change', ev=>{ e.active = ev.target.checked; });
+  $('tplMult').addEventListener('input', ev=>{
+    e.mult = ev.target.value; const l = $('tplMultLbl'); if(l) l.textContent = e.mult;
+    root.querySelectorAll('.tpl-pv').forEach(td=>{ td.innerHTML = `<b>${outreqTplPvText(e.comps[Number(td.dataset.ix)])}</b>`; });
+  });
+  const reqInp = $('tplReq');
+  outreqSuggest(reqInp, $('tplReqDd'), q=>outreqMaterialSuggestions(q),
+    m=> m.isNew ? `<span style="color:var(--accent);font-weight:600;">➕ مادة مطلوبة جديدة «<b>${esc(m.name)}</b>»</span>` : `<span>${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code||'')}</span></span>${m.src!=='custom'?`<span class="rem">${outreqNum(m.rem)}</span>`:''}`,
+    async m=>{
+      try{ if(m.isNew) m = await outreqAddCustomRaw(m.name); }catch(err){ outreqTplMsg('bad', 'تعذّر إضافة المادة: '+err.message); return; }
+      const ex = outreqTplAny(m.src, m.key);
+      if(ex && ex.id!==e.id){ outreqTplMsg('warn', `يوجد قالب لهذه المادة بالفعل («${ex.req_name}») — يمكنك فتحه وتعديله من قائمة القوالب.`); reqInp.value = e.req?e.req.name:''; return; }
+      e.req = {src:m.src, key:m.key, name:m.name}; reqInp.value = m.name; outreqTplMsg('', '');
+      $('tplComp').focus();
+    }, q=> trim(q) ? '' : 'اكتب للبحث في المواد');
+  reqInp.addEventListener('input', ()=>{ if(e.req && reqInp.value !== e.req.name) e.req = null; });
+  const compInp = $('tplComp');
+  outreqSuggest(compInp, $('tplCompDd'), q=>outreqSearchInventory(q),
+    m=>`<span>${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code||'')} · ${m.src==='stock'?'مواد 4G':'مخزون المستودع'}</span></span><span class="rem">${outreqNum(m.rem)}</span>`,
+    m=>{
+      compInp.value = '';
+      const ix = e.comps.findIndex(c=>c.src===m.src && c.key===m.key);
+      if(ix>=0){ outreqTplMsg('warn', `«${m.name}» موجودة في القالب بالفعل — عدّل كميتها.`); }
+      else { e.comps.push({src:m.src, key:m.key, name:m.name, qty:'1'}); outreqTplMsg('', ''); }
+      outreqTplRenderComps();
+      const row = document.querySelector(`.tpl-qty[data-ix="${ix>=0?ix:e.comps.length-1}"]`); if(row){ row.focus(); row.select(); }
+    }, q=> trim(q) ? '' : 'اكتب جزءاً من اسم مادة المستودع');
+  $('tplSave').addEventListener('click', ()=>outreqTplSave());
+}
+async function outreqTplSave(){
+  const e = OUTREQ.tplEdit; if(!e || OUTREQ.busy) return;
+  if(!e.req){ outreqTplMsg('warn', 'اختر المادة المطلوبة أولاً.'); document.getElementById('tplReq').focus(); return; }
+  if(!e.comps.length){ outreqTplMsg('warn', 'أضف مادة مستودع واحدة على الأقل إلى القالب.'); return; }
+  const comps = [];
+  for(const c of e.comps){
+    const q = Number(String(c.qty).replace(',','.'));
+    if(!(q>0) || q>1000000){ outreqTplMsg('warn', `الكمية لكل وحدة للمادة «${c.name}» يجب أن تكون رقماً أكبر من صفر.`); return; }
+    comps.push({mat_src:c.src, mat_key:c.key, mat_name:c.name, qty_per_unit:q});
+  }
+  OUTREQ.busy = true;
+  const btn = document.getElementById('tplSave'); if(btn){ btn.disabled = true; btn.textContent = 'جارِ الحفظ…'; }
+  try{
+    await outreqRpc('outbound_save_template', {p_id:e.id, p_req_src:e.req.src, p_req_key:e.req.key, p_req_name:e.req.name, p_active:e.active, p_note:trim(e.note)||null, p_components:comps});
+    await outreqLoadTemplates();
+    OUTREQ.busy = false; OUTREQ.tplEdit = null;
+    outreqFlash('ok', `تم حفظ قالب «${e.req.name}» (${comps.length} مادة).`);
+    outreqGo('templates');
+  }catch(err){
+    OUTREQ.busy = false;
+    if(btn){ btn.disabled = false; btn.textContent = '💾 حفظ القالب'; }
+    outreqTplMsg('bad', 'تعذّر حفظ القالب: '+err.message);
+  }
+}
+
+/* ============================================================
+   ✂️ فصل المواد: طلب المهندس (يبقى كما هو) ← مواد التنفيذ (Snapshot محفوظ). لا خصم من المخزون هنا إطلاقاً.
+   ============================================================ */
+function outreqSourcesHtml(sources){
+  return (sources||[]).map(s=>{
+    const kind = s.kind==='template' ? `قالب: ${outreqNum(s.per_unit)} لكل وحدة` : (s.kind==='linked' ? 'مربوط بمادة المخزون' : 'مباشر كما طُلب');
+    return `<div class="or-src">${outreqBdi(s.item_name)} × ${outreqNum(s.item_qty)} <span class="or-hint">(${kind}) ← ${outreqNum(s.qty)}</span></div>`;
+  }).join('');
+}
+function outreqUniq(arr){ return Array.from(new Set(arr.map(x=>trim(x)).filter(Boolean))); }
+function outreqLineSite(l){ return outreqUniq((l.sources||[]).map(s=>s.site)).join(' / '); }
+function outreqLineRecipient(l){ return outreqUniq((l.sources||[]).map(s=>s.recipient)).join(' / '); }
+/* ربط تلقائي: بند بلا قالب ومادته "جديدة" لها نفس اسم مادة مخزون فعلية (مطابقة وحيدة) ← يُنفَّذ من المخزون مباشرة */
+function outreqAutoLinks(r){
+  const inv = outreqInventoryList(), links = {};
+  r.items.forEach(i=>{
+    if(i.material_src!=='custom' || outreqTplFor(i.material_src, i.material_key)) return;
+    const sq = outreqSquash(i.material_name);
+    const hits = inv.filter(m=>outreqSquash(m.name)===sq);
+    if(hits.length===1) links[i.id] = {src:hits[0].src, key:hits[0].key, name:hits[0].name};
+  });
+  return links;
+}
+async function outreqSplitStart(reqId){
+  if(OUTREQ.busy) return;
+  const r = outreqReq(reqId); if(!r) return;
+  OUTREQ.busy = true;
+  try{
+    await outreqLoadTemplates();   /* أحدث قوالب قبل الحساب */
+    OUTREQ.split = {reqId, preview:null, links:{}, auto:outreqAutoLinks(r)};
+    await outreqSplitPreview(reqId);
+    OUTREQ.mode = 'split'; OUTREQ.flash = null;
+  }catch(e){ outreqFlash('bad', e.message); }
+  OUTREQ.busy = false; outreqPaint(); window.scrollTo({top:0});
+}
+async function outreqSplitPreview(reqId){
+  const sp = OUTREQ.split;
+  const links = Object.assign({}, sp.auto||{}, sp.links||{});
+  sp.preview = await outreqRpc('outbound_split_request', {p_request_id:reqId, p_links:links, p_commit:false});
+}
+async function outreqSplitCommit(reqId){
+  if(OUTREQ.busy) return;
+  const sp = OUTREQ.split; if(!sp || sp.reqId!==reqId || !sp.preview) return;
+  OUTREQ.busy = true;
+  const btn = document.getElementById('orSplitOk'); if(btn){ btn.disabled = true; btn.textContent = 'جارِ الحفظ…'; }
+  try{
+    const links = Object.assign({}, sp.auto||{}, sp.links||{});
+    const res = await outreqRpc('outbound_split_request', {p_request_id:reqId, p_links:links, p_commit:true});
+    OUTREQ.split = {reqId:null, preview:null, links:{}, auto:{}};
+    await outreqLoadRequests();
+    OUTREQ.mode = 'split';
+    outreqFlash('ok', `تم اعتماد الفصل: ${res.lines.length} مادة تنفيذ جاهزة. لم يُخصم أي شيء من المخزون — الخصم يتم عند «تنفيذ الإخراج» فقط.`);
+  }catch(e){ outreqFlash('bad', e.message); }
+  OUTREQ.busy = false; outreqPaint(); window.scrollTo({top:0});
+}
+function outreqBalCell(src, key, remaining){
+  const bal = outreqMaterialBalance(src, key);
+  if(bal===Infinity) return `<span class="pill warn" title="مادة غير مسجّلة في المخزون: تُنفَّذ بدون خصم رصيد">بدون رصيد</span>`;
+  if(bal===null) return `<span class="pill bad">غير موجودة في المخزون</span>`;
+  const short = remaining - bal;
+  return `<span class="pill ${short>1e-9?'bad':'ok'}">${outreqNum(bal)}${short>1e-9?` · نقص ${outreqNum(short)}`:''}</span>`;
+}
+function outreqPaintSplit(r){
+  const body = document.getElementById('orBody');
+  const sp = OUTREQ.split.reqId===r.id ? OUTREQ.split : null;
+  const hasSplit = outreqHasSplit(r);
+  const preview = sp && sp.preview;
+  if(preview){
+    const lines = preview.lines.map(l=>({mat_src:l.mat_src, mat_key:l.mat_key, mat_name:l.mat_name, qty_required:Number(l.qty_required), qty_done:0, sources:l.sources}));
+    const nT = preview.items.filter(i=>i.kind==='template').length, nD = preview.items.length - nT;
+    const unlinked = lines.filter(l=>l.mat_src==='custom');
+    body.innerHTML = `
+      <div class="msg info" style="margin-bottom:10px;"><b>معاينة الفصل — لم يُحفظ شيء ولم يُخصم أي رصيد.</b><br>${nT} بند فُصل بقالب · ${nD} بند يخرج مباشرة كما طُلب. المواد المتكررة جُمعت في سطر واحد. راجع المواد ثم اضغط «اعتماد الفصل».
+        ${hasSplit ? '<br>⚠ اعتماد هذا الفصل سيستبدل مواد التنفيذ المحفوظة سابقاً (قبل أي تنفيذ).' : ''}</div>
+      ${unlinked.length ? `<div class="msg warn" style="margin-bottom:10px;">⚠ ${unlinked.length} مادة غير مرتبطة بمخزون فعلي (مواد جديدة بلا قالب) — ستُنفَّذ بدون خصم رصيد. يمكنك ربطها بمادة مخزون من الخانة داخل الجدول، أو إنشاء قالب لها من «🧩 قوالب الإخراج».</div>` : ''}
+      <div class="tablewrap" style="max-height:none;"><table class="data" id="orSplitTable">
+        <thead><tr><th>#</th><th>مادة المستودع</th><th>الكمية المطلوبة</th><th>الرصيد الحالي</th><th>مصدر الكمية (من طلب المهندس)</th></tr></thead>
+        <tbody>${lines.map((l,ix)=>`<tr>
+          <td>${ix+1}</td>
+          <td>${outreqIcon(l.mat_src)} <b>${outreqBdi(l.mat_name)}</b>${l.mat_src==='custom' ? `<div class="qm-search-wrap" style="margin-top:6px;max-width:300px;"><input type="text" class="or-link-inp" data-ix="${ix}" autocomplete="off" placeholder="🔗 ربط بمادة مخزون…"><div class="qm-dropdown" id="orLinkDd${ix}" style="display:none;"></div></div>` : ''}</td>
+          <td><b>${outreqNum(l.qty_required)}</b></td><td>${outreqBalCell(l.mat_src, l.mat_key, l.qty_required)}</td>
+          <td>${outreqSourcesHtml(l.sources)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="btnrow"><button class="primary" id="orSplitOk">✅ اعتماد الفصل</button><button class="secondary" id="orSplitCancel">إلغاء المعاينة</button></div>`;
+    document.getElementById('orSplitOk').addEventListener('click', ()=>outreqSplitCommit(r.id));
+    document.getElementById('orSplitCancel').addEventListener('click', ()=>{ OUTREQ.split = {reqId:null, preview:null, links:{}, auto:{}}; OUTREQ.mode = hasSplit ? 'split' : 'items'; outreqPaint(); });
+    body.querySelectorAll('.or-link-inp').forEach(inp=>{
+      const ix = Number(inp.dataset.ix), line = lines[ix];
+      outreqSuggest(inp, document.getElementById('orLinkDd'+ix), q=>outreqSearchInventory(q),
+        m=>`<span>${outreqIcon(m.src)} <b>${outreqBdi(m.name)}</b> <span class="or-hint">${esc(m.code||'')}</span></span><span class="rem">${outreqNum(m.rem)}</span>`,
+        async m=>{
+          (line.sources||[]).forEach(s=>{ sp.links[s.item_id] = {src:m.src, key:m.key, name:m.name}; });
+          try{ await outreqSplitPreview(r.id); }catch(e){ outreqFlash('bad', e.message); }
+          outreqPaint();
+        }, q=> trim(q) ? '' : 'اكتب اسم مادة المستودع');
+    });
+    return;
+  }
+  /* الفصل المحفوظ (Snapshot) */
+  const lines = r.lines;
+  const closed = r.status==='completed' || r.status==='cancelled';
+  body.innerHTML = `
+    <div class="msg info" style="margin-bottom:10px;">مواد التنفيذ المحفوظة وقت الفصل${r.split_at?` (${outreqFmt(r.split_at)}${r.split_by_name?' · '+esc(r.split_by_name):''})`:''} — تعديل القوالب لاحقاً لا يغيّرها. طلب المهندس الأصلي محفوظ كما هو في تبويب «طلب المهندس».</div>
+    <div class="tablewrap" style="max-height:none;"><table class="data" id="orSplitTable">
+      <thead><tr><th>#</th><th>مادة المستودع</th><th>المطلوب</th><th>تم إخراجه</th><th>المتبقي</th><th>الرصيد الحالي</th><th>مصدر الكمية (من طلب المهندس)</th></tr></thead>
+      <tbody>${lines.map(l=>{ const rem = l.qty_required - l.qty_done; return `<tr class="${rem<=0?'or-done-row':''}">
+        <td>${l.line_no}</td><td>${outreqIcon(l.mat_src)} <b>${outreqBdi(l.mat_name)}</b></td>
+        <td><b>${outreqNum(l.qty_required)}</b></td><td>${outreqNum(l.qty_done)}</td><td><b>${outreqNum(rem)}</b></td>
+        <td>${rem<=0 ? '<span class="pill ok">✓ مكتمل</span>' : (closed ? '—' : outreqBalCell(l.mat_src, l.mat_key, rem))}</td>
+        <td>${outreqSourcesHtml(l.sources)}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
+
+/* ============================================================
+   ▶ تنفيذ الإخراج: يتحقق من الأرصدة ويعرض النقص قبل أي خصم؛ الخصم الفعلي يتم هنا فقط وبنفس آلية المخزون الحالية
+   ============================================================ */
+function outreqExecRows(r){
+  return r.lines.filter(l=>l.qty_required - l.qty_done > 1e-9).map(l=>{
+    const rem = l.qty_required - l.qty_done, bal = outreqMaterialBalance(l.mat_src, l.mat_key);
+    const avail = bal===null ? 0 : Math.max(0, Math.min(rem, bal));
+    return {l, rem, bal, avail, short: rem - avail};
+  });
+}
+async function outreqExecuteSplit(reqId){
+  if(OUTREQ.busy) return;
+  OUTREQ.busy = true;
+  try{ await outreqLoadRequests(); }catch(e){}
+  try{ await pollSupabaseForRemoteChanges(true); }catch(e){}   /* أحدث رصيد مخزون قبل الفحص */
+  OUTREQ.busy = false;
+  const r = outreqReq(reqId); if(!r) return;
+  if(r.status!=='split' && r.status!=='partial'){ outreqFlash('warn', 'حالة الطلب تغيّرت — لا يوجد ما يُنفَّذ.'); outreqPaint(); return; }
+  const rows = outreqExecRows(r);
+  if(!rows.length){ outreqPaint(); return; }
+  const short = rows.filter(x=>x.short>1e-9);
+  const anyAvail = rows.some(x=>x.avail>1e-9);
+  const html = short.length ? `
+    <div class="msg bad" style="margin-bottom:10px;"><b>⚠ رصيد المخزون لا يكفي لبعض المواد.</b> لم يُنفَّذ أو يُخصم أي شيء بعد.</div>
+    <div class="tablewrap" style="max-height:none;"><table class="data" id="orShortTable"><thead><tr><th>المادة</th><th>المطلوب</th><th>المتوفر</th><th>النقص</th></tr></thead>
+      <tbody>${short.map(x=>`<tr><td>${outreqBdi(x.l.mat_name)}</td><td>${outreqNum(x.rem)}</td><td>${x.bal===null?'غير موجودة':outreqNum(x.bal)}</td><td><b style="color:var(--bad,#b3261e);">${outreqNum(x.short)}</b></td></tr>`).join('')}</tbody></table></div>
+    <div class="or-hint" style="margin:10px 0;">${anyAvail ? '«تنفيذ المتوفر فقط» يُخرج من كل مادة الكمية المتوفرة ويُبقي النقص ظاهراً كمتبقٍّ في الطلب (منفذ جزئياً) لتكمله لاحقاً بعد توفّر الرصيد.' : 'لا يتوفر رصيد لأي مادة حالياً.'}</div>
+    <div class="btnrow">${anyAvail ? `<button class="primary" id="orDlgExec">تنفيذ المتوفر فقط</button>` : ''}<button class="secondary" id="orDlgCancel">إلغاء — لا تنفّذ شيئاً</button></div>`
+  : `
+    <div class="msg info" style="margin-bottom:10px;">الأرصدة كافية. سيُخصم من المخزون ويُسجَّل كحركة إخراج مرتبطة بالطلب <b>${esc(r.req_no)}</b>:</div>
+    <div class="tablewrap" style="max-height:none;"><table class="data" id="orConfirmTable"><thead><tr><th>المادة</th><th>الكمية</th><th></th></tr></thead>
+      <tbody>${rows.map(x=>`<tr><td>${outreqBdi(x.l.mat_name)}</td><td><b>${outreqNum(x.rem)}</b></td><td>${x.bal===Infinity?'<span class="or-hint">بدون خصم رصيد (مادة جديدة)</span>':''}</td></tr>`).join('')}</tbody></table></div>
+    <div class="btnrow"><button class="primary" id="orDlgExec">✅ تأكيد تنفيذ الإخراج</button><button class="secondary" id="orDlgCancel">إلغاء</button></div>`;
+  openModal(short.length ? '⚠ نقص في المخزون' : '▶ تنفيذ الإخراج', html, {maxWidth:'760px'});
+  document.getElementById('orDlgCancel').addEventListener('click', closeModal);
+  const go = document.getElementById('orDlgExec');
+  if(go) go.addEventListener('click', ()=>{ closeModal(); outreqRunExec(reqId); });
+}
+async function outreqRunExec(reqId){
+  if(OUTREQ.busy) return;
+  OUTREQ.busy = true;
+  const eb = document.getElementById('orExecAll'); if(eb){ eb.disabled = true; eb.textContent = 'جارِ التنفيذ…'; }
+  try{ await pollSupabaseForRemoteChanges(true); }catch(e){}
+  let r = outreqReq(reqId); const out = []; let okN = 0, total = 0;
+  for(const x of outreqExecRows(r)){
+    const l = x.l;
+    if(x.avail <= 1e-9){ out.push(`⏸ ${l.mat_name}: لا يتوفر رصيد — بقي ${outreqNum(x.rem)} معلّقاً.`); continue; }
+    total++;
+    const item = {material_src:l.mat_src, material_key:l.mat_key, material_name:l.mat_name, site:outreqLineSite(l), recipient:outreqLineRecipient(l)};
+    const inv = await outreqApplyInventory(item, x.avail, r);
+    if(!inv.ok){ out.push(`✖ ${l.mat_name}: ${inv.msg}`); continue; }
+    try{
+      await outreqRpc('outbound_record_line_execution', {p_line_id:l.id, p_qty:x.avail, p_ledger_ref:inv.ref, p_note:null});
+      okN++;
+      out.push(`✔ ${l.mat_name}: أُخرج ${outreqNum(x.avail)}${x.short>1e-9?` (بقي ${outreqNum(x.short)} — نقص)`:''}.`);
+    }catch(e){
+      const rev = await outreqReverseInventory(inv.entries);
+      out.push(`✖ ${l.mat_name}: ${e.message} — ${rev ? 'عُكس خصم المخزون تلقائياً بحركة تصحيحية.' : '⚠ تعذّر عكس المخزون تلقائياً، راجع سجل الحركات يدوياً!'}`);
+    }
+  }
+  await outreqLoadRequests();
+  OUTREQ.busy = false;
+  r = outreqReq(reqId);
+  outreqFlash(okN===total && total>0 && r && r.status==='completed' ? 'ok' : (okN ? 'warn' : 'bad'),
+    (r && r.status==='completed' ? 'تم تنفيذ الإخراج بالكامل — الحالة: تم التنفيذ.' : (okN ? `تم تنفيذ ${okN} من ${total} مادة — الطلب منفذ جزئياً:` : 'لم يُنفَّذ أي شيء:'))+'\n'+out.join('\n'));
+  outreqPaint();
+  if(typeof updateSaveIndicator==='function') updateSaveIndicator();
+}
+
+/* ============================================================
    تنبيهات الإدارة (مخزَّنة في Supabase، تبقى حتى يزيلها المدير صراحةً)
    ============================================================ */
 function outreqNotifBannerHtml(){
@@ -8292,7 +8741,7 @@ async function outreqOpenRequest(reqId){
   OUTREQ.notifOpen = false; renderOutreqBellPanel();
   if(!outreqReq(reqId)) await outreqLoadRequests();
   APP_MODE = 'admin'; ACTIVE_TAB = 'outreq';
-  OUTREQ.view = 'detail'; OUTREQ.selectedId = reqId; OUTREQ.mode = 'items'; OUTREQ.flash = null;
+  OUTREQ.view = 'detail'; OUTREQ.selectedId = reqId; OUTREQ.mode = outreqDefaultMode(outreqReq(reqId)); OUTREQ.flash = null;
   renderApp(); window.scrollTo({top:0});
 }
 function outreqOpenCount(){ return OUTREQ.notifs.length; }
@@ -8326,38 +8775,60 @@ document.addEventListener('click', (e)=>{
 /* ============================================================
    🖨️ طباعة الطلب (A4) — مرتَّب حسب المادة لسهولة التحضير، بدون أي أزرار أو واجهة
    ============================================================ */
-function outreqPrintHtml(r){
-  const t = outreqTotals(r);
-  const groups = outreqGroups(r);   // الترتيب حسب المادة كما كان — بدون صفوف عناوين مجموعات منفصلة
-  let n = 0;
-  const flat = [];
-  groups.forEach(g=>g.items.forEach(i=>flat.push({name:g.name, i})));
-  const rowHtml = ({name,i})=>{ n++; return `<tr>
-      <td class="c">${n}</td><td>${outreqBdi(name)}</td><td>${outreqBdi(i.site)}</td><td>${outreqBdi(i.recipient||'')}</td>
-      <td class="c b">${outreqNum(i.qty_requested)}</td>${i.qty_done>0?`<td class="c done">${outreqNum(i.qty_done)}</td>`:`<td class="c box">☐</td>`}</tr>`; };
-  const endBlock = `<div class="p-endwrap"><div class="p-total">عدد البنود: <b>${r.items.length}</b> &nbsp;|&nbsp; إجمالي الكمية المطلوبة: <b>${outreqNum(t.req)}</b></div>
-    <div class="p-sign"><div>اسم المنفِّذ / التوقيع: ................................</div><div>اسم المستلم / التوقيع: ................................</div></div></div>`;
-  /* آخر بند يبقى مع التوقيعات في نفس الصفحة (لا صفحة أخيرة فارغة إلا من التوقيع) */
-  const KEEP = 2;   // آخر بندين يبقيان مع التوقيعات
-  const head = flat.slice(0,-KEEP).map(rowHtml).join('');
-  const last = flat.slice(-KEEP).map(rowHtml).join('');
+/* kind='request' : "طلب إخراج مواد" — طلب المهندس كما أُرسل (المادة المطلوبة | الكمية)
+   kind='exec'    : "مواد تنفيذ طلب الإخراج" — مواد المستودع بعد الفصل (مادة المستودع | الكمية)
+   تخطيط A4 مضغوط واحد للنوعين؛ التوقيعات في آخر صفحة فقط. */
+function outreqPrintHtml(r, kind){
+  kind = kind || 'request';
+  const sites = outreqUniq(r.items.map(i=>i.site));
+  const siteTxt = sites.length===1 ? sites[0] : `عدة مواقع (${sites.length})`;
+  const showSite = kind==='request' && sites.length>1;
+  const showRec = kind==='request' && r.items.some(i=>trim(i.recipient||''));
+  let title, cols, rows, countLbl, signs;
+  if(kind==='exec'){
+    title = 'مواد تنفيذ طلب الإخراج';
+    cols = [{h:'#', w:6}, {h:'مادة المستودع', w:74}, {h:'الكمية', w:20}];
+    rows = (r.lines||[]).map((l,ix)=>[`<td class="c">${ix+1}</td>`, `<td>${outreqBdi(l.mat_name)}</td>`, `<td class="c b">${outreqNum(l.qty_required)}</td>`]);
+    countLbl = 'عدد المواد';
+    signs = ['اسم المنفِّذ / التوقيع', 'اسم المستلم / التوقيع'];
+  } else {
+    title = 'طلب إخراج مواد';
+    const extra = (showSite?24:0) + (showRec?18:0);
+    cols = [{h:'#', w:5}, {h:'المادة المطلوبة', w:100-5-12-extra}, {h:'الكمية', w:12}];
+    if(showSite) cols.push({h:'الموقع', w:24});
+    if(showRec) cols.push({h:'المستلم', w:18});
+    rows = r.items.map((i,ix)=>{
+      const c = [`<td class="c">${ix+1}</td>`, `<td>${outreqBdi(i.material_name)}${i.note?`<div class="p-sub">${esc(i.note)}</div>`:''}</td>`, `<td class="c b">${outreqNum(i.qty_requested)}</td>`];
+      if(showSite) c.push(`<td>${outreqBdi(i.site)}</td>`);
+      if(showRec) c.push(`<td>${outreqBdi(i.recipient||'')}</td>`);
+      return c;
+    });
+    countLbl = 'عدد البنود';
+    signs = ['مقدم الطلب / التوقيع', 'اعتماد المسؤول / التوقيع'];
+  }
+  const tr = c=>`<tr>${c.join('')}</tr>`;
+  const endBlock = `<div class="p-endwrap"><div class="p-total">${countLbl}: <b>${rows.length}</b></div>
+    <div class="p-sign"><div>${signs[0]}: ................................</div><div>${signs[1]}: ................................</div></div></div>`;
+  const KEEP = 2;   // آخر بندين يبقيان مع التوقيعات فلا تنفرد صفحة أخيرة بالتوقيع وحده
+  const head = rows.slice(0,-KEEP).map(tr).join(''), last = rows.slice(-KEEP).map(tr).join('');
   return `<div class="p-wrap">
-    <h1>طلب إخراج بضاعة</h1>
+    <h1>${title}</h1>
     <table class="p-meta"><tr>
       <td><span>رقم الطلب</span><b>${esc(r.req_no)}</b></td>
+      <td><span>الموقع</span><b>${outreqBdi(siteTxt)}</b></td>
       <td><span>مقدم الطلب</span><b>${esc(r.requester_name)}</b></td>
-      <td><span>التاريخ</span><b>${outreqFmt(r.created_at)}</b></td>
-      <td><span>الحالة</span><b>${esc(OUTREQ_STATUS[r.status]||r.status)}</b></td></tr></table>
-    ${r.note?`<div class="p-note">ملاحظة: ${esc(r.note)}</div>`:''}
-    <table class="p-table"><colgroup><col style="width:5%"><col style="width:38%"><col style="width:21%"><col style="width:14%"><col style="width:10%"><col style="width:12%"></colgroup>
-      <thead><tr><th>#</th><th>المادة</th><th>الموقع</th><th>المستلم</th><th>المطلوب</th><th>تم الإخراج</th></tr></thead>
-      <tbody>${head}</tbody><tbody class="p-tail">${last}<tr class="p-end"><td colspan="6">${endBlock}</td></tr></tbody></table>
+      <td><span>التاريخ</span><b>${outreqFmt(r.created_at)}</b></td></tr></table>
+    ${kind==='request' && r.note ? `<div class="p-note">ملاحظة: ${esc(r.note)}</div>` : ''}
+    <table class="p-table"><colgroup>${cols.map(c=>`<col style="width:${c.w}%">`).join('')}</colgroup>
+      <thead><tr>${cols.map(c=>`<th>${c.h}</th>`).join('')}</tr></thead>
+      <tbody>${head}</tbody><tbody class="p-tail">${last}<tr class="p-end"><td colspan="${cols.length}">${endBlock}</td></tr></tbody></table>
   </div>`;
 }
-function outreqPrint(id){
+function outreqPrint(id, kind){
   const r = outreqReq(id); if(!r) return;
+  if(kind==='exec' && !(r.lines||[]).length) return;
   const old = document.getElementById('printRoot'); if(old) old.remove();
-  const div = document.createElement('div'); div.id = 'printRoot'; div.innerHTML = outreqPrintHtml(r);
+  const div = document.createElement('div'); div.id = 'printRoot'; div.innerHTML = outreqPrintHtml(r, kind||'request');
   document.body.appendChild(div);
   /* @page خاص بطباعة الطلب فقط (يُحقن عند الطباعة ويُزال بعدها): A4 عمودي، هوامش صغيرة، وتذييل "Page x of y" + اسم النظام */
   let st = document.getElementById('outreqPageStyle'); if(st) st.remove();
