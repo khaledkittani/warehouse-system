@@ -5905,9 +5905,6 @@ function sidrSiteDisplayedRows(imp, opts){
 }
 function sidrReportBdi(v){ return `<bdi>${esc(v)}</bdi>`; }
 function sidrSiteReportHtml(imp, mode, opts){
-  const kpiHtml = (n, req, rec, sh, nLabel)=>`<table class="sr-kpi"><tr>
-      <td><b>${n}</b><span>${nLabel}</span></td><td><b>${req}</b><span>إجمالي المطلوب</span></td>
-      <td><b>${rec}</b><span>إجمالي المستلم</span></td><td class="${sh>0?'hot':''}"><b>${sh}</b><span>إجمالي النقص</span></td></tr></table>`;
   /* رأس الصفحة: اسم الموقع فقط — بلا عنوان ولا تاريخ ولا ملف ولا أي تفاصيل أخرى */
   const head = `<div class="sr-site"><b>${esc(imp.site)}</b></div>`;
   if(mode==='raw'){
@@ -5926,7 +5923,6 @@ function sidrSiteReportHtml(imp, mode, opts){
     const body = rows.map((r,ri)=>`<tr><td class="c">${12+1+ri}</td>${cols.map(c=>`<td>${sidrReportBdi(trim(r[c]))}</td>`).join('')}</tr>`).join('')
       || `<tr><td class="c" colspan="${colCount+1}">لا توجد بيانات محفوظة لهذا الاستيراد.</td></tr>`;
     return {orient: colCount>7?'landscape':'portrait', html: `<div class="sr-wrap">${head}
-      ${kpiHtml(all.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف')}
       <table class="sr-table"><colgroup><col style="width:4%">${colW.map(x=>`<col style="width:${x}%">`).join('')}</colgroup>
         <thead><tr><th>#</th>${cols.map(c=>`<th>${sidrReportBdi(trim(header[c]))||'&nbsp;'}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
       <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
@@ -5946,7 +5942,6 @@ function sidrSiteReportHtml(imp, mode, opts){
       <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}${r.note?`<br><span class="sr-rnote">${sidrReportBdi(r.note)}</span>`:''}</td></tr>`).join('')
     || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
   return {orient:'portrait', hl: hlRows.length>0, html: `<div class="sr-wrap">${head}
-    ${kpiHtml(rows.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف المعروضة')}
     ${hlBox}
     <table class="sr-table"><colgroup><col style="width:4%"><col style="width:13%"><col style="width:17%"><col style="width:30%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:11%"></colgroup>
       <thead><tr><th>#</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
