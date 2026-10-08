@@ -601,10 +601,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-head{display:flex;justify-content:space-between;align-items:flex-end;gap:1em;border-bottom:2.2pt solid #000;padding-bottom:.35em;margin-bottom:.55em;}
   #printRoot.sr .sr-org{font-size:1em;font-weight:600;color:#333;}
   #printRoot.sr .sr-title{font-size:1.65em;font-weight:800;}
-  #printRoot.sr .sr-site{border:1.8pt solid #000;padding:.3em .75em;margin-bottom:.55em;display:flex;align-items:baseline;gap:.7em;background:#f2f2f2;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  #printRoot.sr .sr-site span{font-size:1.05em;font-weight:600;}
+  #printRoot.sr .sr-site{border:1.8pt solid #000;padding:.3em .75em;margin-bottom:.55em;display:flex;align-items:baseline;justify-content:center;gap:.7em;background:#f2f2f2;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   #printRoot.sr .sr-site b{font-size:2.1em;font-weight:800;unicode-bidi:plaintext;word-break:break-word;}
   #printRoot.sr table{width:100%;border-collapse:collapse;table-layout:fixed;}
+  /* هوامش 10mm تتكرر في كل صفحة عبر thead/tfoot، بينما @page{margin:0} يمنع المتصفح من طباعة التاريخ والعنوان والرابط وأرقام الصفحات */
+  #printRoot.sr .sr-pg>thead>tr>td, #printRoot.sr .sr-pg>tfoot>tr>td, #printRoot.sr .sr-pg>tbody>tr>td{padding:0;border:0;}
+  #printRoot.sr .sr-pg-sp{height:10mm;}
+  #printRoot.sr .sr-pg-body{padding:0 10mm !important;}
   #printRoot.sr .sr-meta td{border:.8pt solid #000;padding:.25em .55em;vertical-align:top;font-size:.95em;width:25%;}
   #printRoot.sr .sr-meta span{display:block;font-size:.8em;color:#444;}
   #printRoot.sr .sr-meta b{font-weight:700;word-break:break-word;overflow-wrap:anywhere;}
@@ -5902,15 +5905,11 @@ function sidrSiteDisplayedRows(imp, opts){
 }
 function sidrReportBdi(v){ return `<bdi>${esc(v)}</bdi>`; }
 function sidrSiteReportHtml(imp, mode, opts){
-  const now = todayStr()+' '+nowTimeStr();
   const kpiHtml = (n, req, rec, sh, nLabel)=>`<table class="sr-kpi"><tr>
       <td><b>${n}</b><span>${nLabel}</span></td><td><b>${req}</b><span>إجمالي المطلوب</span></td>
       <td><b>${rec}</b><span>إجمالي المستلم</span></td><td class="${sh>0?'hot':''}"><b>${sh}</b><span>إجمالي النقص</span></td></tr></table>`;
-  const head = `
-    <div class="sr-head"><div class="sr-org">نظام إدارة وترصيد مواد المستودع</div>
-      <div class="sr-title">${mode==='raw'?'تقرير مراجعة SID — الملف الأصلي كاملاً':'تقرير حالة المواد المسلَّمة في SID'}</div></div>
-    <div class="sr-site"><span>الموقع:</span><b>${esc(imp.site)}</b></div>`;
-  const metaCell = (l,v)=>`<td><span>${l}</span><b>${v}</b></td>`;
+  /* رأس الصفحة: اسم الموقع فقط — بلا عنوان ولا تاريخ ولا ملف ولا أي تفاصيل أخرى */
+  const head = `<div class="sr-site"><b>${esc(imp.site)}</b></div>`;
   if(mode==='raw'){
     const header = imp.rawHeader || [], rows = imp.rawRows || [];
     const totalCols = Math.max(header.length, ...rows.map(r=>r.length), 1);
@@ -5927,9 +5926,7 @@ function sidrSiteReportHtml(imp, mode, opts){
     const body = rows.map((r,ri)=>`<tr><td class="c">${12+1+ri}</td>${cols.map(c=>`<td>${sidrReportBdi(trim(r[c]))}</td>`).join('')}</tr>`).join('')
       || `<tr><td class="c" colspan="${colCount+1}">لا توجد بيانات محفوظة لهذا الاستيراد.</td></tr>`;
     return {orient: colCount>7?'landscape':'portrait', html: `<div class="sr-wrap">${head}
-      <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell('تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('عدد الصفوف',rows.length)}</tr></table>
       ${kpiHtml(all.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف')}
-      <div class="sr-note">نسخة كاملة من الملف الأصلي كما رُفع (جميع الأعمدة والصفوف) — "#" = رقم السطر في ملف Excel.</div>
       <table class="sr-table"><colgroup><col style="width:4%">${colW.map(x=>`<col style="width:${x}%">`).join('')}</colgroup>
         <thead><tr><th>#</th>${cols.map(c=>`<th>${sidrReportBdi(trim(header[c]))||'&nbsp;'}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
       <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
@@ -5949,7 +5946,6 @@ function sidrSiteReportHtml(imp, mode, opts){
       <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}${r.note?`<br><span class="sr-rnote">${sidrReportBdi(r.note)}</span>`:''}</td></tr>`).join('')
     || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
   return {orient:'portrait', hl: hlRows.length>0, html: `<div class="sr-wrap">${head}
-    <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell(opts&&opts.dateLabel?opts.dateLabel:'تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('نطاق العرض',esc(scope))}</tr></table>
     ${kpiHtml(rows.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف المعروضة')}
     ${hlBox}
     <table class="sr-table"><colgroup><col style="width:4%"><col style="width:13%"><col style="width:17%"><col style="width:30%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:11%"></colgroup>
@@ -5959,7 +5955,7 @@ function sidrSiteReportHtml(imp, mode, opts){
 }
 /* يضغط الخط تدريجياً حتى يتّسع التقرير في صفحة واحدة (هوامش 10mm)؛ إن لم يتّسع عند أصغر حجم مقروء يمتد لصفحة ثانية برأس جدول متكرر */
 function sidrFitOnePage(root, orient, minSize){
-  const pageW = orient==='landscape'?277:190, pageH = orient==='landscape'?190:277;   // الأبعاد المتاحة (mm) بعد الهوامش
+  const pageW = orient==='landscape'?297:210, pageH = orient==='landscape'?210:297;   // أبعاد ورقة A4 (mm) — الهوامش داخل المحتوى نفسه (انظر .sr-pg)
   const px = mm=>mm*96/25.4;
   const limit = px(pageH)*0.975;
   root.style.cssText = `display:block;position:fixed;left:-99999px;top:0;width:${pageW}mm;visibility:hidden;`;
@@ -5975,11 +5971,12 @@ async function sidrPrepareSiteReport(mode, impOverride, opts){
   const imp = impOverride || sidrImportForSite(SIDR_SELECTED_SITE); if(!imp) return null;
   const rep = sidrSiteReportHtml(imp, mode, opts);
   const old = document.getElementById('printRoot'); if(old) old.remove();
-  const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr'+(mode==='raw'?' raw':''); div.innerHTML = rep.html;
+  const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr'+(mode==='raw'?' raw':'');
+  div.innerHTML = `<table class="sr-pg"><thead><tr><td><div class="sr-pg-sp"></div></td></tr></thead><tbody><tr><td class="sr-pg-body">${rep.html}</td></tr></tbody><tfoot><tr><td><div class="sr-pg-sp"></div></td></tr></tfoot></table>`;
   document.body.appendChild(div);
   let st = document.getElementById('sidrPageStyle'); if(st) st.remove();
   st = document.createElement('style'); st.id = 'sidrPageStyle';
-  st.textContent = `@media print{@page{size:A4 ${rep.orient};margin:10mm;}}`;
+  st.textContent = `@media print{@page{size:A4 ${rep.orient};margin:0;}}`;
   document.head.appendChild(st);
   try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
   const fit = sidrFitOnePage(div, rep.orient, rep.hl ? 6 : 6.5);   // مع وجود عناصر مبرزة يُسمح بخط أصغر قليلاً كي لا يتسرّب سطر وحيد لصفحة ثانية
