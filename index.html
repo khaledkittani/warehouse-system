@@ -217,14 +217,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .footer-note{color:var(--muted);font-size:11.5px;text-align:center;margin-top:26px;}
   .empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13.5px;}
 
-  .modal-overlay{
-    position:fixed;inset:0;background:rgba(24,34,38,.55);
-    display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;
-  }
-  .modal{
-    background:#fff;border-radius:var(--radius);max-width:640px;width:100%;
-    padding:26px;max-height:88vh;overflow:auto;
-  }
   .loading{text-align:center;padding:30px;color:var(--muted);}
   ::-webkit-scrollbar{width:10px;height:10px;}
   ::-webkit-scrollbar-thumb{background:#cfc8b6;border-radius:6px;}
@@ -488,31 +480,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     .kpi-grid{grid-template-columns:repeat(2,1fr);}
   }
 
-  /* ---- Custom Labels & Columns UI ---- */
-  .col-mgmt-btn{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;margin-inline-start:8px;vertical-align:middle;}
-  .col-mgmt-btn:hover{background:var(--surface);color:var(--text);}
-  .custom-col-header{background:#f0ede4 !important;font-size:12px;color:var(--accent);white-space:nowrap;}
-  .custom-col-cell{padding:2px !important;}
-  .custom-col-input{width:90px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);}
-  .custom-col-input:focus{outline:2px solid var(--accent);border-color:var(--accent);}
-  .col-del-btn{background:none;border:none;color:#c0392b;cursor:pointer;font-size:11px;margin-inline-start:3px;padding:0 3px;vertical-align:middle;}
-  .col-del-btn:hover{color:#e74c3c;}
-  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;}
-  .modal-card{background:var(--card);border-radius:14px;padding:28px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.35);direction:rtl;}
-  .modal-card h2{margin:0 0 16px 0;font-size:18px;color:var(--text);}
-  .modal-card .close-btn{position:absolute;top:12px;left:16px;background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;}
-  .col-list-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;}
-  .col-list-item label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;}
-  .col-list-item input[type="text"]{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12.5px;}
-  .col-list-item .pill{font-size:11px;cursor:pointer;}
-  .add-col-row{display:flex;gap:8px;margin-top:12px;align-items:center;}
-  .add-col-row input{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;}
-  .add-col-row select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;}
-  .label-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);}
-  .label-item .lbl-key{min-width:160px;font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
-  .label-item input{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12.5px;}
-  .label-item .reset-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:2px 6px;}
-  .label-item .reset-btn:hover{text-decoration:underline;}
 
   /* ---- Movements table editing (Admin) ---- */
   .movements-table td{padding:3px 6px !important;}
@@ -526,14 +493,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .movements-table .mov-save-status.bad{color:#c0392b;}
   .movements-table .mov-balance{font-weight:600;color:var(--accent);text-align:center;}
 
-  /* ---- تعديل النصوص بالضغط مباشرة (Admin) ---- */
-  .editable-lbl{border-bottom:1px dashed rgba(120,110,80,0.35);border-radius:3px;cursor:text;transition:background .15s;}
-  .editable-lbl:hover{background:rgba(197,177,120,0.22);}
-  .editable-lbl.editing{border-bottom-color:transparent;}
-  .label-inline-edit{font:inherit;color:inherit;background:rgba(197,177,120,0.25);border:1px solid var(--accent);border-radius:4px;padding:0 4px;min-width:140px;max-width:100%;box-sizing:border-box;}
-  .label-inline-edit:focus{outline:2px solid var(--accent);}
-  nav.tabs .editable-lbl{cursor:default;border-bottom-color:transparent;}
-  nav.tabs .editable-lbl:hover{background:transparent;}
 .modal-overlay{position:fixed;inset:0;background:rgba(20,18,12,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;}
 .modal-box{background:#fff;border-radius:14px;max-width:960px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);}
 .modal-head{position:sticky;top:0;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eee;z-index:1;}
@@ -714,10 +673,6 @@ const STORE_KEYS = {
   cableLedger: 'wms_cable_ledger_v1',
   goodsCatalog: 'wms_goods_catalog_v1',
   goodsLedger: 'wms_goods_ledger_v1',
-  customLabels: 'wms_custom_labels_v1',
-  hiddenColumns: 'wms_hidden_columns_v1',
-  customColumns: 'wms_custom_columns_v1',
-  customValues: 'wms_custom_values_v1',
   tagLog: 'wms_tag_log_v1',
   tagLogTemplate: 'wms_tag_log_template_v1',
   tagApprovedSites: 'wms_tag_sites_v1',
@@ -738,10 +693,6 @@ let STATE = {
   cableLedger: [],
   goodsCatalog: {},   // { key: {code, name, category, unit, totalIn, totalOut} } — كتالوج البضاعة المرجعي (مستورد من ملف العميل)
   goodsLedger: [],      // [{id, date, key, name, qty, direction:'IN'|'OUT', note, source}]
-  customLabels: {},      // { labelKey: newValue } — تعديلات التسميات المخصصة من المستخدم
-  hiddenColumns: {},     // { sectionKey: [colId, ...] } — الأعمدة المخفية لكل قسم
-  customColumns: {},     // { sectionKey: [{id, name, type:'text'|'number'}, ...] } — أعمدة مخصصة إضافية لكل جدول
-  customValues: {},      // { sectionKey: { itemKey: { colId: value } } } — قيم الأعمدة المخصصة لكل صنف
   tagLog: [],   // [{id, tag, materialName, source, siteName, installDate, createdAt}] — سجل "رصد التاجات" المستقل، مستقل تماماً عن STATE.stock
   tagLogTemplate: null, // {fileName, base64, uploadedAt} — قالب إكسل "رصد التاجات" الذي يرفعه الأدمن مرة واحدة (إخراج فقط، لا يُستخرج منه أي قائمة مواد)
   tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ list: [{name, address}] — عنصر نصي قديم (من قبل إضافة العنوان) يُطبَّع تلقائياً عند القراءة عبر taglogApprovedSitesList() إلى {name, address:''}. رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
@@ -774,11 +725,7 @@ const LABELS = {
   tab_goods: 'مخزون المستودع',
   tab_outreq: '📤 طلبات الإخراج',
   tab_goods_viewer: 'مواد المستودع المتوفرة',
-  tab_sidhistory: 'سجل SID المنفَّذة',
-  tab_search: 'البحث',
   tab_issues: 'المشاكل',
-  tab_reports: 'التقارير',
-  tab_customize: '🎨 تخصيص الأعمدة',
   tab_backup: '💾 نسخ احتياطي',
   tab_tags: 'تاجات المواد المتوفرة',
   tab_tagcapture: '🏷️ رصد التاجات',
@@ -787,51 +734,28 @@ const LABELS = {
   // عناوين فرعية / أقسام داخلية
   tags_heading: 'تاجات المواد المتوفرة',
   goods_search_heading: 'البحث في الكتالوج',
-  goods_viewer_search_heading: 'البحث في كتالوج الأصناف',
   goods_ledger_heading: 'سجل الحركات',
   goods_add_heading: 'إضافة صنف جديد يدوياً (إذا لم يكن موجوداً في القائمة)',
   goods_quick_heading: 'تسجيل حركة سريعة (صنف واحد)',
   goods_batch_heading: 'رفع ملف كميات (دفعة) — شراء أو إخراج لجوال',
   goods_batch_preview_heading: 'معاينة ملف',
-  sid_batch_summary_heading: 'ملخص الدفعة',
   receipt_detail_heading: 'تفاصيل الاستلام',
-  customize_labels_heading: '🎨 تخصيص التسميات',
-  customize_columns_heading: '⚙️ إدارة الأعمدة',
   backup_preview_heading: 'ملخص النسخة الاحتياطية قبل الاستعادة',
-  search_hits_stock: 'أصناف مطابقة',
   search_hits_tags: 'تاجات مطابقة',
-  search_hits_dismantled: 'مواد مفكوكة مطابقة',
-  search_hits_sids: 'مواقع/SID مطابقة',
 
   // عناوين الأقسام الرئيسية
   setup_heading: 'استلام مواد 4G',
-  setup_desc: 'ارفع ملف الاستلام (شيت "Consolidated Materials" وشيت "Tags" اختياري)...',
   setup_dismantled_heading: 'إضافة مواد مفكوكة (مواد ارجاع)',
-  setup_dismantled_desc: 'ارفع ملف "مواد ارجاع"...',
   setup_summary_heading: 'ملخص سريع',
   setup_files_heading: 'آخر الملفات المعالَجة',
   receipts_heading: 'سجل استلام مواد 4G',
-  receipts_desc: 'كل ملف تم رفعه من "استلام مواد 4G" يُسجَّل هنا كاستلام مستقل برقم خاص به، منفصل تماماً عن بقية الاستلامات.',
   movements_heading: 'سجل حركات مواد 4G',
-  movements_desc: 'كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.',
-  sid_heading: 'رفع ملف أو عدة ملفات SID',
-  sid_desc: 'يمكنك اختيار أكثر من ملف SID دفعة واحدة...',
   stock_heading: 'مواد 4G المتوفرة',
   stock_desc: 'الرصيد التراكمي لكل صنف بعد كل عمليات الاستلام والصرف.',
   dismantled_heading: 'مواد ارجاع (تُرجَع بالكامل للمورد)',
-  dismantled_desc: 'هذا السجل معلوماتي فقط — لا يُستخدم أبداً لتلبية أي SID.',
   goods_heading: 'كتالوج الأصناف',
   goods_summary_heading: 'ملخص الأصناف والرصيد المتبقي',
-  sidhistory_heading: 'سجل SID المنفَّذة',
-  sidhistory_desc: 'كل SID يُنفَّذ مرة واحدة فقط...',
-  search_heading: 'البحث',
-  search_desc: 'ابحث بالكود، اسم المادة، رقم التاج، اسم الموقع، أو معرّف SID.',
   issues_heading: 'المشاكل والتكرارات المسجَّلة',
-  issues_desc: 'هذه المشاكل تُعرض للمراجعة فقط، ولا يقوم النظام بتصحيحها تلقائياً.',
-  reports_heading: 'تقرير شامل',
-  reports_desc: 'يشمل: لوحة المؤشرات، مواد 4G المتوفرة، سجل الحركات الكامل، سجل SID المنفَّذة، مواد ارجاع، والمشاكل.',
-  reports_sid_heading: 'تقارير SID فردية',
-  reports_sid_desc: 'لتنزيل تقرير SID محدد بعد تنفيذه، اذهب لتبويب "سجل SID المنفَّذة".',
   backup_heading: '💾 النسخ الاحتياطي والاستعادة',
   backup_restore_heading: '♻️ استعادة نسخة احتياطية',
   backup_bundle_heading: '📦 إرسال التطبيق مع بياناته لشخص آخر',
@@ -862,13 +786,6 @@ const LABELS = {
   movements_th_notes: 'ملاحظات',
 
   // أعمدة جدول SID
-  sid_th_code: 'الكود',
-  sid_th_desc: 'الوصف',
-  sid_th_requested: 'مطلوب (قابل للتعديل)',
-  sid_th_available: 'متوفر',
-  sid_th_issue: 'سيُصرف',
-  sid_th_shortage: 'نقص',
-  sid_th_status: 'الحالة',
 
   // أعمدة جدول مواد 4G
   stock_th_code: 'الكود',
@@ -895,7 +812,6 @@ const LABELS = {
   goods_th_out: 'إجمالي مُخرَج',
   goods_th_remaining: 'المتبقي',
   goods_th_threshold: 'حد التنبيه',
-  goods_th_action: '',
 
   // أعمدة جدول سجل حركات البضاعة
   goods_ledger_th_date: 'التاريخ',
@@ -907,13 +823,6 @@ const LABELS = {
   goods_ledger_th_action: '',
 
   // أعمدة جدول SID المنفَّذة
-  sidhistory_th_site: 'الموقع',
-  sidhistory_th_date: 'التاريخ',
-  sidhistory_th_file: 'الملف',
-  sidhistory_th_items: 'أصناف',
-  sidhistory_th_requested: 'مطلوب',
-  sidhistory_th_issued: 'مصروف',
-  sidhistory_th_shortage: 'نقص',
 
   // أعمدة جدول المشاكل
   issues_th_type: 'النوع',
@@ -923,99 +832,15 @@ const LABELS = {
   issues_th_date: 'التاريخ',
 
   // أعمدة جدول البحث - أصناف
-  search_th_code: 'الكود',
-  search_th_desc: 'الوصف',
-  search_th_remaining: 'المتبقي',
   // أعمدة جدول البحث - تاجات
-  search_th_tag: 'التاج',
-  search_th_status: 'الحالة',
-  search_th_sid: 'صُرف لـ SID',
   // أعمدة جدول البحث - مفكوكة
-  search_dism_th_tag: 'التاج',
-  search_dism_th_material: 'المادة',
-  search_dism_th_from: 'من',
   // أعمدة جدول البحث - مواقع
-  search_sid_th_site: 'الموقع',
-  search_sid_th_date: 'التاريخ',
-  search_sid_th_issued: 'مصروف',
-  search_sid_th_shortage: 'نقص',
 
   // أعمدة جدول ملخص SID (المعاينة)
-  sid_summary_th_items: 'أصناف',
-  sid_summary_th_requested: 'مطلوب',
-  sid_summary_th_available: 'متوفر',
-  sid_summary_th_issue: 'سيُصرف',
-  sid_summary_th_shortage: 'نقص',
-  sid_summary_th_unmatched: 'غير مطابق',
 
   // أعمدة جدول ملخص البضاعة (المعاينة)
-  goods_batch_th_name: 'الاسم',
-  goods_batch_th_category: 'التصنيف',
-  goods_batch_th_qty: 'الكمية (قابلة للتعديل)',
-  goods_batch_th_available: 'المتوفر',
-  goods_batch_th_apply: 'سيُطبَّق',
-  goods_batch_th_shortage: 'نقص',
-  goods_batch_th_status: 'الحالة',
 };
-function L(key){
-  const v = (STATE.customLabels && STATE.customLabels[key]) || LABELS[key] || key;
-  if(typeof CURRENT_ROLE!=='undefined' && CURRENT_ROLE==='admin'){
-    return `<span class="editable-lbl" data-lk="${esc(key)}">${esc(v)}</span>`;
-  }
-  return v;
-}
-function isColHidden(section, colId){
-  return STATE.hiddenColumns && STATE.hiddenColumns[section] && STATE.hiddenColumns[section].includes(colId);
-}
-function toggleColumnHidden(section, colId){
-  if(!STATE.hiddenColumns) STATE.hiddenColumns = {};
-  if(!STATE.hiddenColumns[section]) STATE.hiddenColumns[section] = [];
-  const idx = STATE.hiddenColumns[section].indexOf(colId);
-  if(idx >= 0) STATE.hiddenColumns[section].splice(idx, 1);
-  else STATE.hiddenColumns[section].push(colId);
-}
-function getCustomCols(section){
-  return (STATE.customColumns && STATE.customColumns[section]) || [];
-}
-function getCustomVal(section, itemKey, colId){
-  return (STATE.customValues && STATE.customValues[section] && STATE.customValues[section][itemKey] && STATE.customValues[section][itemKey][colId]) || '';
-}
-function setCustomVal(section, itemKey, colId, value){
-  if(!STATE.customValues) STATE.customValues = {};
-  if(!STATE.customValues[section]) STATE.customValues[section] = {};
-  if(!STATE.customValues[section][itemKey]) STATE.customValues[section][itemKey] = {};
-  STATE.customValues[section][itemKey][colId] = value;
-  saveState(['customValues']);
-}
-function addCustomColumn(section, name, type){
-  if(!STATE.customColumns) STATE.customColumns = {};
-  if(!STATE.customColumns[section]) STATE.customColumns[section] = [];
-  const id = 'ccol_' + Date.now().toString(36);
-  STATE.customColumns[section].push({id, name: name || 'عمود جديد', type: type || 'text'});
-  saveState(['customColumns']);
-  return id;
-}
-function removeCustomColumn(section, colId){
-  if(!STATE.customColumns || !STATE.customColumns[section]) return;
-  STATE.customColumns[section] = STATE.customColumns[section].filter(c=>c.id !== colId);
-  if(STATE.customValues && STATE.customValues[section]){
-    Object.values(STATE.customValues[section]).forEach(vals=> delete vals[colId]);
-  }
-  saveState(['customColumns', 'customValues']);
-}
-function renderCustomColHeaders(section){
-  const cols = getCustomCols(section);
-  if(!cols.length) return '';
-  return cols.filter(c=>!isColHidden(section, c.id)).map(c=>`<th class="custom-col-header">${esc(c.name)} <button class="col-del-btn" data-rmccol="${section}:${c.id}" title="حذف العمود">✕</button></th>`).join('');
-}
-function renderCustomColCells(section, itemKey){
-  const cols = getCustomCols(section);
-  if(!cols.length) return '';
-  return cols.filter(c=>!isColHidden(section, c.id)).map(c=>{
-    const val = getCustomVal(section, itemKey, c.id);
-    return `<td class="custom-col-cell"><input type="text" ${c.type==='number'?'inputmode="numeric"':''} class="custom-col-input" data-ccol-section="${section}" data-ccol-key="${esc(itemKey)}" data-ccol-id="${c.id}" value="${esc(val)}" placeholder="—"></td>`;
-  }).join('');
-}
+function L(key){ return LABELS[key] || key; }
 function todayStr(){
   const d = new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -1034,13 +859,6 @@ let SUPABASE_LAST_SYNC_TIME = null;
 let SUPABASE_POLL_TIMER = null;
 let SUPABASE_ROW_CACHE = {}; // آخر نسخة معروفة من كل صف (key -> raw value) لاكتشاف التغييرات القادمة من مستخدمين آخرين فقط
 let SUPABASE_ROW_META_CACHE = {}; // آخر updated_at معروف لكل صف (key -> timestamp) — تُستخدم للتحقق الخفيف من وجود تحديثات دون تحميل كل القيم الكاملة في كل استطلاع
-
-function supabaseHeaders(extra){
-  return Object.assign({
-    'apikey': SUPABASE_ANON_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-  }, extra||{});
-}
 
 /* ---------- Supabase Auth — تسجيل الدخول وتحديد الدور (Admin / Viewer) ----------
    لا نستخدم مكتبة supabase-js الكاملة؛ استدعاءات مباشرة لواجهة GoTrue REST البسيطة، لتفادي تضخيم الملف. */
@@ -2403,10 +2221,6 @@ function buildBackupObject(){
     goodsLedger: STATE.goodsLedger,
     cableItems: STATE.cableItems,
     cableLedger: STATE.cableLedger,
-    customLabels: STATE.customLabels || {},
-    hiddenColumns: STATE.hiddenColumns || {},
-    customColumns: STATE.customColumns || {},
-    customValues: STATE.customValues || {},
   }));
   return {
     system: BACKUP_SYSTEM_ID,
@@ -2773,83 +2587,6 @@ function renderApp(roleFetchError, roleResult){
   if(APP_MODE==='quick') renderQuickMode(content); else renderAdminMode(content);
 }
 
-/* Event delegation for custom column value inputs */
-document.addEventListener('change', (e)=>{
-  if(e.target.classList.contains('custom-col-input')){
-    const section = e.target.dataset.ccolSection;
-    const itemKey = e.target.dataset.ccolKey;
-    const colId = e.target.dataset.ccolId;
-    if(section && itemKey && colId) setCustomVal(section, itemKey, colId, e.target.value);
-  }
-});
-
-/* ---- تعديل أي نص بالضغط عليه (Admin فقط) — كل عنصر يحمل data-lk يُفتح للتعديل لمرة واحدة ---------------------- */
-function isInsideInteractive(elm){
-  let n = elm;
-  while(n && n !== document.body){
-    if(n.matches && n.matches('button, a, input, select, textarea, label, [role="button"], .tabs button')) return true;
-    n = n.parentElement;
-  }
-  return false;
-}
-document.addEventListener('click', (e)=>{
-  if(typeof CURRENT_ROLE==='undefined' || CURRENT_ROLE!=='admin') return;
-  if(!e.target || !e.target.closest) return;
-  const span = e.target.closest('.editable-lbl');
-  if(!span || span.dataset.editing) return;
-  if(isInsideInteractive(span)) return; // لا نعترض نقر الأزرار والروابط والقوائم — تبقى تعمل بشكل طبيعي
-  e.preventDefault();
-  startLabelEdit(span);
-});
-function startLabelEdit(span){
-  const key = span.dataset.lk;
-  const orig = (span.dataset.orig!==undefined) ? span.dataset.orig : span.textContent;
-  span.dataset.orig = orig;
-  span.dataset.editing = '1';
-  span.classList.add('editing');
-  span.textContent = '';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'label-inline-edit';
-  input.value = orig;
-  span.appendChild(input);
-  input.focus();
-  input.select();
-  let closed = false;
-  const close = async (save)=>{
-    if(closed) return;
-    closed = true;
-    span.dataset.editing = '';
-    span.classList.remove('editing');
-    if(save){
-      const val = input.value.trim();
-      if(!STATE.customLabels) STATE.customLabels = {};
-      if(val && val !== LABELS[key]) STATE.customLabels[key] = val;
-      else delete STATE.customLabels[key];
-      refreshLabelInstances(key);
-      try{
-        await saveState(['customLabels']);
-      }catch(err){
-        console.error('فشل حفظ التسمية:', err);
-      }
-    }else{
-      span.textContent = orig;
-    }
-  };
-  input.addEventListener('keydown', (ev)=>{
-    if(ev.key==='Enter'){ ev.preventDefault(); close(true); }
-    else if(ev.key==='Escape'){ ev.preventDefault(); close(false); }
-  });
-  input.addEventListener('blur', ()=>{ close(true); });
-}
-function refreshLabelInstances(key){
-  const v = (STATE.customLabels && STATE.customLabels[key]) || LABELS[key] || key;
-  document.querySelectorAll('.editable-lbl[data-lk="'+key+'"]').forEach(sp=>{
-    if(sp.dataset.editing) return;
-    sp.textContent = v;
-  });
-}
-
 /* ---- شاشة تسجيل الدخول (تظهر فقط عندما تكون Supabase مُفعَّلة ولا توجد جلسة حالية) ---- */
 let LOGIN_UI_MODE = 'login'; // 'login' | 'signup'
 function renderLoginScreen(app){
@@ -2971,7 +2708,6 @@ function renderAdminMode(root){
       <button class="secondary" id="btnOpenIssuesModal">⚠️ مشاكل مسجلة (${issuesCount})</button>
       <button class="secondary" id="btnOpenBackupModal">💾 نسخة احتياطي</button>
       <button class="secondary" id="btnOpenFullReport">📊 التقرير الشامل</button>
-      <button class="secondary" id="btnOpenCustomizeModal">🎨 تخصيص الأعمدة</button>
     </div>
     <div class="footer-note">يُحفظ كل شيء تلقائياً في متصفحك بعد كل عملية — لا حاجة لأي زر حفظ يدوي. لا تُحذف أي حركة من السجل، أي تصحيح يُسجَّل كحركة جديدة.</div>
   `;
@@ -2994,9 +2730,6 @@ function renderAdminMode(root){
     openModal('💾 '+L('tab_backup'), (bodyEl)=>{ renderBackupTab(bodyEl); });
   });
   document.getElementById('btnOpenFullReport').addEventListener('click', downloadFullReport);
-  document.getElementById('btnOpenCustomizeModal').addEventListener('click', ()=>{
-    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
-  });
   renderTabContent();
 }
 
@@ -3207,7 +2940,6 @@ function qmItemRemaining(item){ return QM_DOMAIN==='stock' ? (item.total_quantit
 function qmItemKey(item){ return QM_DOMAIN==='stock' ? item.code : goodsKey(item.name); }
 function qmSearchItems(q){ return QM_DOMAIN==='stock' ? searchStockCatalog(q) : searchGoodsCatalog(q); }
 
-function qmSelectedCat(){ return qmSelectedItem(); } // اسم قديم مُبقًى للتوافق الداخلي
 
 function renderQuickMode(root){
   root.innerHTML = `<div class="qm-wrap" id="qmWrap"></div>`;
@@ -5472,7 +5204,6 @@ exportSectionToExcel(headers, exportRows, 'سجل حركات مواد 4G', [12,1
 
 /* ---- تعديل الحركات مباشرة (Admin فقط) ---- */
 function bindMovementsEditListeners(el){
-  const statusMap = {};
   el.querySelectorAll('.mov-edit').forEach(inp=>{
     inp.addEventListener('change', async ()=>{
       const id = inp.dataset.id;
@@ -6880,10 +6611,9 @@ function renderStockTab(el){
           <input type="checkbox" id="stockHideZeroToggle" ${STOCK_HIDE_ZERO?'checked':''}> إخفاء المواد ذات الرصيد صفر
         </label>
         <button class="secondary" id="btnExportStock" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button>
-        ${CURRENT_ROLE==='admin' ? `<button class="col-mgmt-btn" id="btnColMgmt_stock">⚙️ إدارة الأعمدة</button>` : ''}
       </div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>${L('stock_th_code')}</th><th>${L('stock_th_desc')}</th><th>${L('stock_th_received')}</th><th>${L('stock_th_issued')}</th><th>${L('stock_th_remaining')}</th><th>${L('stock_th_tags')}</th>${renderCustomColHeaders('stock')}</tr></thead>
+        <thead><tr><th>${L('stock_th_code')}</th><th>${L('stock_th_desc')}</th><th>${L('stock_th_received')}</th><th>${L('stock_th_issued')}</th><th>${L('stock_th_remaining')}</th><th>${L('stock_th_tags')}</th></tr></thead>
         <tbody>
           ${rows.map(s=>{
             const remaining = s.total_quantity - s.issued_quantity;
@@ -6895,9 +6625,8 @@ function renderStockTab(el){
               <td>${s.issued_quantity}</td>
               <td class="${cls}">${remaining}</td>
               <td>${s.tags.filter(t=>t.status==='available').length}</td>
-              ${renderCustomColCells('stock', s.code)}
             </tr>`;
-          }).join('') || `<tr>          <td colspan="${6 + getCustomCols('stock').length}" class="empty">${emptyMsg}</td></tr>`}
+          }).join('') || `<tr>          <td colspan="6" class="empty">${emptyMsg}</td></tr>`}
         </tbody>
       </table></div>
     </div>
@@ -6922,10 +6651,6 @@ function renderStockTab(el){
     const exportRows = rows.map(s=>[s.code, s.description, s.total_quantity, s.issued_quantity, s.total_quantity-s.issued_quantity, s.tags.filter(t=>t.status==='available').length]);
     exportSectionToExcel(headers, exportRows, 'مواد 4G المتوفرة', [18,40,16,12,14,16]);
   });
-  const btnMgmt = document.getElementById('btnColMgmt_stock');
-  if(btnMgmt) btnMgmt.addEventListener('click', ()=>{
-    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
-  });
 }
 
 /* ---- تبويب: مواد ارجاع ---- */
@@ -6937,7 +6662,7 @@ function renderDismantledTab(el){
       <div class="desc">هذا السجل معلوماتي فقط — لا يُستخدم أبداً لتلبية أي SID.</div>
       <div class="btnrow"><button class="secondary" id="btnExportDismantled" style="padding:8px 16px;font-size:12.5px;">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>${L('dismantled_th_tag')}</th><th>${L('dismantled_th_material')}</th><th>${L('dismantled_th_from')}</th><th>${L('dismantled_th_to')}</th><th>${L('dismantled_th_note')}</th><th>${L('dismantled_th_date')}</th>${renderCustomColHeaders('dismantled')}</tr></thead>
+        <thead><tr><th>${L('dismantled_th_tag')}</th><th>${L('dismantled_th_material')}</th><th>${L('dismantled_th_from')}</th><th>${L('dismantled_th_to')}</th><th>${L('dismantled_th_note')}</th><th>${L('dismantled_th_date')}</th></tr></thead>
         <tbody>
           ${rows.map(d=>`<tr>
             <td class="code-cell">${esc(d.tag_display)}</td>
@@ -6946,7 +6671,6 @@ function renderDismantledTab(el){
             <td>${esc(d.to)}</td>
             <td>${esc(d.note)}</td>
             <td>${d.date_added}</td>
-            ${renderCustomColCells('dismantled', d.id)}
           </tr>`).join('') || '<tr><td colspan="6" class="empty">لا توجد بيانات بعد</td></tr>'}
         </tbody>
       </table></div>
@@ -7067,7 +6791,7 @@ function renderGoodsTab(el){
       <div class="msg warn">⚠ ${lowStockItems().length} صنف وصل أو تجاوز حد التنبيه: ${lowStockItems().map(it=>`${esc(it.name)} (${it.totalIn-it.totalOut})`).join('، ')}</div>
       ` : ''}
       <div class="tablewrap" id="goodsSummaryTableWrap"><table class="data">
-        <thead><tr><th>${L('goods_th_code')}</th><th>${L('goods_th_name')}</th><th>${L('goods_th_category')}</th><th>${L('goods_th_unit')}</th><th>${L('goods_th_in')}</th><th>${L('goods_th_out')}</th><th>${L('goods_th_remaining')}</th><th>${L('goods_th_threshold')}</th>${renderCustomColHeaders('goods')}</tr></thead>
+        <thead><tr><th>${L('goods_th_code')}</th><th>${L('goods_th_name')}</th><th>${L('goods_th_category')}</th><th>${L('goods_th_unit')}</th><th>${L('goods_th_in')}</th><th>${L('goods_th_out')}</th><th>${L('goods_th_remaining')}</th><th>${L('goods_th_threshold')}</th></tr></thead>
         <tbody>
           ${Object.values(STATE.goodsCatalog)
             .filter(it => !GOODS_SHOW_AVAILABLE_ONLY || (it.totalIn-it.totalOut)>0)
@@ -7085,14 +6809,12 @@ function renderGoodsTab(el){
               <td>${it.totalOut}</td>
               <td class="${cls}">${remaining}</td>
               <td><input type="text" inputmode="numeric" class="mono thresholdInput" data-key="${esc(key)}" value="${it.lowStockThreshold||''}" placeholder="—" style="width:64px;padding:4px 6px;"></td>
-              ${renderCustomColCells('goods', key)}
             </tr>`;
           }).join('') || `<tr><td colspan="8" class="empty">${GOODS_SHOW_AVAILABLE_ONLY?'لا يوجد أصناف برصيد متوفر حالياً':'لا يوجد كتالوج مستورَد بعد'}</td></tr>`}
         </tbody>
       </table></div>
       <div class="btnrow">
         <button class="secondary" id="btnDownloadGoods">تنزيل تقرير البضاعة (Excel)</button>
-        ${APP_MODE==='admin'?`<button class="secondary" id="btnColMgmt_goods" style="font-size:12.5px;padding:8px 16px;">⚙️ إدارة الأعمدة</button>`:''}
       </div>
     </div>
 
@@ -7231,10 +6953,6 @@ function renderGoodsTab(el){
   });
 
   document.getElementById('btnDownloadGoods').addEventListener('click', downloadGoodsReport);
-  const btnMgmtGoods = document.getElementById('btnColMgmt_goods');
-  if(btnMgmtGoods) btnMgmtGoods.addEventListener('click', ()=>{
-    openModal('🎨 '+L('tab_customize'), (bodyEl)=>{ renderCustomizeTab(bodyEl); });
-  });
   el.querySelectorAll('[data-delgoods]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('هل تريد حذف هذه الحركة؟ سيُعاد احتساب الرصيد فوراً.')) return;
@@ -7348,164 +7066,6 @@ function renderIssuesTab(el){
     const headers = ['النوع','الكود','اسم المادة','التفاصيل','التاريخ'];
     const exportRows = rows.map(i=>[i.type, i.code, i.material||'', i.detail, i.date]);
     exportSectionToExcel(headers, exportRows, 'المشاكل', [22,20,26,50,14]);
-  });
-}
-
-/* ---- تبويب: تخصيص الأعمدة والتسميات ---- */
-const SECTIONS_FOR_COLS = [
-  {key:'stock', title:'مواد 4G المتوفرة', builtIn:['stock_th_code','stock_th_desc','stock_th_received','stock_th_issued','stock_th_remaining','stock_th_tags']},
-  {key:'goods', title:'بضاعة المستودع', builtIn:['goods_th_code','goods_th_name','goods_th_category','goods_th_unit','goods_th_in','goods_th_out','goods_th_remaining','goods_th_threshold']},
-  {key:'dismantled', title:'مواد ارجاع', builtIn:['dismantled_th_tag','dismantled_th_material','dismantled_th_from','dismantled_th_to','dismantled_th_note','dismantled_th_date']},
-  {key:'receipts', title:'سجل الاستلام', builtIn:['receipts_th_number','receipts_th_date','receipts_th_file','receipts_th_items','receipts_th_total']},
-  {key:'movements', title:'سجل الحركات', builtIn:['movements_th_date','movements_th_type','movements_th_name','movements_th_code','movements_th_qty','movements_th_balance','movements_th_source','movements_th_receipt','movements_th_notes']},
-  {key:'sidhistory', title:'سجل SID', builtIn:['sidhistory_th_site','sidhistory_th_date','sidhistory_th_file','sidhistory_th_items','sidhistory_th_requested','sidhistory_th_issued','sidhistory_th_shortage']},
-  {key:'issues', title:'المشاكل', builtIn:['issues_th_type','issues_th_code','issues_th_name','issues_th_detail','issues_th_date']},
-];
-function renderCustomizeTab(el){
-  el.innerHTML = `
-    <div class="panel">
-      <h2>${L('customize_labels_heading')}</h2>
-      <div class="desc">تعديل أسماء الأقسام وأعمدة الجداول. اكتب الاسم الجديد ثم اضغط حفظ. اترك الحقل فارغاً للاحتفاظ بالاسم الافتراضي.</div>
-      <div class="grid2" style="margin-bottom:12px;">
-        <select id="labelSectionFilter">
-          <option value="all">كل الأقسام</option>
-          ${SECTIONS_FOR_COLS.map(s=>`<option value="${s.key}">${s.title}</option>`).join('')}
-          <option value="headings">عناوين الأقسام</option>
-        </select>
-        <button class="primary" id="btnSaveLabels" style="padding:8px 20px;">💾 حفظ التسميات</button>
-      </div>
-      <div id="labelResetAll" style="margin-bottom:12px;">
-        <button class="danger" id="btnResetAllLabels" style="padding:6px 14px;font-size:12px;">🔄 إعادة كل التسميات للوضع الافتراضي</button>
-      </div>
-      <div id="labelsList"></div>
-    </div>
-    <div class="panel">
-      <h2>${L('customize_columns_heading')}</h2>
-      <div class="desc">إظهار/إخفاء أعمدة موجودة، إعادة تسميتها، أو إضافة أعمدة مخصصة جديدة بقيم لكل صنف.</div>
-      <div id="columnsList"></div>
-    </div>
-  `;
-  renderLabelsList();
-  renderColumnsMgmtList();
-  document.getElementById('labelSectionFilter').addEventListener('change', renderLabelsList);
-  document.getElementById('btnSaveLabels').addEventListener('click', ()=>{
-    const inputs = document.querySelectorAll('.label-edit-input');
-    inputs.forEach(inp=>{
-      const key = inp.dataset.labelKey;
-      const val = inp.value.trim();
-      if(!STATE.customLabels) STATE.customLabels = {};
-      if(val && val !== LABELS[key]) STATE.customLabels[key] = val;
-      else delete STATE.customLabels[key];
-    });
-    saveState(['customLabels']);
-    alert('تم حفظ التسميات!');
-    renderApp();
-  });
-  document.getElementById('btnResetAllLabels').addEventListener('click', ()=>{
-    if(!confirm('هل تريد إعادة كل التسميات للوضع الافتراضي؟')) return;
-    STATE.customLabels = {};
-    saveState(['customLabels']);
-    renderApp();
-  });
-}
-function renderLabelsList(){
-  const filter = document.getElementById('labelSectionFilter').value;
-  const container = document.getElementById('labelsList');
-  let keys = Object.keys(LABELS);
-  if(filter !== 'all'){
-    if(filter === 'headings') keys = keys.filter(k=>k.endsWith('_heading') || k.endsWith('_desc'));
-    else keys = keys.filter(k=>k.startsWith(filter+'_'));
-  }
-  container.innerHTML = keys.map(k=>{
-    const defaultVal = LABELS[k];
-    const current = (STATE.customLabels && STATE.customLabels[k]) || '';
-    return `<div class="label-item">
-      <span class="lbl-key">${k}</span>
-      <input type="text" class="label-edit-input" data-label-key="${k}" value="${esc(current)}" placeholder="${esc(defaultVal)}">
-      ${current ? `<button class="reset-btn" data-resetlabel="${k}" title="إعادة للefault">↩</button>` : ''}
-    </div>`;
-  }).join('') || '<div class="empty">لا توجد تسميات在这个 القسم</div>';
-  container.querySelectorAll('[data-resetlabel]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      delete STATE.customLabels[btn.dataset.resetlabel];
-      renderLabelsList();
-    });
-  });
-}
-function renderColumnsMgmtList(){
-  const container = document.getElementById('columnsList');
-  container.innerHTML = SECTIONS_FOR_COLS.map(s=>{
-    const hidden = (STATE.hiddenColumns && STATE.hiddenColumns[s.key]) || [];
-    const custom = getCustomCols(s.key);
-    return `
-      <div style="margin-bottom:20px;">
-        <h3 style="margin:0 0 8px 0;font-size:14px;color:var(--text);">${s.title}</h3>
-        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-          ${s.builtIn.map(bk=>{
-            const isHidden = hidden.includes(bk);
-            const defaultName = LABELS[bk] || bk;
-            const customName = (STATE.customLabels && STATE.customLabels[bk]) || '';
-            return `<div class="col-list-item">
-              <label style="flex:1;">
-                <input type="checkbox" ${!isHidden?'checked':''} data-togglecol="${s.key}:${bk}">
-                <input type="text" class="label-edit-input" data-label-key="${bk}" value="${esc(customName)}" placeholder="${esc(defaultName)}" style="margin-inline-start:6px;">
-              </label>
-            </div>`;
-          }).join('')}
-          ${custom.map(c=>`<div class="col-list-item">
-            <label style="flex:1;">
-              <input type="checkbox" checked data-togglecol="${s.key}:${c.id}">
-              <input type="text" class="label-edit-input" data-label-key="${c.id}" value="${esc(c.name)}" style="margin-inline-start:6px;">
-            </label>
-            <button class="col-del-btn" data-rmccol="${s.key}:${c.id}" title="حذف العمود المخصص">✕</button>
-          </div>`).join('')}
-        </div>
-        <div class="add-col-row">
-          <input type="text" id="newColName_${s.key}" placeholder="اسم العمود الجديد">
-          <select id="newColType_${s.key}"><option value="text">نص</option><option value="number">رقم</option></select>
-          <button class="secondary" data-addccol="${s.key}" style="padding:6px 14px;font-size:12px;">+ إضافة عمود</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-  container.querySelectorAll('[data-togglecol]').forEach(inp=>{
-    inp.addEventListener('change', ()=>{
-      const [section, colId] = inp.dataset.togglecol.split(':');
-      toggleColumnHidden(section, colId);
-      saveState(['hiddenColumns']);
-    });
-  });
-  container.querySelectorAll('[data-rmccol]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const [section, colId] = btn.dataset.rmccol.split(':');
-      if(!confirm('هل تريد حذف هذا العمود المخصص؟')) return;
-      removeCustomColumn(section, colId);
-      renderColumnsMgmtList();
-    });
-  });
-  container.querySelectorAll('[data-addccol]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const section = btn.dataset.addccol;
-      const nameInput = document.getElementById('newColName_'+section);
-      const typeSelect = document.getElementById('newColType_'+section);
-      const name = nameInput.value.trim();
-      if(!name){ alert('اكتب اسم العمود أولاً.'); return; }
-      addCustomColumn(section, name, typeSelect.value);
-      nameInput.value = '';
-      renderColumnsMgmtList();
-    });
-  });
-  // Bind custom column name edits (live update name in customColumns)
-  container.querySelectorAll('.label-edit-input').forEach(inp=>{
-    inp.addEventListener('change', ()=>{
-      const key = inp.dataset.labelKey;
-      // Check if this key is a custom column ID
-      SECTIONS_FOR_COLS.forEach(s=>{
-        const custom = getCustomCols(s.key);
-        const col = custom.find(c=>c.id === key);
-        if(col){ col.name = inp.value.trim() || col.name; saveState(['customColumns']); }
-      });
-    });
   });
 }
 
