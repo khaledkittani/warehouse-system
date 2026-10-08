@@ -192,6 +192,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .kpi.warn .num{color:var(--amber);}
   .kpi.bad .num{color:var(--rust);}
 
+  tr.sidr-hl td{background:#fff8dc;}
+  .sidr-hl-cell{text-align:center;width:34px;}
+  .sidr-hl-cell input{width:17px;height:17px;cursor:pointer;accent-color:#c8a200;}
   .tag-ok{color:var(--green);font-weight:700;}
   .tag-warn{color:var(--amber);font-weight:700;}
   .tag-bad{color:var(--rust);font-weight:700;}
@@ -621,6 +624,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-table td.c{text-align:center;}
   #printRoot.sr .sr-table td.n{text-align:center;font-variant-numeric:tabular-nums;}
   #printRoot.sr .sr-table tr.short td{background:#ececec;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:700;}
+  #printRoot.sr .sr-table tr.hl td{background:#fff1a8;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-weight:800;}
+  #printRoot.sr .sr-hl{margin:.3em 0;border:1.5pt solid #000;}
+  #printRoot.sr .sr-hl th{background:#555;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:.8pt solid #000;padding:.08em .3em;font-size:.85em;text-align:center;}
+  #printRoot.sr .sr-hl td{border:.6pt solid #444;padding:.08em .4em;font-size:.95em;font-weight:700;background:#fff1a8;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #printRoot.sr .sr-hl td.n{text-align:center;}
+  #printRoot.sr .sr-hl tr{break-inside:avoid;page-break-inside:avoid;}
   #printRoot.sr.raw{line-height:1.12;}
   #printRoot.sr.raw .sr-head{margin-bottom:.3em;padding-bottom:.2em;}
   #printRoot.sr.raw .sr-site{margin-bottom:.3em;padding:.15em .6em;}
@@ -679,6 +688,7 @@ const STORE_KEYS = {
   tagShortcuts: 'wms_tag_shortcuts_v1',
   sidReview: 'wms_sid_review_v1',
   siteSchedule: 'wms_site_schedule_v1',
+  sidHighlights: 'wms_sid_highlights_v1',
 };
 
 let STATE = {
@@ -699,6 +709,7 @@ let STATE = {
   tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
   sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected,rawHeader:[...],rawRows:[[...]]}] — rawHeader/rawRows: نسخة كاملة غير معالَجة من كل الأعمدة والصفوف كما في Excel الأصلي، للعرض في شاشة "الملف الأصلي كاملاً" فقط
   siteSchedule: { sites: [], fileName: null, uploadedAt: null }, // جدول المواقع الأسبوعي (للفلترة في تقارير SID فقط، مستقل تماماً عن sidReview) — sites: [{key, site, week:'Week 40', weekNum:40, region:'شمال'|'وسط'|'جنوب', updatedAt}]؛ رفع ملف جديد يحدّث الموقع نفسه (upsert حسب الاسم)
+  sidHighlights: { keys: [] }, // العناصر المحددة للإبراز عند طباعة تقرير الموقع في SID — عامة لكل المواقع (مفتاح المادة = productDescription أو description) وتبقى حتى يغيّرها المستخدم
 };
 
 let ACTIVE_TAB = 'setup';
@@ -5726,6 +5737,7 @@ function renderSidrSiteDetail(){
   if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
   if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
   const canEditRecv = CURRENT_ROLE==='admin';
+  const hlSet = sidrHlSet();
   const editedCount = imp.rows.filter(r=>r.origReceived!==undefined).length;
   const totals = rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received, shortage:s.shortage+r.shortage}), {requested:0,received:0,shortage:0});
   area.innerHTML = `
@@ -5755,11 +5767,13 @@ function renderSidrSiteDetail(){
         <button class="secondary" id="btnSidrExportSite">📥 تصدير تقرير هذا الموقع</button>
         <button class="danger" id="btnSidrDeleteImport">🗑 حذف هذا الاستيراد</button>
       </div>
+      <div class="desc" style="margin:8px 0;" id="sidrHlInfo">★ <b>الإبراز في الطباعة:</b> علّم بخانة ★ العناصر التي تريد إبرازها؛ تظهر في أعلى التقرير المطبوع (الاسم، المطلوب، المستلم) ومظلّلة في الجدول، وينطبق اختيارك على <b>كل المواقع</b> ويبقى محفوظاً حتى تغيّره. المحدد حالياً: <b id="sidrHlCount">${hlSet.size}</b> عنصر ${hlSet.size?`<button type="button" class="secondary" id="btnSidrHlClear" style="padding:3px 10px;font-size:12px;margin-inline-start:8px;">مسح كل الاختيارات</button>`:''}</div>
       ${canEditRecv?`<div class="desc" style="margin:8px 0;">✏️ يمكنك تعديل خانة <b>المستلم</b> مباشرة عند استلام مواد إضافية لهذا الموقع (اكتب الرقم ثم Enter). يُحفظ التعديل تلقائياً ويُحدّث النقص والتقارير والملخص العام. الخلايا المعدّلة تظهر بلون مميّز${editedCount?` (${editedCount} معدّلة حالياً)`:''}، وزر ↩ يعيد القيمة الأصلية من الملف.</div><div id="sidrRecvMsg"></div>`:''}
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم${canEditRecv?' ✏️':''}</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
+        <thead><tr><th class="sidr-hl-cell" title="إبراز في الطباعة (لكل المواقع) — تحديد/إلغاء كل المعروض"><input type="checkbox" id="sidrHlAll" ${rows.length&&rows.every(r=>hlSet.has(sidrHlKey(r)))?'checked':''}> ★</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم${canEditRecv?' ✏️':''}</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
         <tbody>
-          ${rows.map(r=>`<tr>
+          ${rows.map(r=>`<tr class="${hlSet.has(sidrHlKey(r))?'sidr-hl':''}">
+            <td class="sidr-hl-cell"><input type="checkbox" class="sidr-hl-chk" data-hlkey="${esc(sidrHlKey(r))}" ${hlSet.has(sidrHlKey(r))?'checked':''} title="إبراز هذا العنصر عند طباعة تقارير كل المواقع"></td>
             <td>${esc(r.productCode)}</td><td>${esc(r.productDescription)}</td><td>${esc(r.description)}</td>
             <td>${r.requested}</td>
             <td class="sidr-recv-cell">${canEditRecv
@@ -5767,7 +5781,7 @@ function renderSidrSiteDetail(){
               : r.received}${r.note?` <span class="or-hint">(${esc(r.note)})</span>`:''}</td>
             <td>${r.shortage>0?`<span class="tag-warn">${r.shortage}</span>`:(r.surplus>0?`+${r.surplus}`:'0')}</td>
             <td>${r.status==='ناقص'?'<span class="pill warn">ناقص</span>':r.status==='زيادة'?'<span class="pill bad">زيادة</span>':'<span class="pill ok">مكتمل</span>'}</td>
-          </tr>`).join('') || `<tr><td colspan="7" class="empty">لا توجد نتائج مطابقة</td></tr>`}
+          </tr>`).join('') || `<tr><td colspan="8" class="empty">لا توجد نتائج مطابقة</td></tr>`}
         </tbody>
       </table></div>
       `}
@@ -5787,6 +5801,27 @@ function renderSidrSiteDetail(){
     const res = await sidrDeleteImport(imp.id);
     alert(res.msg);
     if(res.ok){ SIDR_SELECTED_SITE=null; renderApp(); }
+  });
+  /* إبراز العناصر عند الطباعة (عام لكل المواقع) */
+  area.querySelectorAll('input.sidr-hl-chk').forEach(chk=>{
+    chk.addEventListener('change', async ()=>{
+      await sidrHlSetKeys([chk.dataset.hlkey], chk.checked);
+      chk.closest('tr').classList.toggle('sidr-hl', chk.checked);
+      renderSidrSiteDetailHlMeta(area, rows);
+    });
+  });
+  const hlAll = document.getElementById('sidrHlAll');
+  if(hlAll) hlAll.addEventListener('change', async ()=>{
+    await sidrHlSetKeys(rows.map(sidrHlKey), hlAll.checked);
+    const sc = document.querySelector('#sidrSiteDetailArea .tablewrap'); const top = sc ? sc.scrollTop : 0;
+    renderSidrSiteDetail();
+    const sc2 = document.querySelector('#sidrSiteDetailArea .tablewrap'); if(sc2) sc2.scrollTop = top;
+  });
+  const hlClear = document.getElementById('btnSidrHlClear');
+  if(hlClear) hlClear.addEventListener('click', async ()=>{
+    if(!confirm('مسح كل العناصر المبرزة لكل المواقع؟')) return;
+    await sidrHlSetKeys(Array.from(sidrHlSet()), false);
+    renderSidrSiteDetail();
   });
   /* تعديل المستلم مباشرة داخل الجدول */
   const commitRecv = async (ri, val, focusRi)=>{
@@ -5819,6 +5854,17 @@ function renderSidrSiteDetail(){
     commitRecv(Number(b.dataset.ri), row.origReceived, null);
   }));
 }
+function renderSidrSiteDetailHlMeta(area, rows){
+  const n = sidrHlCount(); const c = document.getElementById('sidrHlCount'); if(c) c.textContent = n;
+  const all = document.getElementById('sidrHlAll'); const set = sidrHlSet();
+  if(all) all.checked = !!(rows.length && rows.every(r=>set.has(sidrHlKey(r))));
+  const info = document.getElementById('sidrHlInfo'); const btn = document.getElementById('btnSidrHlClear');
+  if(info && ((n && !btn) || (btn && !n))){
+    const sc = document.querySelector('#sidrSiteDetailArea .tablewrap'); const top = sc ? sc.scrollTop : 0;
+    renderSidrSiteDetail();
+    const sc2 = document.querySelector('#sidrSiteDetailArea .tablewrap'); if(sc2) sc2.scrollTop = top;
+  }
+}
 /* يعدّل الكمية المستلمة لصف داخل استيراد محفوظ (للمواد الإضافية المستلمة لاحقاً).
    تُحفظ القيمة الأصلية من الملف في origReceived لإمكانية الاسترجاع؛ باقي البيانات والتوقيع الأصلي للملف لا يتغيّران. */
 async function sidrSetReceived(impId, ri, val){
@@ -5835,6 +5881,17 @@ async function sidrSetReceived(impId, ri, val){
 /* ---- طباعة تقرير الموقع (مراجعة حسب الموقع): تقرير رسمي مبني من نفس البيانات المعروضة حالياً (نفس البحث/الفلتر)،
    بتخطيط طباعة مستقل (#printRoot.sr) ويُضغط تلقائياً ليتّسع في صفحة A4 واحدة قدر الإمكان.
    قراءة فقط: لا يعدّل أي بيانات أو حسابات. ---- */
+/* ---- إبراز عناصر محددة عند الطباعة: اختيار واحد عام لكل المواقع (حسب المادة) ويبقى محفوظاً حتى يغيّره المستخدم ---- */
+function sidrHlKey(r){ return trim(r.productDescription||r.description||r.productCode).toLowerCase(); }
+function sidrHlSet(){ return new Set((STATE.sidHighlights && STATE.sidHighlights.keys) || []); }
+function sidrHlCount(){ return ((STATE.sidHighlights && STATE.sidHighlights.keys) || []).length; }
+async function sidrHlSetKeys(keysToChange, on){
+  if(!STATE.sidHighlights || !Array.isArray(STATE.sidHighlights.keys)) STATE.sidHighlights = {keys:[]};
+  const set = sidrHlSet();
+  keysToChange.forEach(k=>{ if(!k) return; if(on) set.add(k); else set.delete(k); });
+  STATE.sidHighlights.keys = Array.from(set);
+  await saveState(['sidHighlights']);
+}
 function sidrSiteDisplayedRows(imp, opts){
   const search = opts ? opts.search : SIDR_SITE_SEARCH, shortOnly = opts ? opts.shortageOnly : SIDR_SITE_SHORTAGE_ONLY;
   let rows = sidrRowsWithStatus(imp.rows);
@@ -5881,27 +5938,32 @@ function sidrSiteReportHtml(imp, mode, opts){
   const tot = rows.reduce((s,r)=>({req:s.req+r.requested, rec:s.rec+r.received, sh:s.sh+r.shortage}), {req:0,rec:0,sh:0});
   const q = trim(opts ? opts.search : SIDR_SITE_SEARCH);
   const scope = [(opts ? opts.shortageOnly : SIDR_SITE_SHORTAGE_ONLY)?'المواد الناقصة فقط':'كل الأصناف', q?`بحث: «${q}»`:''].filter(Boolean).join(' — ');
-  const body = rows.map((r,i)=>`<tr class="${r.status==='ناقص'?'short':''}"><td class="c">${i+1}</td>
+  const hlSet = sidrHlSet();
+  const hlRows = hlSet.size ? sidrRowsWithStatus(imp.rows).filter(r=>hlSet.has(sidrHlKey(r))) : [];
+  const hlBox = hlRows.length ? `<table class="sr-hl"><thead><tr><th colspan="4">★ العناصر المبرزة</th></tr>
+      <tr><th>الاسم</th><th>المطلوب</th><th>المستلم</th><th>النقص</th></tr></thead><tbody>${hlRows.map(r=>`<tr><td>${sidrReportBdi(r.description||r.productDescription||r.productCode)}${r.description&&r.productDescription?` <span class="sr-rnote">(${sidrReportBdi(r.productDescription)})</span>`:''}</td><td class="n">${r.requested}</td><td class="n">${r.received}</td><td class="n">${r.shortage>0?r.shortage:(r.surplus>0?'+'+r.surplus:'0')}</td></tr>`).join('')}</tbody></table>` : '';
+  const body = rows.map((r,i)=>`<tr class="${[r.status==='ناقص'?'short':'', hlSet.has(sidrHlKey(r))?'hl':''].filter(Boolean).join(' ')}"><td class="c">${hlSet.has(sidrHlKey(r))?'★ ':''}${i+1}</td>
       <td>${sidrReportBdi(r.productCode)}</td><td>${sidrReportBdi(r.productDescription)}</td><td>${sidrReportBdi(r.description)}</td>
       <td class="n">${r.requested}</td><td class="n">${r.received}</td>
       <td class="n">${r.shortage>0?r.shortage:(r.surplus>0?'+'+r.surplus:'0')}</td>
       <td class="c sr-st">${r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل'}${r.note?`<br><span class="sr-rnote">${sidrReportBdi(r.note)}</span>`:''}</td></tr>`).join('')
     || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
-  return {orient:'portrait', html: `<div class="sr-wrap">${head}
+  return {orient:'portrait', hl: hlRows.length>0, html: `<div class="sr-wrap">${head}
     <table class="sr-meta"><tr>${metaCell('تاريخ الطباعة',esc(now))}${metaCell('الملف',sidrReportBdi(imp.fileName))}${metaCell(opts&&opts.dateLabel?opts.dateLabel:'تاريخ استيراد الملف',esc(imp.importedAt.slice(0,10)))}${metaCell('نطاق العرض',esc(scope))}</tr></table>
     ${kpiHtml(rows.length, tot.req, tot.rec, tot.sh, 'عدد الأصناف المعروضة')}
+    ${hlBox}
     <table class="sr-table"><colgroup><col style="width:4%"><col style="width:13%"><col style="width:17%"><col style="width:30%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:11%"></colgroup>
       <thead><tr><th>#</th><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead>
       <tbody>${body}</tbody></table>
     <div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`};
 }
 /* يضغط الخط تدريجياً حتى يتّسع التقرير في صفحة واحدة (هوامش 10mm)؛ إن لم يتّسع عند أصغر حجم مقروء يمتد لصفحة ثانية برأس جدول متكرر */
-function sidrFitOnePage(root, orient){
+function sidrFitOnePage(root, orient, minSize){
   const pageW = orient==='landscape'?277:190, pageH = orient==='landscape'?190:277;   // الأبعاد المتاحة (mm) بعد الهوامش
   const px = mm=>mm*96/25.4;
   const limit = px(pageH)*0.975;
   root.style.cssText = `display:block;position:fixed;left:-99999px;top:0;width:${pageW}mm;visibility:hidden;`;
-  let size = 11.5; const MIN = 6.5;
+  let size = 11.5; const MIN = minSize || 6.5;
   root.style.fontSize = size+'pt';
   while(size > MIN && root.scrollHeight > limit){ size -= 0.25; root.style.fontSize = size+'pt'; }
   const fits = root.scrollHeight <= limit;
@@ -5920,7 +5982,7 @@ async function sidrPrepareSiteReport(mode, impOverride, opts){
   st.textContent = `@media print{@page{size:A4 ${rep.orient};margin:10mm;}}`;
   document.head.appendChild(st);
   try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
-  const fit = sidrFitOnePage(div, rep.orient);
+  const fit = sidrFitOnePage(div, rep.orient, rep.hl ? 6 : 6.5);   // مع وجود عناصر مبرزة يُسمح بخط أصغر قليلاً كي لا يتسرّب سطر وحيد لصفحة ثانية
   document.body.classList.add('printing-sidr');
   return Object.assign({orient:rep.orient}, fit);
 }
