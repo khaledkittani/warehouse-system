@@ -677,6 +677,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-table thead{display:table-header-group;}
   #printRoot.sr .sr-table tr{break-inside:avoid;page-break-inside:avoid;}
   #printRoot.sr .sr-st{font-weight:800;}
+  #printRoot.sch .sch-sub{font-size:1.1em;font-weight:800;margin:.7em 0 .3em;padding:.2em .5em;border:1pt solid #000;background:#eee;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-after:avoid;page-break-after:avoid;}
+  #printRoot.sch .sr-table.sch-short td:nth-child(1), #printRoot.sch .sr-table.sch-short td:nth-child(2){white-space:normal;}
+  #printRoot.sch .sch-total td{font-weight:800;background:#ddd;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #printRoot.sch .sr-table tr.short td{font-weight:400;background:#fff;}
+  #printRoot.sch .sr-table td.n{text-align:center;}
+  .sch-sub-s{font-weight:700;margin:14px 0 6px;}
+  tr.sch-total td{font-weight:700;background:var(--surface-2,#f3f3f3);}
   #printRoot.sr .sr-foot{display:flex;justify-content:space-between;gap:2em;margin-top:.9em;font-size:.95em;break-inside:avoid;page-break-inside:avoid;}
   @media print{
     body.printing-sidr{background:#fff !important;}
@@ -716,6 +723,7 @@ const STORE_KEYS = {
   tagApprovedSites: 'wms_tag_sites_v1',
   tagShortcuts: 'wms_tag_shortcuts_v1',
   sidReview: 'wms_sid_review_v1',
+  siteSchedule: 'wms_site_schedule_v1',
 };
 
 let STATE = {
@@ -739,6 +747,7 @@ let STATE = {
   tagApprovedSites: { list: [], fileName: null, uploadedAt: null }, // قائمة المواقع المعتمدة لرصد التاجات (من ملف Excel يرفعه الأدمن)؛ list: [{name, address}] — عنصر نصي قديم (من قبل إضافة العنوان) يُطبَّع تلقائياً عند القراءة عبر taglogApprovedSitesList() إلى {name, address:''}. رفع ملف جديد يستبدل القائمة بالكامل دون أي أثر على سجلات tagLog السابقة
   tagShortcuts: [null,null,null,null,null,null,null,null,null,null], // 10 اختصارات ثابتة قابلة للتخصيص لرصد التاجات: كل عنصر إما null (غير مُعد) أو {label, materialName}
   sidReview: { imports: [] }, // مراجعة استلام SID متعددة المواقع/الملفات (مستقلة تماماً عن processedSids وصرف المخزون) — imports: [{id,fileName,sheetName,site,importedAt,signature,rows:[{productCode,productDescription,description,requested,received}],autoDetected,rawHeader:[...],rawRows:[[...]]}] — rawHeader/rawRows: نسخة كاملة غير معالَجة من كل الأعمدة والصفوف كما في Excel الأصلي، للعرض في شاشة "الملف الأصلي كاملاً" فقط
+  siteSchedule: { sites: [], fileName: null, uploadedAt: null }, // جدول المواقع الأسبوعي (للفلترة في تقارير SID فقط، مستقل تماماً عن sidReview) — sites: [{key, site, week:'Week 40', weekNum:40, region:'شمال'|'وسط'|'جنوب', updatedAt}]؛ رفع ملف جديد يحدّث الموقع نفسه (upsert حسب الاسم)
 };
 
 let ACTIVE_TAB = 'setup';
@@ -5686,7 +5695,7 @@ function renderSidTab(el){
 /* ============================================================
    واجهة مراجعة استلام SID — متعدد الملفات/المواقع
    ============================================================ */
-let SIDR_VIEW = 'upload'; // 'upload' | 'sites' | 'summary'
+let SIDR_VIEW = 'upload'; // 'upload' | 'sites' | 'summary' | 'schedule'
 
 function renderSidReviewSubview(el){
   el.innerHTML = `
@@ -5695,6 +5704,7 @@ function renderSidReviewSubview(el){
       <button type="button" data-sidrview="upload" class="${SIDR_VIEW==='upload'?'active':''}">⬆️ رفع ومعالجة الملفات</button>
       <button type="button" data-sidrview="sites" class="${SIDR_VIEW==='sites'?'active':''}">📍 مراجعة حسب الموقع (${STATE.sidReview.imports.length})</button>
       <button type="button" data-sidrview="summary" class="${SIDR_VIEW==='summary'?'active':''}">📊 ملخص النواقص لكل المواقع</button>
+      <button type="button" data-sidrview="schedule" class="${SIDR_VIEW==='schedule'?'active':''}">🗓️ جدولة المواقع والتقارير الأسبوعية</button>
     </nav>
     <div id="sidrViewArea"></div>
   `;
@@ -5704,6 +5714,7 @@ function renderSidReviewSubview(el){
   const area = document.getElementById('sidrViewArea');
   if(SIDR_VIEW==='sites') renderSidrSitesView(area);
   else if(SIDR_VIEW==='summary') renderSidrSummaryView(area);
+  else if(SIDR_VIEW==='schedule') renderSidrScheduleView(area);
   else renderSidrUploadView(area);
 }
 
@@ -6193,6 +6204,383 @@ async function sidrPrintSiteReport(impOverride, opts){
   if(!info) return;
   window.addEventListener('afterprint', sidrCleanupPrint);
   setTimeout(()=>{ try{ window.print(); }catch(e){ sidrCleanupPrint(); } }, 60);
+}
+
+/* ============================================================
+   جدولة المواقع الأسبوعية وربطها بتقارير SID
+   ------------------------------------------------------------
+   إضافة فقط: تخزّن (اسم الموقع، الأسبوع المجدول، المنطقة) في STATE.siteSchedule (مفتاح wms_state جديد
+   wms_site_schedule_v1 — بنفس آلية STATE.sidReview ودون أي تغيير على مخطط Supabase ولا على بياناته الحالية).
+   تُستخدم فقط كفلتر لاستخراج تقارير من بيانات SID الموجودة: كل الأرقام (المطلوب/المستلم/النقص/الحالة) تأتي من
+   نفس الدوال الحالية sidrImportForSite و sidrRowsWithStatus دون أي تعديل عليها.
+   رفع ملف جديد يحدّث الموقع نفسه (upsert حسب اسم الموقع) ولا يكرّره ولا يمسّ المواقع غير المذكورة في الملف.
+   ============================================================ */
+const SCHED_REGIONS = ['شمال','وسط','جنوب'];
+let SCHED_WEEK = null;      // 'Week 40'
+let SCHED_REGION = 'all';   // 'all' | 'شمال' | 'وسط' | 'جنوب'
+let SCHED_REPORT = null;    // null | 'received' | 'shortage'
+let SCHED_PARSED = null;    // نتيجة فحص ملف مرفوع بانتظار التأكيد
+
+function schedNormAr(s){
+  return trim(s).toLowerCase().replace(/[ً-ٰٟـ]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function schedSiteKey(s){ return trim(s).replace(/\s+/g,' ').toLowerCase(); }
+function schedNormWeek(v){
+  if(v===null||v===undefined) return null;
+  const s = trim(v); if(s==='') return null;
+  let m = s.match(/w(?:eek)?\s*[-_.:#]*\s*0*(\d{1,2})(?!\d)/i) || s.match(/(?:الاسبوع|الأسبوع|اسبوع|أسبوع)\s*[-_.:#]*\s*0*(\d{1,2})(?!\d)/) || s.match(/^0*(\d{1,2})(?:\.0+)?$/);
+  if(!m) return null;
+  const n = Number(m[1]);
+  if(!(n>=1 && n<=53)) return null;
+  return {label:'Week '+n, num:n};
+}
+function schedNormRegion(v){
+  let s = schedNormAr(v); if(!s) return null;
+  s = s.replace(/^ال/,'').replace(/^region\s*/,'').replace(/^منطقه\s*/,'').replace(/^ال/,'');
+  if(['شمال','شمالي','شماليه','north','northern','n'].includes(s)) return 'شمال';
+  if(['وسط','وسطي','وسطيه','central','centre','center','middle','mid'].includes(s)) return 'وسط';
+  if(['جنوب','جنوبي','جنوبيه','south','southern','s'].includes(s)) return 'جنوب';
+  return null;
+}
+const SCHED_AL = {
+  site: ['site','site name','sitename','site id','site code','اسم الموقع','الموقع','موقع','كود الموقع'],
+  week: ['week','scheduled week','wk','الاسبوع','الاسبوع المجدول','اسبوع','الاسبوع المجدوله'],
+  region: ['region','area','zone','المنطقه','منطقه','الاقليم','المنطقه الجغرافيه'],
+};
+function schedParseAoa(aoa){
+  const rows = (aoa||[]).map((r,i)=>({r:r||[], n:i+1})).filter(x=>x.r.some(c=>trim(c)!==''));
+  const out = {rows:[], errors:[], duplicates:0, total:0};
+  if(!rows.length) return out;
+  const findCol = (hdr, key)=> hdr.findIndex(h=> SCHED_AL[key].includes(schedNormAr(h)));
+  let cols = null, startAt = 0;
+  for(let i=0;i<Math.min(rows.length,5);i++){
+    const hdr = rows[i].r;
+    const c = {site:findCol(hdr,'site'), week:findCol(hdr,'week'), region:findCol(hdr,'region')};
+    if([c.site,c.week,c.region].filter(x=>x>=0).length>=2){
+      if(c.site<0||c.week<0||c.region<0){ /* أكمل الأعمدة الناقصة من الأعمدة غير المستخدمة بالترتيب */
+        const used = [c.site,c.week,c.region].filter(x=>x>=0);
+        const free = [0,1,2,3,4,5].filter(x=>!used.includes(x));
+        ['site','week','region'].forEach(k=>{ if(c[k]<0) c[k]=free.shift(); });
+      }
+      cols = c; startAt = i+1; break;
+    }
+  }
+  if(!cols){ cols = {site:0, week:1, region:2}; startAt = 0; }
+  const seen = new Map();
+  for(let i=startAt;i<rows.length;i++){
+    const {r,n} = rows[i];
+    out.total++;
+    const site = trim(r[cols.site]).replace(/\s+/g,' ');
+    const wk = schedNormWeek(r[cols.week]);
+    const rg = schedNormRegion(r[cols.region]);
+    const errs = [];
+    if(!site) errs.push('اسم الموقع فارغ');
+    if(!wk) errs.push(`الأسبوع غير صالح («${trim(r[cols.week])}»)`);
+    if(!rg) errs.push(`المنطقة غير صالحة («${trim(r[cols.region])}») — المسموح: شمال / وسط / جنوب`);
+    if(errs.length){ out.errors.push({row:n, site, msg:errs.join('، ')}); continue; }
+    const k = schedSiteKey(site);
+    if(seen.has(k)){ out.duplicates++; out.rows[seen.get(k)] = {site, week:wk.label, weekNum:wk.num, region:rg}; continue; } // الأخير في الملف يغلب
+    seen.set(k, out.rows.length);
+    out.rows.push({site, week:wk.label, weekNum:wk.num, region:rg});
+  }
+  return out;
+}
+async function schedParseFile(file){
+  const wb = await readWorkbook(file);
+  const merged = {rows:[], errors:[], duplicates:0, total:0};
+  const seen = new Map();
+  wb.SheetNames.forEach(name=>{
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:null, raw:true});
+    const p = schedParseAoa(aoa);
+    merged.total += p.total; merged.duplicates += p.duplicates;
+    p.errors.forEach(e=> merged.errors.push(wb.SheetNames.length>1 ? {...e, msg:`[${name}] `+e.msg} : e));
+    p.rows.forEach(r=>{
+      const k = schedSiteKey(r.site);
+      if(seen.has(k)){ merged.duplicates++; merged.rows[seen.get(k)] = r; }
+      else { seen.set(k, merged.rows.length); merged.rows.push(r); }
+    });
+  });
+  merged.fileName = file.name;
+  return merged;
+}
+function schedList(){ return (STATE.siteSchedule && STATE.siteSchedule.sites) || []; }
+/* خطة الدمج: جديد / تحديث (تغيّر الأسبوع أو المنطقة أو الاسم) / دون تغيير */
+function schedPlanUpsert(parsedRows){
+  const byKey = new Map(schedList().map(e=>[e.key, e]));
+  const plan = {added:0, updated:0, unchanged:0};
+  parsedRows.forEach(r=>{
+    const e = byKey.get(schedSiteKey(r.site));
+    if(!e) plan.added++;
+    else if(e.week===r.week && e.region===r.region) plan.unchanged++;
+    else plan.updated++;
+  });
+  return plan;
+}
+function schedApplyUpsert(parsedRows, fileName){
+  if(!STATE.siteSchedule || !Array.isArray(STATE.siteSchedule.sites)) STATE.siteSchedule = {sites:[], fileName:null, uploadedAt:null};
+  const now = new Date().toISOString();
+  const idx = new Map(STATE.siteSchedule.sites.map((e,i)=>[e.key,i]));
+  parsedRows.forEach(r=>{
+    const key = schedSiteKey(r.site);
+    const rec = {key, site:r.site, week:r.week, weekNum:r.weekNum, region:r.region, updatedAt:now};
+    if(idx.has(key)) STATE.siteSchedule.sites[idx.get(key)] = rec;
+    else { idx.set(key, STATE.siteSchedule.sites.length); STATE.siteSchedule.sites.push(rec); }
+  });
+  STATE.siteSchedule.fileName = fileName || null;
+  STATE.siteSchedule.uploadedAt = now;
+}
+function schedWeeks(){
+  const m = new Map();
+  schedList().forEach(e=> m.set(e.weekNum, e.week));
+  return [...m.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+}
+function schedRegionLabel(region){ return region==='all' ? 'جميع المناطق' : region; }
+function schedFiltered(week, region){
+  const rOrd = r=>SCHED_REGIONS.indexOf(r);
+  return schedList().filter(e=> e.week===week && (region==='all' || e.region===region))
+    .slice().sort((a,b)=> rOrd(a.region)-rOrd(b.region) || a.site.localeCompare(b.site));
+}
+/* إحصاءات موقع واحد — تعتمد حصراً على بيانات SID الحالية وعلى نفس دوال الحساب الموجودة دون تعديل */
+function schedSiteStats(entry){
+  const imp = sidrImportForSite(entry.site);
+  if(!imp) return {hasSid:false, status:'لا يوجد SID', requested:0, received:0, shortage:0, rows:[]};
+  const rows = sidrRowsWithStatus(imp.rows);
+  const requested = rows.reduce((s,r)=>s+r.requested,0), received = rows.reduce((s,r)=>s+r.received,0), shortage = rows.reduce((s,r)=>s+r.shortage,0);
+  return {hasSid:true, status: shortage>0?'ناقص':'مكتمل', requested, received, shortage, rows, imp};
+}
+function schedMaterialName(r){
+  const name = trim(r.productDescription) || trim(r.description) || '';
+  return [trim(r.productCode), name].filter(Boolean).join(' — ') || '—';
+}
+function schedRegionSummary(items){
+  return SCHED_REGIONS.map(rg=>{
+    const its = items.filter(i=>i.entry.region===rg);
+    return {region:rg, sites:its.length, withoutSid:its.filter(i=>!i.st.hasSid).length,
+      requested:its.reduce((s,i)=>s+i.st.requested,0), received:its.reduce((s,i)=>s+i.st.received,0), shortage:its.reduce((s,i)=>s+i.st.shortage,0)};
+  });
+}
+function schedBuildItems(week, region){
+  return schedFiltered(week, region).map(entry=>({entry, st:schedSiteStats(entry)}));
+}
+function schedReportTitle(kind, week, region){
+  return `${kind==='received'?'تقرير المواد المستلمة':'تقرير النواقص'} – ${week} – ${schedRegionLabel(region)}`;
+}
+function schedBuildReport(kind, week, region){
+  const items = schedBuildItems(week, region);
+  const rep = {kind, week, region, regionLabel:schedRegionLabel(region), title:schedReportTitle(kind,week,region), items,
+    regionSummary: region==='all' ? schedRegionSummary(items) : null};
+  rep.totals = {sites:items.length, withoutSid:items.filter(i=>!i.st.hasSid).length,
+    requested:items.reduce((s,i)=>s+i.st.requested,0), received:items.reduce((s,i)=>s+i.st.received,0), shortage:items.reduce((s,i)=>s+i.st.shortage,0),
+    sitesWithShortage:items.filter(i=>i.st.shortage>0).length};
+  if(kind==='shortage'){
+    rep.lines = [];
+    items.forEach(i=> i.st.rows.filter(r=>r.status==='ناقص').forEach(r=> rep.lines.push({site:i.entry.site, region:i.entry.region, material:schedMaterialName(r), requested:r.requested, received:r.received, shortage:r.shortage})));
+    rep.totals.lines = rep.lines.length;
+    rep.totals.lineRequested = rep.lines.reduce((s,l)=>s+l.requested,0);
+    rep.totals.lineReceived = rep.lines.reduce((s,l)=>s+l.received,0);
+    rep.totals.lineShortage = rep.lines.reduce((s,l)=>s+l.shortage,0);
+  } else {
+    rep.sections = items.map(i=>({entry:i.entry, st:i.st, lines:i.st.rows.filter(r=>r.received>0)}));
+  }
+  return rep;
+}
+/* ---- مصفوفة Excel للتقرير ---- */
+function schedReportAoa(rep){
+  const aoa = [[rep.title], [`الأسبوع: ${rep.week}`, `المنطقة: ${rep.regionLabel}`, `تاريخ الإنشاء: ${todayStr()}`], []];
+  if(rep.kind==='shortage'){
+    aoa.push(['الموقع','المنطقة','المادة','المطلوب حسب SID','المستلم','النقص']);
+    rep.lines.forEach(l=> aoa.push([l.site, l.region, l.material, l.requested, l.received, l.shortage]));
+    if(!rep.lines.length) aoa.push(['لا توجد نواقص للمواقع المحددة']);
+    aoa.push([], ['الإجمالي', '', '', rep.totals.lineRequested, rep.totals.lineReceived, rep.totals.lineShortage]);
+    aoa.push([], ['ملخص النواقص الإجمالي']);
+    aoa.push(['عدد المواقع في النطاق', rep.totals.sites]);
+    aoa.push(['عدد المواقع التي بها نواقص', rep.totals.sitesWithShortage]);
+    aoa.push(['مواقع بدون ملف SID', rep.totals.withoutSid]);
+    aoa.push(['عدد بنود النواقص', rep.totals.lines]);
+    aoa.push(['إجمالي النقص', rep.totals.lineShortage]);
+  } else {
+    aoa.push(['الموقع','المنطقة','حالة SID','Product code','Product description','Description','المطلوب','المستلم']);
+    rep.sections.forEach(s=>{
+      if(!s.lines.length) aoa.push([s.entry.site, s.entry.region, s.st.status, s.st.hasSid?'لا توجد مواد مستلمة':'لا يوجد ملف SID لهذا الموقع']);
+      s.lines.forEach(r=> aoa.push([s.entry.site, s.entry.region, s.st.status, r.productCode, r.productDescription, r.description, r.requested, r.received]));
+    });
+    aoa.push([], ['الإجمالي', '', '', '', '', '', rep.totals.requested, rep.totals.received]);
+  }
+  return aoa;
+}
+function schedRegionSummaryAoa(rep){
+  const rs = rep.regionSummary; if(!rs) return null;
+  const aoa = [[rep.title + ' — ملخص حسب المنطقة'], ['المنطقة','عدد المواقع','إجمالي المواد المطلوبة','إجمالي المواد المستلمة','إجمالي النواقص']];
+  rs.forEach(x=> aoa.push([x.region, x.sites, x.requested, x.received, x.shortage]));
+  aoa.push(['الإجمالي', rep.totals.sites, rep.totals.requested, rep.totals.received, rep.totals.shortage]);
+  return aoa;
+}
+function schedExportReport(rep){
+  const sheets = [{name: safeSheetName(rep.kind==='shortage'?'تقرير النواقص':'المواد المستلمة'), ws: aoaSheet(schedReportAoa(rep), rep.kind==='shortage'?[18,10,48,16,12,12]:[18,10,14,16,26,34,12,12])}];
+  const rsAoa = schedRegionSummaryAoa(rep);
+  if(rsAoa) sheets.push({name:'ملخص المناطق', ws: aoaSheet(rsAoa,[16,14,20,20,16])});
+  downloadWorkbook(sheets, `${rep.kind==='shortage'?'تقرير_النواقص':'تقرير_المواد_المستلمة'}_${rep.week.replace(/\s+/g,'_')}_${rep.regionLabel.replace(/\s+/g,'_')}_${todayStr()}.xlsx`);
+}
+/* ---- عرض HTML للتقرير (print=true للطباعة بأسلوب .sr، وإلا للعرض على الشاشة) ---- */
+function schedReportHtml(rep, print){
+  const B = sidrReportBdi;
+  const tcls = print ? 'sr-table' : 'data';
+  const kpi = (items)=> print
+    ? `<table class="sr-kpi"><tr>${items.map(([n,l,hot])=>`<td class="${hot?'hot':''}"><b>${n}</b><span>${l}</span></td>`).join('')}</tr></table>`
+    : `<div class="kpi-grid">${items.map(([n,l,hot])=>`<div class="kpi ${hot?'warn':''}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('')}</div>`;
+  const metaHtml = print
+    ? `<div class="sr-head"><div class="sr-org">نظام إدارة وترصيد مواد المستودع</div><div class="sr-title">${esc(rep.title)}</div></div>
+       <table class="sr-meta"><tr><td><span>الأسبوع</span><b>${esc(rep.week)}</b></td><td><span>المنطقة</span><b>${esc(rep.regionLabel)}</b></td><td><span>عدد المواقع</span><b>${rep.totals.sites}</b></td><td><span>تاريخ الطباعة</span><b>${esc(todayStr()+' '+nowTimeStr())}</b></td></tr></table>`
+    : `<h2>${esc(rep.title)}</h2><div class="desc">الأسبوع: <b>${esc(rep.week)}</b> — المنطقة: <b>${esc(rep.regionLabel)}</b> — عدد المواقع: <b>${rep.totals.sites}</b></div>`;
+  let regionHtml = '';
+  if(rep.regionSummary){
+    const rows = rep.regionSummary.map(x=>`<tr><td class="${print?'c':''}"><b>${x.region}</b></td><td class="n">${x.sites}</td><td class="n">${x.requested}</td><td class="n">${x.received}</td><td class="n ${x.shortage>0?'bad-num':''}">${x.shortage}</td></tr>`).join('');
+    regionHtml = `<div class="${print?'sch-sub':'sch-sub-s'}">ملخص حسب المنطقة</div>
+      <table class="${tcls} sch-regsum"><thead><tr><th>المنطقة</th><th>عدد المواقع</th><th>إجمالي المواد المطلوبة</th><th>إجمالي المواد المستلمة</th><th>إجمالي النواقص</th></tr></thead><tbody>${rows}
+      <tr class="sch-total"><td><b>الإجمالي</b></td><td class="n">${rep.totals.sites}</td><td class="n">${rep.totals.requested}</td><td class="n">${rep.totals.received}</td><td class="n">${rep.totals.shortage}</td></tr></tbody></table>`;
+  }
+  let body = '';
+  if(rep.kind==='shortage'){
+    const rows = rep.lines.map((l,i)=>`<tr class="short"><td class="${print?'c':''}">${B(l.site)}</td><td class="c">${l.region}</td><td>${B(l.material)}</td><td class="n">${l.requested}</td><td class="n">${l.received}</td><td class="n">${l.shortage}</td></tr>`).join('')
+      || `<tr><td class="c" colspan="6">لا توجد نواقص للمواقع المحددة</td></tr>`;
+    const cg = print ? '<colgroup><col style="width:15%"><col style="width:8%"><col style="width:45%"><col style="width:11%"><col style="width:10%"><col style="width:11%"></colgroup>' : '';
+    body = `<div class="${print?'sch-sub':'sch-sub-s'}">تفاصيل النواقص</div><table class="${tcls} sch-short">${cg}<thead><tr><th>الموقع</th><th>المنطقة</th><th>المادة</th><th>المطلوب حسب SID</th><th>المستلم</th><th>النقص</th></tr></thead><tbody>${rows}
+      ${rep.lines.length?`<tr class="sch-total"><td colspan="3"><b>الإجمالي</b></td><td class="n">${rep.totals.lineRequested}</td><td class="n">${rep.totals.lineReceived}</td><td class="n">${rep.totals.lineShortage}</td></tr>`:''}</tbody></table>
+      <div class="${print?'sch-sub':'sch-sub-s'}">ملخص النواقص الإجمالي</div>
+      ${kpi([[rep.totals.sites,'عدد المواقع'],[rep.totals.sitesWithShortage,'مواقع بها نواقص',rep.totals.sitesWithShortage>0],[rep.totals.lines,'عدد بنود النواقص'],[rep.totals.lineShortage,'إجمالي النقص',rep.totals.lineShortage>0]])}
+      ${rep.totals.withoutSid?`<div class="${print?'sr-note':'msg warn'}">ملاحظة: ${rep.totals.withoutSid} موقع في هذا النطاق لا يوجد له ملف SID مستورد، ولذلك لا تظهر له مواد.</div>`:''}`;
+  } else {
+    body = kpi([[rep.totals.sites,'عدد المواقع'],[rep.totals.requested,'إجمالي المطلوب'],[rep.totals.received,'إجمالي المستلم'],[rep.totals.shortage,'إجمالي النقص',rep.totals.shortage>0]])
+      + rep.sections.map(s=>{
+        const rows = s.lines.map(r=>`<tr><td>${B(r.productCode)}</td><td>${B(r.productDescription)}</td><td>${B(r.description)}</td><td class="n">${r.requested}</td><td class="n">${r.received}</td></tr>`).join('')
+          || `<tr><td class="c" colspan="5">${s.st.hasSid?'لا توجد مواد مستلمة':'لا يوجد ملف SID مستورد لهذا الموقع'}</td></tr>`;
+        return `<div class="${print?'sch-sub':'sch-sub-s'}">${B(s.entry.site)} — ${s.entry.region} — حالة SID: ${s.st.status}</div>
+          <table class="${tcls}">${print?'<colgroup><col style="width:15%"><col style="width:24%"><col style="width:35%"><col style="width:13%"><col style="width:13%"></colgroup>':''}<thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }).join('')
+      || '<div class="msg warn">لا توجد مواقع مجدولة لهذا الاختيار.</div>';
+  }
+  const foot = print ? `<div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div>` : '';
+  return `${print?'<div class="sr-wrap">':''}${metaHtml}${regionHtml}${body}${foot}${print?'</div>':''}`;
+}
+async function schedPrintReport(rep){
+  const old = document.getElementById('printRoot'); if(old) old.remove();
+  const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr sch'; div.innerHTML = schedReportHtml(rep, true);
+  document.body.appendChild(div);
+  let st = document.getElementById('sidrPageStyle'); if(st) st.remove();
+  st = document.createElement('style'); st.id = 'sidrPageStyle';
+  st.textContent = `@media print{@page{size:A4 portrait;margin:10mm 10mm 14mm;@bottom-center{content:"صفحة " counter(page) " من " counter(pages);font-size:9pt;}} #printRoot.sch{font-size:10pt;}}`;
+  document.head.appendChild(st);
+  const prevTitle = document.title; document.title = rep.title;
+  try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
+  document.body.classList.add('printing-sidr');
+  const done = ()=>{ document.title = prevTitle; sidrCleanupPrint(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(()=>{ try{ window.print(); }catch(e){ done(); } }, 60);
+}
+/* ---- الواجهة ---- */
+function schedDownloadTemplate(){
+  downloadWorkbook([{name:'جدول المواقع', ws: aoaSheet([['اسم الموقع','الأسبوع المجدول','المنطقة'],['HBR117','Week 40','شمال'],['WBR025','Week 40','وسط'],['NBL032','Week 41','شمال'],['TUL015','Week 42','جنوب']],[22,18,14])}], 'قالب_جدول_المواقع_الأسبوعي.xlsx');
+}
+function renderSidrScheduleView(el){
+  const weeks = schedWeeks();
+  if(!weeks.includes(SCHED_WEEK)) SCHED_WEEK = weeks.length ? weeks[weeks.length-1] : null;
+  const total = schedList().length, ss = STATE.siteSchedule || {};
+  el.innerHTML = `
+    <div class="panel">
+      <h2>🗓️ رفع جدول المواقع الأسبوعي</h2>
+      <div class="desc">ملف Excel بثلاثة أعمدة: <b>اسم الموقع | الأسبوع المجدول | المنطقة</b> (المنطقة: شمال / وسط / جنوب). يُحفظ الجدول بشكل دائم؛ ورفع ملف جديد يحدّث بيانات الموقع نفسه دون تكرار، ولا يمسّ المواقع غير المذكورة في الملف. لا يؤثر على ملفات SID ولا على طريقة حساب المستلم والنواقص.</div>
+      <div class="filebox"><label class="flabel">ملف جدول المواقع (.xlsx)</label><input type="file" id="schedFile" accept=".xlsx,.xls"></div>
+      <div id="schedMsg"></div>
+      <div class="btnrow"><button class="primary" id="btnSchedParse">فحص الملف</button><button class="secondary" id="btnSchedTpl">📄 تنزيل قالب Excel</button></div>
+      <div id="schedPreview"></div>
+      <div class="desc" style="margin-top:8px;">${total?`المحفوظ حالياً: <b>${total}</b> موقع في <b>${weeks.length}</b> أسبوع${ss.fileName?` — آخر ملف: ${esc(ss.fileName)}`:''}${ss.uploadedAt?` (${esc(String(ss.uploadedAt).slice(0,10))})`:''}`:'لا يوجد جدول محفوظ بعد.'}</div>
+    </div>
+    ${total ? `<div class="panel">
+      <h2>تقارير SID حسب الأسبوع والمنطقة</h2>
+      <div class="grid2">
+        <div><label class="flabel">الأسبوع</label><select id="schedWeekSel">${weeks.map(w=>`<option value="${esc(w)}" ${w===SCHED_WEEK?'selected':''}>${esc(w)}</option>`).join('')}</select></div>
+        <div><label class="flabel">المنطقة</label><select id="schedRegionSel"><option value="all" ${SCHED_REGION==='all'?'selected':''}>الكل</option>${SCHED_REGIONS.map(r=>`<option value="${r}" ${SCHED_REGION===r?'selected':''}>${r}</option>`).join('')}</select></div>
+      </div>
+      <div id="schedListArea"></div>
+    </div>
+    <div id="schedReportArea"></div>` : ''}`;
+  document.getElementById('btnSchedTpl').addEventListener('click', schedDownloadTemplate);
+  document.getElementById('btnSchedParse').addEventListener('click', async ()=>{
+    const inp = document.getElementById('schedFile');
+    if(!inp.files.length){ showMsg('schedMsg','warn','اختر ملف Excel أولاً.'); return; }
+    setBusy('btnSchedParse', true, 'جارِ الفحص…');
+    try{ SCHED_PARSED = await schedParseFile(inp.files[0]); document.getElementById('schedMsg').innerHTML=''; renderSchedPreview(); }
+    catch(e){ SCHED_PARSED = null; showMsg('schedMsg','bad','تعذّرت قراءة الملف: '+e.message); }
+    setBusy('btnSchedParse', false, 'فحص الملف');
+  });
+  if(SCHED_PARSED) renderSchedPreview();
+  if(total){
+    document.getElementById('schedWeekSel').addEventListener('change', e=>{ SCHED_WEEK = e.target.value; SCHED_REPORT = null; renderSchedList(); });
+    document.getElementById('schedRegionSel').addEventListener('change', e=>{ SCHED_REGION = e.target.value; SCHED_REPORT = null; renderSchedList(); });
+    renderSchedList();
+  }
+}
+function renderSchedPreview(){
+  const area = document.getElementById('schedPreview'); if(!area) return;
+  const p = SCHED_PARSED; if(!p){ area.innerHTML=''; return; }
+  const plan = schedPlanUpsert(p.rows);
+  area.innerHTML = `
+    <div class="kpi-grid" style="margin-top:10px;">
+      <div class="kpi"><div class="num">${plan.added}</div><div class="lbl">مواقع جديدة</div></div>
+      <div class="kpi ${plan.updated?'warn':''}"><div class="num">${plan.updated}</div><div class="lbl">مواقع سيُحدَّث أسبوعها/منطقتها</div></div>
+      <div class="kpi"><div class="num">${plan.unchanged}</div><div class="lbl">دون تغيير</div></div>
+      <div class="kpi ${p.errors.length?'bad':''}"><div class="num">${p.errors.length}</div><div class="lbl">صفوف مرفوضة</div></div>
+    </div>
+    ${p.duplicates?`<div class="msg warn">${p.duplicates} صف مكرر لنفس الموقع داخل الملف — اعتُمد آخر صف لكل موقع.</div>`:''}
+    ${p.errors.length?`<div class="msg warn"><b>صفوف لن تُحفظ:</b><br>${p.errors.slice(0,15).map(e=>`سطر ${e.row}${e.site?` (${esc(e.site)})`:''}: ${esc(e.msg)}`).join('<br>')}${p.errors.length>15?`<br>… و${p.errors.length-15} أخرى`:''}</div>`:''}
+    <div class="btnrow"><button class="primary" id="btnSchedCommit" ${p.rows.length?'':'disabled'}>✅ حفظ / تحديث الجدول (${p.rows.length} موقع)</button><button class="secondary" id="btnSchedCancel">إلغاء</button></div>`;
+  document.getElementById('btnSchedCancel').addEventListener('click', ()=>{ SCHED_PARSED = null; renderSchedPreview(); });
+  document.getElementById('btnSchedCommit').addEventListener('click', async ()=>{
+    setBusy('btnSchedCommit', true, 'جارِ الحفظ…');
+    schedApplyUpsert(p.rows, p.fileName);
+    await saveState(['siteSchedule']);
+    const n = p.rows.length; SCHED_PARSED = null;
+    const area2 = document.getElementById('sidrViewArea'); renderSidrScheduleView(area2);
+    showMsg('schedMsg','ok',`تم حفظ جدول المواقع (${n} موقع) — مواقع جديدة أو محدَّثة دون أي تكرار.`);
+  });
+}
+function renderSchedList(){
+  const area = document.getElementById('schedListArea'); if(!area) return;
+  const items = schedBuildItems(SCHED_WEEK, SCHED_REGION);
+  const tot = {req:items.reduce((s,i)=>s+i.st.requested,0), rec:items.reduce((s,i)=>s+i.st.received,0), sh:items.reduce((s,i)=>s+i.st.shortage,0)};
+  const stCls = st=> st==='ناقص'?'bad':(st==='مكتمل'?'ok':'warn');
+  const rs = SCHED_REGION==='all' ? schedRegionSummary(items) : null;
+  area.innerHTML = `
+    <div class="kpi-grid" style="margin-top:12px;">
+      <div class="kpi"><div class="num">${items.length}</div><div class="lbl">عدد المواقع</div></div>
+      <div class="kpi"><div class="num">${tot.req}</div><div class="lbl">إجمالي المواد المطلوبة</div></div>
+      <div class="kpi"><div class="num">${tot.rec}</div><div class="lbl">إجمالي المواد المستلمة</div></div>
+      <div class="kpi ${tot.sh?'warn':''}"><div class="num">${tot.sh}</div><div class="lbl">إجمالي النواقص</div></div>
+    </div>
+    ${rs?`<div class="tablewrap" style="margin-top:8px;"><table class="data" id="schedRegionTable"><thead><tr><th>المنطقة</th><th>عدد المواقع</th><th>إجمالي المواد المطلوبة</th><th>إجمالي المواد المستلمة</th><th>إجمالي النواقص</th></tr></thead><tbody>
+      ${rs.map(x=>`<tr><td><b>${x.region}</b></td><td>${x.sites}</td><td>${x.requested}</td><td>${x.received}</td><td>${x.shortage}</td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="btnrow" style="margin-top:10px;">
+      <button class="primary" id="btnSchedRepRecv" ${items.length?'':'disabled'}>📦 تقرير المواد المستلمة</button>
+      <button class="primary" id="btnSchedRepShort" ${items.length?'':'disabled'}>⚠️ تقرير النواقص</button>
+    </div>
+    <div class="tablewrap"><table class="data" id="schedSitesTable"><thead><tr><th>اسم الموقع</th><th>المنطقة</th><th>الأسبوع</th><th>حالة SID</th><th>عدد المواد المطلوبة</th><th>عدد المواد المستلمة</th><th>عدد المواد الناقصة</th></tr></thead><tbody>
+      ${items.map(i=>`<tr><td><b>${esc(i.entry.site)}</b></td><td>${i.entry.region}</td><td>${esc(i.entry.week)}</td><td><span class="pill ${stCls(i.st.status)}">${i.st.status}</span></td><td>${i.st.requested}</td><td>${i.st.received}</td><td>${i.st.shortage}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">لا توجد مواقع مجدولة لهذا الاختيار</td></tr>'}
+    </tbody></table></div>`;
+  const rb = document.getElementById('btnSchedRepRecv'), sb = document.getElementById('btnSchedRepShort');
+  rb.addEventListener('click', ()=>{ SCHED_REPORT = 'received'; renderSchedReport(); });
+  sb.addEventListener('click', ()=>{ SCHED_REPORT = 'shortage'; renderSchedReport(); });
+  renderSchedReport();
+}
+function renderSchedReport(){
+  const area = document.getElementById('schedReportArea'); if(!area) return;
+  if(!SCHED_REPORT){ area.innerHTML=''; return; }
+  const rep = schedBuildReport(SCHED_REPORT, SCHED_WEEK, SCHED_REGION);
+  area.innerHTML = `<div class="panel" id="schedReportPanel">
+    <div class="btnrow" style="margin-bottom:10px;"><button class="primary" id="btnSchedPrint">🖨️ طباعة</button><button class="secondary" id="btnSchedXlsx">📥 تصدير Excel</button><button class="secondary" id="btnSchedClose">إغلاق التقرير</button></div>
+    <div class="tablewrap">${schedReportHtml(rep, false)}</div></div>`;
+  document.getElementById('btnSchedPrint').addEventListener('click', ()=> schedPrintReport(rep));
+  document.getElementById('btnSchedXlsx').addEventListener('click', ()=> schedExportReport(rep));
+  document.getElementById('btnSchedClose').addEventListener('click', ()=>{ SCHED_REPORT = null; renderSchedReport(); });
 }
 
 /* ---- 3-أ) تحليل Sheet واحد من ملف Excel بشكل مستقل ----
