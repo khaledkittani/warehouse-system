@@ -5770,7 +5770,8 @@ function renderSidrSiteDetail(){
   const totals = rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received, shortage:s.shortage+r.shortage}), {requested:0,received:0,shortage:0});
   area.innerHTML = `
     <div class="panel">
-      <h2>${esc(imp.site)}</h2>
+      <div id="sidrSiteTitle" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><h2 style="margin:0;">${esc(imp.site)}</h2>${canEditRecv?`<button type="button" class="secondary" id="btnSidrRename" style="padding:3px 12px;font-size:12.5px;">✏️ تعديل اسم الموقع</button>`:''}</div>
+      <div id="sidrRenameMsg"></div>
       <div class="desc">الملف: ${esc(imp.fileName)} (${esc(imp.sheetName)}) — تاريخ الاستيراد: ${esc(imp.importedAt.slice(0,10))}${imp.autoDetected?'':' — روجعت أعمدته يدوياً'}</div>
       <nav class="tabs" style="margin:10px 0;">
         <button type="button" data-sidrsiteview="summary" class="${SIDR_SITE_VIEW_MODE==='summary'?'active':''}">📊 ملخص المواد والنواقص</button>
@@ -5821,6 +5822,21 @@ function renderSidrSiteDetail(){
       SIDR_SITE_VIEW_MODE = btn.dataset.sidrsiteview;
       renderSidrSiteDetail();
     });
+  });
+  const btnRen = document.getElementById('btnSidrRename');
+  if(btnRen) btnRen.addEventListener('click', ()=>{
+    const box = document.getElementById('sidrSiteTitle');
+    box.innerHTML = `<input type="text" id="sidrRenameInp" value="${esc(imp.site)}" style="max-width:340px;font-weight:700;" autocomplete="off"><button type="button" class="primary" id="btnSidrRenameOk" style="padding:4px 14px;">حفظ الاسم</button><button type="button" class="secondary" id="btnSidrRenameCancel" style="padding:4px 14px;">إلغاء</button>`;
+    const inp = document.getElementById('sidrRenameInp'); inp.focus(); try{ inp.select(); }catch(e){}
+    const doSave = async ()=>{
+      const res = await sidrRenameSite(imp.id, inp.value);
+      if(!res.ok){ showMsg('sidrRenameMsg','bad',res.msg); inp.focus(); return; }
+      renderApp();
+      if(res.changed) setTimeout(()=>{ const m = document.getElementById('sidrRenameMsg'); if(m) showMsg('sidrRenameMsg','ok',res.msg); }, 0);
+    };
+    document.getElementById('btnSidrRenameOk').addEventListener('click', doSave);
+    document.getElementById('btnSidrRenameCancel').addEventListener('click', ()=>renderSidrSiteDetail());
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSave(); } else if(e.key==='Escape'){ renderSidrSiteDetail(); } });
   });
   document.getElementById('btnSidrPrintSite').addEventListener('click', ()=>sidrPrintSiteReport());
   document.getElementById('btnSidrExportSite').addEventListener('click', ()=> sidrDownloadSiteDetail(imp.site));
@@ -5904,6 +5920,25 @@ async function sidrSetReceived(impId, ri, val){
   if(row.origReceived===val){ delete row.origReceived; delete row.editedAt; } else { row.editedAt = new Date().toISOString(); }
   await saveState(['sidReview']);
   return {ok:true};
+}
+
+/* تصحيح اسم موقع أُدخل خطأً: يغيّر الاسم فقط (imp.site) دون أي مساس بالمواد أو الكميات أو الحسابات.
+   يُرفض الاسم الفارغ أو المكرر (موقع آخر بنفس الاسم). تُحدَّث بصمة الاستيراد بالاسم الجديد (من القيم الأصلية للملف) كي يبقى كشف التكرار عند رفع الملف سليماً. */
+async function sidrRenameSite(impId, newName){
+  const imp = STATE.sidReview.imports.find(i=>i.id===impId);
+  if(!imp) return {ok:false, msg:'تعذّر العثور على هذا الموقع (ربما حُذف الاستيراد).'};
+  const name = trim(newName).replace(/\s+/g,' ');
+  if(!name) return {ok:false, msg:'اسم الموقع لا يمكن أن يكون فارغاً.'};
+  if(name===imp.site) return {ok:true, changed:false, msg:'لم يتغيّر الاسم.'};
+  const clash = STATE.sidReview.imports.find(i=> i.id!==impId && trim(i.site).toLowerCase()===name.toLowerCase());
+  if(clash) return {ok:false, msg:`يوجد موقع آخر بنفس الاسم "${clash.site}" — اختر اسماً مختلفاً (أو احذف الاستيراد المكرر أولاً).`};
+  const old = imp.site;
+  imp.site = name;
+  imp.signature = sidrComputeSignature(name, imp.rows.map(r=> r.origReceived!==undefined ? {...r, received:r.origReceived} : r));
+  await saveState(['sidReview']);
+  if(SIDR_SELECTED_SITE===old) SIDR_SELECTED_SITE = name;
+  if(typeof SIDR_MULTI!=='undefined' && SIDR_MULTI.sel.has(old)){ SIDR_MULTI.sel.delete(old); SIDR_MULTI.sel.add(name); }
+  return {ok:true, changed:true, old, name, msg:`تم تغيير اسم الموقع من "${old}" إلى "${name}".`};
 }
 
 /* ---- طباعة تقرير الموقع (مراجعة حسب الموقع): تقرير رسمي مبني من نفس البيانات المعروضة حالياً (نفس البحث/الفلتر)،
