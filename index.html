@@ -194,6 +194,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   tr.sidr-hl td{background:#fff8dc;}
   .sidr-hl-cell{text-align:center;width:34px;}
+  .msel-list{margin-top:10px;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));}
+  .msel-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;}
+  .msel-item:hover{background:#f6f3ea;}
+  .msel-item.on{background:#eaf3f1;}
+  .msel-item input{width:16px;height:16px;accent-color:var(--steel-dark);cursor:pointer;flex:none;}
+  .msel-item .rem{margin-inline-start:auto;font-size:11.5px;color:var(--muted);white-space:nowrap;}
+  tr.sr-grp td{background:#e9e4d4;font-weight:700;}
+  tr.sr-grp .btn-open{padding:2px 10px;font-size:12px;margin-inline-start:10px;}
   .sidr-hl-cell input{width:17px;height:17px;cursor:pointer;accent-color:#c8a200;}
   .tag-ok{color:var(--green);font-weight:700;}
   .tag-warn{color:var(--amber);font-weight:700;}
@@ -650,6 +658,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   #printRoot.sr .sr-st{font-weight:800;}
   #printRoot.sch .sch-sub{font-size:1.1em;font-weight:800;margin:.7em 0 .3em;padding:.2em .5em;border:1pt solid #000;background:#eee;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-after:avoid;page-break-after:avoid;}
   #printRoot.sch .sr-table.sch-short td:nth-child(1), #printRoot.sch .sr-table.sch-short td:nth-child(2){white-space:normal;}
+  #printRoot.sch .sr-table tr.sr-grp td{font-weight:800;background:#ddd;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-after:avoid;page-break-after:avoid;}
+  #printRoot.sch .sr-table tr.sr-grp{break-after:avoid;page-break-after:avoid;}
   #printRoot.sch .sch-total td{font-weight:800;background:#ddd;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   #printRoot.sch .sr-table tr.short td{font-weight:400;background:#fff;}
   #printRoot.sch .sr-table td.n{text-align:center;}
@@ -5659,8 +5669,23 @@ let SIDR_SELECTED_SITE = null;
 let SIDR_SITE_SEARCH = '';
 let SIDR_SITE_SHORTAGE_ONLY = false;
 let SIDR_SITE_VIEW_MODE = 'summary'; // 'summary' = ملخص المواد والنواقص (كما كان تماماً) | 'raw' = عرض الملف الأصلي كاملاً كما في Excel
+let SIDR_SITES_MODE = 'single';      // 'single' = موقع واحد (كما كان تماماً) | 'multi' = مراجعة عدة مواقع دفعة واحدة
 
+/* مبدّل الوضع: موقع واحد (الشاشة الأصلية دون أي تغيير) أو عدة مواقع (إضافة جديدة) */
 function renderSidrSitesView(el){
+  if(!sidrSitesList().length){ renderSidrSingleSiteView(el); return; }
+  el.innerHTML = `<nav class="tabs" style="margin-bottom:10px;" id="sidrSitesModeNav">
+      <button type="button" data-sitesmode="single" class="${SIDR_SITES_MODE==='single'?'active':''}">🏢 موقع واحد</button>
+      <button type="button" data-sitesmode="multi" class="${SIDR_SITES_MODE==='multi'?'active':''}">🏘 عدة مواقع <span id="sidrMultiNavCnt">${SIDR_MULTI.sel.size?`(${SIDR_MULTI.sel.size})`:''}</span></button>
+    </nav><div id="sidrSitesModeArea"></div>`;
+  const area = document.getElementById('sidrSitesModeArea');
+  el.querySelectorAll('[data-sitesmode]').forEach(b=>b.addEventListener('click', ()=>{
+    if(SIDR_SITES_MODE===b.dataset.sitesmode) return;
+    SIDR_SITES_MODE = b.dataset.sitesmode; renderSidrSitesView(el);
+  }));
+  if(SIDR_SITES_MODE==='multi') renderSidrMultiView(area); else renderSidrSingleSiteView(area);
+}
+function renderSidrSingleSiteView(el){
   const sites = sidrSitesList();
   if(!SIDR_SELECTED_SITE || !sites.includes(SIDR_SELECTED_SITE)) SIDR_SELECTED_SITE = sites[0] || null;
   el.innerHTML = `
@@ -5989,6 +6014,208 @@ async function sidrPrintSiteReport(impOverride, opts){
   if(!info) return;
   window.addEventListener('afterprint', sidrCleanupPrint);
   setTimeout(()=>{ try{ window.print(); }catch(e){ sidrCleanupPrint(); } }, 60);
+}
+
+/* ============================================================
+   مراجعة عدة مواقع دفعة واحدة (إضافة فقط)
+   ------------------------------------------------------------
+   يحدّد المستخدم عدة مواقع (بالنقر أو بلصق قائمة أسماء) فتُفحص معاً: بحث بالمادة، عرض النواقص، ملخص لكل موقع،
+   ملخص مجمّع حسب المادة، طباعة وتصدير Excel. قراءة فقط: كل الأرقام من sidrImportForSite و sidrRowsWithStatus
+   دون أي تغيير على حساب المستلم/النواقص، وتعديل المستلم يبقى في وضع "موقع واحد".
+   ============================================================ */
+const SIDR_MULTI = {sel:new Set(), filter:'', search:'', shortOnly:false, view:'sites'};   // view: 'sites' = تفصيل لكل موقع | 'materials' = ملخص مجمّع حسب المادة
+
+function sidrMultiBuild(){
+  const M = SIDR_MULTI, q = trim(M.search).toLowerCase();
+  const groups = [];
+  sidrSitesList().filter(s=>M.sel.has(s)).forEach(s=>{
+    const imp = sidrImportForSite(s); if(!imp) return;
+    let rows = sidrRowsWithStatus(imp.rows);
+    if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
+    if(M.shortOnly) rows = rows.filter(r=>r.status==='ناقص');
+    const sum = rows.reduce((a,r)=>({requested:a.requested+r.requested, received:a.received+r.received, shortage:a.shortage+r.shortage}), {requested:0,received:0,shortage:0});
+    groups.push({site:imp.site, rows, ...sum, status: !rows.length ? 'لا يوجد تطابق' : (sum.shortage>0?'ناقص':'مكتمل')});
+  });
+  const map = {};
+  groups.forEach(g=> g.rows.forEach(r=>{
+    const key = trim(r.productDescription || r.productCode || r.description).toLowerCase() || '—';
+    const m = map[key] || (map[key] = {productCode:r.productCode, productDescription:r.productDescription, description:r.description, requested:0, received:0, shortage:0, sites:0, shortSites:[]});
+    m.requested += r.requested; m.received += r.received; m.shortage += r.shortage; m.sites++;
+    if(r.shortage>0) m.shortSites.push(`${g.site} (${r.shortage})`);
+  }));
+  const mats = Object.values(map).sort((a,b)=> b.shortage-a.shortage || String(a.productDescription||a.productCode).localeCompare(String(b.productDescription||b.productCode)));
+  const withRows = groups.filter(g=>g.rows.length);
+  const totals = {sites:groups.length, sitesWithRows:withRows.length, sitesShort:groups.filter(g=>g.shortage>0).length,
+    items:groups.reduce((s,g)=>s+g.rows.length,0), requested:groups.reduce((s,g)=>s+g.requested,0), received:groups.reduce((s,g)=>s+g.received,0), shortage:groups.reduce((s,g)=>s+g.shortage,0)};
+  const q0 = trim(M.search);
+  const scope = [M.shortOnly?'المواد الناقصة فقط':'', q0?`بحث: «${q0}»`:''].filter(Boolean).join(' — ');
+  return {groups, mats, totals, scope, view:M.view};
+}
+/* ---- HTML (print=true للطباعة بأسلوب .sr، وإلا للشاشة) ---- */
+function sidrMultiHtml(rep, print){
+  const B = print ? sidrReportBdi : esc;
+  const tcls = print ? 'sr-table' : 'data';
+  const sub = t=>`<div class="${print?'sch-sub':'sch-sub-s'}">${t}</div>`;
+  const stTxt = r=> r.status==='ناقص'?'ناقص':r.status==='زيادة'?'زيادة':'مكتمل';
+  const stCell = r=> print ? stTxt(r) : (r.status==='ناقص'?'<span class="pill warn">ناقص</span>':r.status==='زيادة'?'<span class="pill bad">زيادة</span>':'<span class="pill ok">مكتمل</span>');
+  const gStat = g=> print ? g.status : (g.status==='ناقص'?'<span class="pill warn">ناقص</span>':g.status==='مكتمل'?'<span class="pill ok">مكتمل</span>':`<span class="desc">${g.status}</span>`);
+  const diff = r=> r.shortage>0?r.shortage:(r.surplus>0?'+'+r.surplus:'0');
+  const t = rep.totals;
+  const cgS = print ? '<colgroup><col style="width:34%"><col style="width:12%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:12%"></colgroup>' : '';
+  const sumRows = rep.groups.map(g=>`<tr class="${g.shortage>0?'short':''}"><td>${B(g.site)}</td><td class="n">${g.rows.length}</td><td class="n">${g.requested}</td><td class="n">${g.received}</td><td class="n ${g.shortage>0&&!print?'tag-warn':''}">${g.shortage}</td><td class="${print?'c':''}">${gStat(g)}</td></tr>`).join('');
+  let html = (print
+      ? `<div class="sr-site"><b>مراجعة SID — ${t.sites} موقع</b></div>${rep.scope?`<div class="sr-note">${esc(rep.scope)}</div>`:''}`
+      : '')
+    + sub('ملخص المواقع')
+    + `<table class="${tcls}">${cgS}<thead><tr><th>الموقع</th><th>عدد الأصناف</th><th>المطلوب</th><th>المستلم</th><th>النقص</th><th>الحالة</th></tr></thead><tbody>${sumRows}
+       <tr class="sch-total"><td><b>الإجمالي</b></td><td class="n">${t.items}</td><td class="n">${t.requested}</td><td class="n">${t.received}</td><td class="n">${t.shortage}</td><td></td></tr></tbody></table>`;
+  if(rep.view==='materials'){
+    const cg = print ? '<colgroup><col style="width:12%"><col style="width:17%"><col style="width:23%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:17%"></colgroup>' : '';
+    const rows = rep.mats.map(m=>`<tr class="${m.shortage>0?'short':''}"><td>${B(m.productCode)}</td><td>${B(m.productDescription)}</td><td>${B(m.description)}</td><td class="n">${m.requested}</td><td class="n">${m.received}</td><td class="n ${m.shortage>0&&!print?'tag-warn':''}">${m.shortage}</td><td class="n">${m.sites}</td><td>${B(m.shortSites.join('، '))}</td></tr>`).join('')
+      || `<tr><td class="c" colspan="8">لا توجد نتائج مطابقة</td></tr>`;
+    html += sub('ملخص حسب المادة (مجمّع على المواقع المحددة)')
+      + `<table class="${tcls}">${cg}<thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>إجمالي المطلوب</th><th>إجمالي المستلم</th><th>إجمالي النقص</th><th>عدد المواقع</th><th>المواقع الناقصة (النقص)</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    const cg = print ? '<colgroup><col style="width:14%"><col style="width:19%"><col style="width:29%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:10%"></colgroup>' : '';
+    const body = rep.groups.filter(g=>g.rows.length).map(g=>
+      `<tr class="sr-grp"><td colspan="7">${B(g.site)} — ${g.rows.length} صنف — مطلوب ${g.requested} / مستلم ${g.received} / نقص ${g.shortage}${print?'':` <button type="button" class="secondary btn-open" data-opensite="${esc(g.site)}">فتح الموقع</button>`}</td></tr>`
+      + g.rows.map(r=>`<tr class="${r.status==='ناقص'?'short':''}"><td>${B(r.productCode)}</td><td>${B(r.productDescription)}</td><td>${B(r.description)}</td><td class="n">${r.requested}</td><td class="n">${r.received}</td><td class="n">${diff(r)}</td><td class="${print?'c':''}">${stCell(r)}${r.note?` <span class="${print?'sr-rnote':'or-hint'}">(${B(r.note)})</span>`:''}</td></tr>`).join('')
+    ).join('') || `<tr><td class="c" colspan="7">لا توجد نتائج مطابقة في المواقع المحددة</td></tr>`;
+    html += sub('تفصيل المواد لكل موقع')
+      + `<table class="${tcls}">${cg}<thead><tr><th>Product code</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم</th><th>النقص/الزيادة</th><th>الحالة</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+  if(print) html = `<div class="sr-wrap">${html}<div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`;
+  return html;
+}
+/* ---- Excel ---- */
+function sidrMultiExport(rep){
+  const diff = r=> r.shortage>0?r.shortage:(r.surplus>0?('+'+r.surplus):0);
+  const t = rep.totals;
+  const sumAoa = [['الموقع','عدد الأصناف','المطلوب','المستلم','النقص','الحالة'], ...rep.groups.map(g=>[g.site, g.rows.length, g.requested, g.received, g.shortage, g.status]), [], ['الإجمالي', t.items, t.requested, t.received, t.shortage, '']];
+  const detAoa = [['الموقع','Product code','Product description','Description','المطلوب','المستلم','النقص/الزيادة','الحالة']];
+  rep.groups.forEach(g=> g.rows.forEach(r=> detAoa.push([g.site, r.productCode, r.productDescription, r.description, r.requested, r.received, diff(r), r.status])));
+  const matAoa = [['Product code','Product description','Description','إجمالي المطلوب','إجمالي المستلم','إجمالي النقص','عدد المواقع','المواقع الناقصة (النقص)'], ...rep.mats.map(m=>[m.productCode, m.productDescription, m.description, m.requested, m.received, m.shortage, m.sites, m.shortSites.join('، ')])];
+  downloadWorkbook([
+    {name:'ملخص المواقع', ws: aoaSheet(sumAoa,[24,14,14,14,14,14])},
+    {name:'تفصيل المواد', ws: aoaSheet(detAoa,[22,16,28,34,12,12,14,12])},
+    {name:'ملخص حسب المادة', ws: aoaSheet(matAoa,[16,28,34,14,14,14,12,50])},
+  ], `مراجعة_SID_${t.sites}_مواقع${rep.scope?'_'+(SIDR_MULTI.shortOnly?'نواقص':'بحث'):''}_${todayStr()}.xlsx`);
+}
+/* ---- الطباعة: نفس أسلوب تقرير الموقع (هوامش 10mm في كل صفحة، بلا ترويسة/تذييل المتصفح) لكن بتدفّق متعدد الصفحات ---- */
+async function sidrPrintFlowHtml(html, title){
+  const old = document.getElementById('printRoot'); if(old) old.remove();
+  const div = document.createElement('div'); div.id = 'printRoot'; div.className = 'sr sch';
+  div.innerHTML = `<table class="sr-pg"><thead><tr><td><div class="sr-pg-sp"></div></td></tr></thead><tbody><tr><td class="sr-pg-body">${html}</td></tr></tbody><tfoot><tr><td><div class="sr-pg-sp"></div></td></tr></tfoot></table>`;
+  document.body.appendChild(div);
+  let st = document.getElementById('sidrPageStyle'); if(st) st.remove();
+  st = document.createElement('style'); st.id = 'sidrPageStyle';
+  st.textContent = `@media print{@page{size:A4 portrait;margin:0;} #printRoot.sch{font-size:10pt;}}`;
+  document.head.appendChild(st);
+  const prevTitle = document.title; if(title) document.title = title;
+  try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
+  document.body.classList.add('printing-sidr');
+  const done = ()=>{ document.title = prevTitle; sidrCleanupPrint(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(()=>{ try{ window.print(); }catch(e){ done(); } }, 60);
+}
+/* ---- الواجهة ---- */
+function renderSidrMultiView(el){
+  const M = SIDR_MULTI;
+  const all = sidrSitesList();
+  Array.from(M.sel).forEach(s=>{ if(!all.includes(s)) M.sel.delete(s); });
+  el.innerHTML = `
+    <div class="panel">
+      <h2>مراجعة عدة مواقع</h2>
+      <div class="desc">حدّد المواقع التي تريد فحصها دفعة واحدة (بالنقر أو بلصق قائمة أسماء)، ثم ابحث بالمادة، وشاهد النواقص، واطبع أو صدّر تقريراً لها. تعديل خانة المستلم يبقى من وضع «موقع واحد».</div>
+      <div class="grid2">
+        <input type="text" id="msFilter" autocomplete="off" placeholder="فلترة قائمة المواقع بالاسم…" value="${esc(M.filter)}">
+        <input type="text" id="msSearch" autocomplete="off" placeholder="ابحث باسم المادة أو الكود ضمن المواقع المحددة…" value="${esc(M.search)}">
+      </div>
+      <div class="btnrow" style="margin-top:10px;">
+        <button type="button" class="secondary" id="msAll">تحديد كل المعروض</button>
+        <button type="button" class="secondary" id="msShortSites">تحديد المواقع الناقصة (من المعروض)</button>
+        <button type="button" class="secondary" id="msNone">مسح التحديد</button>
+        <button type="button" class="secondary" id="msPasteToggle">📋 لصق قائمة مواقع</button>
+      </div>
+      <div id="msPasteBox" style="display:none;margin-top:8px;">
+        <textarea id="msPasteTxt" rows="4" style="width:100%;" placeholder="الصق أسماء المواقع — موقع في كل سطر أو مفصولة بفواصل"></textarea>
+        <div class="btnrow" style="margin-top:6px;"><button type="button" class="primary" id="msPasteApply">تحديد هذه المواقع</button></div>
+        <div id="msPasteMsg"></div>
+      </div>
+      <div class="desc" style="margin-top:8px;" id="msInfo"></div>
+      <div class="msel-list" id="msList"></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;"><input type="checkbox" id="msShortOnly" ${M.shortOnly?'checked':''}> إظهار المواد الناقصة فقط</label>
+    </div>
+    <div id="msDetailArea"></div>`;
+  const normName = v=>trim(v).replace(/\s+/g,' ').toLowerCase();
+  const shortCount = s=>{ const imp = sidrImportForSite(s); return imp ? sidrRowsWithStatus(imp.rows).filter(r=>r.status==='ناقص').length : 0; };
+  const visible = ()=>{ const n = normName(M.filter); return n ? all.filter(s=>normName(s).includes(n)) : all; };
+  const syncInfo = ()=>{
+    document.getElementById('msInfo').innerHTML = `المحدد: <b>${M.sel.size}</b> من ${all.length} موقع${M.filter?` — المعروض بالفلتر: ${visible().length}`:''}`;
+    const nav = document.getElementById('sidrMultiNavCnt'); if(nav) nav.textContent = M.sel.size ? `(${M.sel.size})` : '';
+  };
+  const renderList = ()=>{
+    const vis = visible();
+    document.getElementById('msList').innerHTML = vis.map(s=>{ const c = shortCount(s);
+      return `<label class="msel-item ${M.sel.has(s)?'on':''}"><input type="checkbox" data-site="${esc(s)}" ${M.sel.has(s)?'checked':''}><b>${esc(s)}</b><span class="rem">${c?`نواقص: ${c}`:'مكتمل'}</span></label>`; }).join('')
+      || `<div class="empty" style="padding:12px;">لا توجد مواقع مطابقة</div>`;
+    syncInfo();
+  };
+  const refresh = ()=>{ renderList(); renderSidrMultiDetail(); };
+  document.getElementById('msList').addEventListener('change', e=>{
+    const chk = e.target.closest('input[data-site]'); if(!chk) return;
+    if(chk.checked) M.sel.add(chk.dataset.site); else M.sel.delete(chk.dataset.site);
+    chk.closest('.msel-item').classList.toggle('on', chk.checked);
+    syncInfo(); renderSidrMultiDetail();
+  });
+  document.getElementById('msFilter').addEventListener('input', e=>{ M.filter = e.target.value; renderList(); });
+  document.getElementById('msSearch').addEventListener('input', debounce(()=>{ M.search = document.getElementById('msSearch').value; renderSidrMultiDetail(); }));
+  document.getElementById('msShortOnly').addEventListener('change', e=>{ M.shortOnly = e.target.checked; renderSidrMultiDetail(); });
+  document.getElementById('msAll').addEventListener('click', ()=>{ visible().forEach(s=>M.sel.add(s)); refresh(); });
+  document.getElementById('msShortSites').addEventListener('click', ()=>{ visible().filter(s=>shortCount(s)>0).forEach(s=>M.sel.add(s)); refresh(); });
+  document.getElementById('msNone').addEventListener('click', ()=>{ M.sel.clear(); refresh(); });
+  document.getElementById('msPasteToggle').addEventListener('click', ()=>{ const b = document.getElementById('msPasteBox'); b.style.display = b.style.display==='none'?'block':'none'; });
+  document.getElementById('msPasteApply').addEventListener('click', ()=>{
+    const names = document.getElementById('msPasteTxt').value.split(/[\n\r,;،\t]+/).map(normName).filter(Boolean);
+    const byKey = new Map(all.map(s=>[normName(s), s]));
+    const found = [], missing = [];
+    Array.from(new Set(names)).forEach(n=>{ const s = byKey.get(n); if(s){ M.sel.add(s); found.push(s); } else missing.push(n); });
+    showMsg('msPasteMsg', missing.length?'warn':'ok', names.length ? `تم تحديد ${found.length} موقع${missing.length?` — غير موجودة في SID (${missing.length}): ${missing.join('، ')}`:''}.` : 'لم تُدخل أي أسماء.');
+    refresh();
+  });
+  refresh();
+}
+function renderSidrMultiDetail(){
+  const area = document.getElementById('msDetailArea'); if(!area) return;
+  const M = SIDR_MULTI;
+  if(!M.sel.size){ area.innerHTML = `<div class="panel"><div class="msg info">حدّد موقعاً واحداً أو أكثر من القائمة أعلاه لعرض موادها ونواقصها.</div></div>`; return; }
+  const rep = sidrMultiBuild(), t = rep.totals;
+  area.innerHTML = `<div class="panel">
+      <h2>نتيجة مراجعة ${t.sites} موقع</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="num">${t.sites}</div><div class="lbl">عدد المواقع</div></div>
+        <div class="kpi ${t.sitesShort>0?'warn':''}"><div class="num">${t.sitesShort}</div><div class="lbl">مواقع بها نواقص</div></div>
+        <div class="kpi"><div class="num">${t.requested}</div><div class="lbl">إجمالي المطلوب</div></div>
+        <div class="kpi"><div class="num">${t.received}</div><div class="lbl">إجمالي المستلم</div></div>
+        <div class="kpi ${t.shortage>0?'warn':''}"><div class="num">${t.shortage}</div><div class="lbl">إجمالي النقص</div></div>
+      </div>
+      <nav class="tabs" style="margin:10px 0;">
+        <button type="button" data-msview="sites" class="${M.view==='sites'?'active':''}">📍 تفصيل لكل موقع</button>
+        <button type="button" data-msview="materials" class="${M.view==='materials'?'active':''}">📦 ملخص حسب المادة</button>
+      </nav>
+      <div class="btnrow">
+        <button class="secondary" id="btnMsPrint">🖨 طباعة التقرير</button>
+        <button class="secondary" id="btnMsExport">📥 تصدير تقرير Excel</button>
+      </div>
+      <div class="tablewrap" style="max-height:70vh;margin-top:10px;" id="msTableWrap">${sidrMultiHtml(rep, false)}</div>
+    </div>`;
+  area.querySelectorAll('[data-msview]').forEach(b=>b.addEventListener('click', ()=>{ if(M.view===b.dataset.msview) return; M.view = b.dataset.msview; renderSidrMultiDetail(); }));
+  document.getElementById('btnMsPrint').addEventListener('click', ()=> sidrPrintFlowHtml(sidrMultiHtml(sidrMultiBuild(), true), `مراجعة SID — ${t.sites} موقع`));
+  document.getElementById('btnMsExport').addEventListener('click', ()=> sidrMultiExport(sidrMultiBuild()));
+  area.querySelectorAll('[data-opensite]').forEach(b=>b.addEventListener('click', ()=>{
+    SIDR_SELECTED_SITE = b.dataset.opensite; SIDR_SITES_MODE = 'single';
+    const root = document.getElementById('sidrSitesModeNav'); renderSidrSitesView(root.parentElement);
+  }));
 }
 
 /* ============================================================
