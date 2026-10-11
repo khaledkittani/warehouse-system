@@ -1246,13 +1246,22 @@ async function pollSupabaseForRemoteChanges(force){
     }
     SUPABASE_ONLINE = true;
     SUPABASE_LAST_SYNC_TIME = nowTimeStr();
-    if(changed && typeof renderApp==='function'){ renderApp(); }
+    if(changed && typeof renderApp==='function'){
+      /* إن بدأ المستخدم الكتابة في خانة أثناء انتظار الاستطلاع فلا نعيد رسم الصفحة (فهذا يُفقد الخانة التركيز ويُعيد لوحة مفاتيح الهاتف إلى الحروف)؛ البيانات حُدّثت، ويُؤجَّل الرسم إلى ما بعد مغادرة الخانة */
+      if(!force && isUserActivelyTyping()){ SUPABASE_RENDER_DEFERRED = true; updateSaveIndicator(); }
+      else { SUPABASE_RENDER_DEFERRED = false; renderApp(); }
+    }
     else { updateSaveIndicator(); }
   }catch(e){
     SUPABASE_ONLINE = false;
     updateSaveIndicator();
   }
 }
+let SUPABASE_RENDER_DEFERRED = false;
+document.addEventListener('focusout', ()=>{
+  if(!SUPABASE_RENDER_DEFERRED) return;
+  setTimeout(()=>{ if(SUPABASE_RENDER_DEFERRED && !isUserActivelyTyping() && typeof renderApp==='function'){ SUPABASE_RENDER_DEFERRED = false; renderApp(); } }, 400);
+});
 function startSupabasePolling(){
   if(!SUPABASE_ENABLED || SUPABASE_POLL_TIMER) return;
   SUPABASE_POLL_TIMER = setInterval(pollSupabaseForRemoteChanges, SUPABASE_POLL_INTERVAL_MS);
@@ -4709,7 +4718,7 @@ function renderTagCaptureTab(el){
         <div class="tl-block">
           <label class="flabel">📍 الموقع الحالي</label>
           <div class="qm-search-wrap">
-            <input type="text" id="tlSite" class="tl-site-input" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}" autocomplete="off">
+            <input type="text" id="tlSite" class="tl-site-input" placeholder="مثال: Site A" value="${esc(TAGLOG_SITE)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
             <div id="tlSiteDropdown"></div>
           </div>
           <div id="tlSiteWarning"></div>
