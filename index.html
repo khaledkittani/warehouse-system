@@ -3906,17 +3906,17 @@ function taglogOpenEditModal(id, onChanged){
   });
 }
 /* ---- كل التاجات المسجَّلة، معروضة كاملة في نفس الصفحة (بدون فتح نافذة منفصلة) مع بحث حي وفرز بالأعمدة ---- */
-function renderTagLogRecordsPanel(){
+/* onlyResults=true (أثناء الكتابة في خانة البحث): يُحدَّث العنوان والجدول فقط وتبقى خانة البحث نفسها في مكانها دون إعادة إنشاء،
+   كي لا تفقد التركيز ولا تعود لوحة مفاتيح الهاتف من الأرقام إلى الحروف عند كل حرف. */
+function renderTagLogRecordsPanel(onlyResults){
   const panel = document.getElementById('tlRecordsPanel');
   if(!panel) return;
   const rows = taglogFilteredSortedRows();
   const total = STATE.tagLog.length;
   const sortArrow = col => TAGLOG_SORT_COL===col ? (TAGLOG_SORT_DIR==='asc' ? ' ▲' : ' ▼') : '';
   const emptyMsg = (total && !rows.length) ? 'لا توجد نتائج مطابقة للبحث' : undefined;
-  panel.innerHTML = `
-    <h2 style="margin:0 0 10px;">📋 كل التاجات المسجَّلة (${rows.length}${rows.length!==total?` من ${total}`:''})</h2>
-    <input type="text" id="tlRecordsFilter" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TAGLOG_FILTER_QUERY)}" style="margin-bottom:10px;">
-    <div class="tablewrap"><table class="data" id="tlRecentTable">
+  const headHtml = `📋 كل التاجات المسجَّلة (${rows.length}${rows.length!==total?` من ${total}`:''})`;
+  const tableHtml = `<div class="tablewrap"><table class="data" id="tlRecentTable">
       <thead><tr>
         <th data-sort="tag" style="cursor:pointer;user-select:none;">التاج${sortArrow('tag')}</th>
         <th data-sort="material" style="cursor:pointer;user-select:none;">اسم القطعة${sortArrow('material')}</th>
@@ -3926,23 +3926,33 @@ function renderTagLogRecordsPanel(){
         <th>إجراءات</th>
       </tr></thead>
       <tbody>${taglogRenderRowsHtml(rows, emptyMsg)}</tbody>
-    </table></div>
+    </table></div>`;
+  const wireResults = ()=>{
+    panel.querySelectorAll('[data-sort]').forEach(th=>{
+      th.addEventListener('click', ()=>taglogSetSort(th.dataset.sort));
+    });
+    taglogWireRowActions(document.getElementById('tlRecentTable'), renderTagLogRecordsPanel);
+  };
+  const keepInp = document.getElementById('tlRecordsFilter');
+  const headEl = document.getElementById('tlRecordsHead'), boxEl = document.getElementById('tlRecordsTableBox');
+  if(onlyResults===true && keepInp && panel.contains(keepInp) && headEl && boxEl){
+    headEl.innerHTML = headHtml;
+    boxEl.innerHTML = tableHtml;
+    wireResults();
+    return;
+  }
+  panel.innerHTML = `
+    <h2 style="margin:0 0 10px;" id="tlRecordsHead">${headHtml}</h2>
+    <input type="text" id="tlRecordsFilter" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TAGLOG_FILTER_QUERY)}" style="margin-bottom:10px;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div id="tlRecordsTableBox">${tableHtml}</div>
   `;
   const filterInp = document.getElementById('tlRecordsFilter');
-  const debouncedRecordsFilterRender = debounce(()=>{
-    const pos = filterInp.selectionStart;
-    renderTagLogRecordsPanel();
-    const f2 = document.getElementById('tlRecordsFilter');
-    if(f2){ f2.focus(); try{ f2.setSelectionRange(pos, pos); }catch(e){} }
-  });
+  const debouncedRecordsFilterRender = debounce(()=>{ renderTagLogRecordsPanel(true); });
   filterInp.addEventListener('input', ()=>{
     TAGLOG_FILTER_QUERY = filterInp.value;
     debouncedRecordsFilterRender();
   });
-  panel.querySelectorAll('[data-sort]').forEach(th=>{
-    th.addEventListener('click', ()=>taglogSetSort(th.dataset.sort));
-  });
-  taglogWireRowActions(document.getElementById('tlRecentTable'), renderTagLogRecordsPanel);
+  wireResults();
 }
 
 /* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
