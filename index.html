@@ -1172,6 +1172,7 @@ async function loadAllState(){
 async function saveState(keys){
   const list = keys || Object.keys(STORE_KEYS);
   let allOk = true;
+  let remoteAll = true;   // هل أُكِّد الحفظ على قاعدة البيانات المشتركة فعلاً (وليس نسخة محلية بديلة فقط)
   for(const key of list){
     let ok = false;
     if(SUPABASE_ENABLED){
@@ -1189,6 +1190,7 @@ async function saveState(keys){
       }
     }
     if(!ok){
+      if(SUPABASE_ENABLED) remoteAll = false;
       ok = await storageSet(STORE_KEYS[key], JSON.stringify(STATE[key]));
     } else {
       // نسخة محلية إضافية بصمت كأمان إضافي فقط — لا تؤثر على نجاح الحفظ الأساسي عبر Supabase
@@ -1200,6 +1202,7 @@ async function saveState(keys){
   LAST_SAVE_TIME = new Date().toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   updateSaveIndicator();
   if(typeof maybeAutoBackup==='function'){ maybeAutoBackup(); } // نسخة تلقائية خفيفة ومُقيَّدة زمنياً — لا تنتظرها حتى لا تُبطئ الحفظ
+  return {ok:allOk, remote:remoteAll};   // قيمة مُرجَعة إضافية فقط (بقية المستدعين يتجاهلونها)
 }
 
 /* فحص دوري: هل حدّث مستخدم آخر البيانات على Supabase؟ — لا يُطبَّق أثناء الكتابة النشطة في أي خانة،
@@ -1212,7 +1215,8 @@ function isUserActivelyTyping(){
 }
 function hasUnfinishedEditingState(){
   return !!((typeof GOODS_BATCH!=='undefined' && GOODS_BATCH) || (typeof RESTORE_PENDING!=='undefined' && RESTORE_PENDING) ||
-    (typeof SIDR_BATCH!=='undefined' && SIDR_BATCH && SIDR_BATCH.length));
+    (typeof SIDR_BATCH!=='undefined' && SIDR_BATCH && SIDR_BATCH.length) ||
+    (typeof taglogQueueActive==='function' && taglogQueueActive()));   // تاجات بانتظار تأكيد الحفظ: لا يُستبدل STATE.tagLog من الخادم قبل اكتمالها
 }
 async function pollSupabaseForRemoteChanges(force){
   if(!SUPABASE_ENABLED) return;
@@ -3747,13 +3751,15 @@ function taglogDismantledDateForMaterial(materialName){
   });
   return latest;
 }
-async function taglogAddRow(tag, materialName, type, siteOverride, skipSave){
-  const site = trim(siteOverride!==undefined ? siteOverride : TAGLOG_SITE); // siteOverride/skipSave: يُستخدمان فقط من "رفع Excel" — الاستدعاء اليدوي لم يتغيّر
+/* إنشاء السجل وإضافته إلى STATE.tagLog بشكل متزامن بالكامل (بلا أي await) — فيُحسم التكرار فوراً حتى لو أُدخل التاج التالي
+   مباشرة أو تكررت الضغطة. الحفظ الفعلي منفصل عنه (انظر قائمة الانتظار TAGQ أدناه). */
+function taglogMakeRow(tag, materialName, type, siteOverride){
+  const site = trim(siteOverride!==undefined ? siteOverride : TAGLOG_SITE);
   const tagVal = trim(tag);
   if(!site) return {ok:false, msg:'اكتب اسم الموقع أولاً.'};
   if(!materialName) return {ok:false, msg:'اختر المادة أولاً من نتائج البحث.'};
-  if(!tagVal) return {ok:false, msg:'أدخل أو امسح رقم التاج أولاً.'};
-  if(taglogIsDuplicate(tagVal)) return {ok:false, msg:`التاج "${tagVal}" مسجَّل مسبقاً في رصد التاجات — لا يمكن تسجيله مرة أخرى.`};
+  if(!tagVal) return {ok:false, msg:'أدخل أو امسح رقم التاج أولاً.', empty:true};
+  if(taglogIsDuplicate(tagVal)) return {ok:false, msg:`التاج "${tagVal}" مسجَّل مسبقاً في رصد التاجات — لا يمكن تسجيله مرة أخرى.`, duplicate:true};
   const rowType = (type==='Dismantled') ? 'Dismantled' : 'Installed';
   let installDate = todayStr();
   if(rowType==='Dismantled'){
@@ -3771,9 +3777,70 @@ async function taglogAddRow(tag, materialName, type, siteOverride, skipSave){
     createdAt: Date.now(),
   };
   STATE.tagLog.push(row);
-  if(!skipSave) await saveState(['tagLog']);
   return {ok:true, row};
 }
+async function taglogAddRow(tag, materialName, type, siteOverride, skipSave){
+  // siteOverride/skipSave: يُستخدمان فقط من "رفع Excel" — الاستدعاء اليدوي يمرّ عبر قائمة الانتظار (taglogHandleSave)
+  const res = taglogMakeRow(tag, materialName, type, siteOverride);
+  if(!res.ok) return res;
+  if(!skipSave) await taglogSaveSerial();
+  return res;
+}
+/* حفظ tagLog بالتسلسل: كل عملية حفظ تنتظر السابقة وتأخذ لقطة البيانات عند دورها (الأحدث دائماً)، فلا يمكن لحفظ قديم متأخر أن يستبدل بيانات أحدث على الخادم */
+let TAGLOG_SAVE_CHAIN = Promise.resolve();
+function taglogSaveSerial(){
+  const p = TAGLOG_SAVE_CHAIN.then(()=>saveState(['tagLog']));
+  TAGLOG_SAVE_CHAIN = p.catch(()=>{});
+  return p;
+}
+/* ---- قائمة انتظار حفظ التاجات اليدوية ----
+   الإدخال (خانة التاج) منفصل تماماً عن الحفظ: كل تاج يُعتمد فوراً كسجل مستقل ويُضاف لقائمة الانتظار، وتُصفَّر الخانة في الحال لاستقبال التالي.
+   يعمل كاتب واحد فقط في كل مرة؛ يحفظ لقطة tagLog الحالية (فتُدمج عدة تاجات متتالية في عملية كتابة واحدة)، ولا يُعتبر التاج مؤكَّداً
+   إلا بعد نجاح الحفظ على قاعدة البيانات. عند الفشل تبقى السجلات في الذاكرة (ونسخة محلية بديلة) وتُعاد المحاولة تلقائياً بفواصل متزايدة. */
+const TAGQ = {pending:[], saving:false, timer:null, retryN:0, lastTag:'', localOnly:false, hardFail:false};
+function taglogQueueActive(){ return TAGQ.saving || TAGQ.pending.length>0; }
+function taglogQueuePaint(){
+  const n = TAGQ.pending.length;
+  if(!n && !TAGQ.saving){
+    if(TAGQ.lastTag){ taglogSetFlash(`تم تسجيل التاج "${TAGQ.lastTag}" وتأكيد حفظه.`); setTimeout(()=>{ if(!taglogQueueActive() && TAGLOG_FLASH_KIND==='ok') taglogSetFlash(null); }, 3500); }
+    return;
+  }
+  if(TAGQ.retryN>0){
+    taglogSetFlash(TAGQ.hardFail
+      ? `⚠️ تعذّر حفظ ${n} تاج — هي محفوظة مؤقتاً في هذه الصفحة فقط. لا تُغلق الصفحة؛ تتم إعادة المحاولة تلقائياً…`
+      : `⚠️ ${n} تاج محفوظة محلياً ولم يُؤكَّد حفظها على قاعدة البيانات بعد — تتم إعادة المحاولة تلقائياً…`, 'warn');
+  } else {
+    taglogSetFlash(`تم اعتماد التاج "${TAGQ.lastTag}" — جارِ حفظ ${n} تاج في الخلفية…`, 'info');
+  }
+}
+async function taglogQueueRun(){
+  if(TAGQ.saving) return;
+  if(TAGQ.timer){ clearTimeout(TAGQ.timer); TAGQ.timer = null; }
+  TAGQ.saving = true;
+  try{
+    while(TAGQ.pending.length){
+      const batch = TAGQ.pending.slice();
+      let res = null;
+      try{ res = await taglogSaveSerial(); }catch(e){ console.error('فشل حفظ التاجات:', e); }
+      if(res && res.ok && res.remote){
+        TAGQ.pending = TAGQ.pending.filter(id=>!batch.includes(id));   // مؤكَّد على قاعدة البيانات
+        TAGQ.retryN = 0; TAGQ.hardFail = false;
+      } else {
+        TAGQ.retryN++; TAGQ.hardFail = !(res && res.ok);
+        const wait = Math.min(2000*Math.pow(2, TAGQ.retryN-1), 15000);
+        TAGQ.timer = setTimeout(()=>{ TAGQ.timer = null; taglogQueueRun(); }, wait);
+        break;
+      }
+      taglogQueuePaint();
+    }
+  } finally {
+    TAGQ.saving = false;
+  }
+  taglogQueuePaint();
+}
+window.addEventListener('beforeunload', (e)=>{
+  if(taglogQueueActive()){ e.preventDefault(); e.returnValue = ''; }   // تاجات لم يُؤكَّد حفظها بعد
+});
 
 /* ---- تعديل/حذف سجل مسجَّل مسبقاً (المواد المسجَّلة في رصد التاجات قابلة للتعديل والحذف) ---- */
 async function taglogUpdateRow(id, updates){
@@ -3794,14 +3861,14 @@ async function taglogUpdateRow(id, updates){
   row.type = (updates.type==='Dismantled') ? 'Dismantled' : 'Installed';
   row.siteName = siteVal;
   if(dateVal) row.installDate = dateVal;
-  await saveState(['tagLog']);
+  await taglogSaveSerial();
   return {ok:true, row};
 }
 async function taglogDeleteRow(id){
   const idx = STATE.tagLog.findIndex(r=>r.id===id);
   if(idx===-1) return {ok:false, msg:'السجل غير موجود (ربما حُذف مسبقاً).'};
   STATE.tagLog.splice(idx,1);
-  await saveState(['tagLog']);
+  await taglogSaveSerial();
   return {ok:true};
 }
 /* عناصر جدول موحّدة (السجل الكامل المعروض في نفس الصفحة) مع أزرار تعديل/حذف لكل سجل */
@@ -4248,15 +4315,26 @@ function taglogChangeMaterial(){
 /* يعرض/يحدّث رسالة النجاح داخل مكانها الثابت في الشاشة (#tlFlash) مباشرة عبر DOM، دون إعادة
    رسم بقية شاشة رصد التاجات — يُستخدم في حلقة التسجيل المتكررة (تسجيل تاج تلو الآخر) حيث تُستدعى
    هذه الدالة عشرات/مئات المرات أثناء العمل. */
-function taglogSetFlash(msg){
-  TAGLOG_FLASH_MSG = msg;
-  const el = document.getElementById('tlFlash');
-  if(el) el.innerHTML = msg ? `<div class="msg ok" style="margin-bottom:0;">✅ ${esc(msg)}</div>` : '';
+function taglogFlashHtml(msg, kind){
+  return msg ? `<div class="msg ${kind==='warn'?'warn':(kind==='info'?'info':'ok')}" style="margin-bottom:0;">${kind==='warn'?'':(kind==='info'?'⏳ ':'✅ ')}${esc(msg)}</div>` : '';
 }
-async function taglogHandleSave(){
+let TAGLOG_FLASH_KIND = 'ok';
+function taglogSetFlash(msg, kind){
+  TAGLOG_FLASH_MSG = msg; TAGLOG_FLASH_KIND = kind || 'ok';
+  const el = document.getElementById('tlFlash');
+  if(el) el.innerHTML = taglogFlashHtml(msg, TAGLOG_FLASH_KIND);
+}
+/* إدخال سريع: كل ما يجري هنا متزامن (قراءة الخانة ← التحقق ← إنشاء السجل ← تصفير الخانة) قبل أي انتظار، ثم يُسلَّم الحفظ لقائمة الانتظار
+   في الخلفية — فيمكن إدخال التاج التالي فوراً دون انتظار انتهاء الحفظ، ولا يمكن لحفظ سابق أن يمسح أو يدمج قيمة أحدث. */
+let TAGLOG_PANEL_TIMER = null;
+function taglogSchedulePanelRender(){
+  if(TAGLOG_PANEL_TIMER) return;
+  TAGLOG_PANEL_TIMER = setTimeout(()=>{ TAGLOG_PANEL_TIMER = null; renderTagLogRecordsPanel(true); }, 150);   // دمج عدة تاجات متتالية في إعادة رسم واحدة للقائمة
+}
+function taglogHandleSave(){
   const tagInp = document.getElementById('tlTagInput');
-  const btn = document.getElementById('btnTlSave');
-  const tagVal = tagInp ? tagInp.value : '';
+  const tagVal = tagInp ? trim(tagInp.value) : '';
+  if(!tagVal) return;   // ضغطة Enter/زر على خانة فارغة (مثلاً ضغطة مكررة بعد اعتماد التاج): تُتجاهل بصمت
   // تحقق اسم الموقع مقابل القائمة المعتمدة (إن وُجدت) قبل أي محاولة تسجيل — يمنع اعتماد اسم
   // غير معتمد بتنبيه واضح، مع ترك الحقل كما هو للتصحيح فوراً. لا تأثير على مسار الاستيراد الدفعي.
   if(taglogApprovedSitesList().length && !taglogIsSiteApproved(TAGLOG_SITE)){
@@ -4265,25 +4343,19 @@ async function taglogHandleSave(){
     if(s) s.focus({preventScroll:true});
     return;
   }
-  // مؤشر تحميل فوري فقط أثناء انتظار تأكيد الحفظ الفعلي (Supabase) — لا نُظهر أي نجاح قبل ذلك
-  if(btn){ btn.disabled = true; btn.dataset.origLabel = btn.dataset.origLabel || btn.textContent; btn.textContent = '⏳ جارِ الحفظ…'; }
-  const res = await taglogAddRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
+  const res = taglogMakeRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
   if(!res.ok){
     alert(res.msg);
-    if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origLabel || '✅ تسجيل'; }
     if(tagInp){ tagInp.focus({preventScroll:true}); tagInp.select(); }
     return;
   }
-  // تحديث مستهدف فقط: قائمة التاجات المسجَّلة (والعدّاد المعروض معها) + خانة التاج التالية —
-  // دون إعادة رسم بقية الشاشة (الموقع، الاختصارات، البحث عن المادة) التي لم يتغيّر شيء فيها.
-  // المادة المختارة تبقى كما هي عمداً (لا تُصفَّر) — حتى يسجّل المستخدم عدة تاجات متتالية لنفس
-  // المادة دون إعادة البحث كل مرة؛ فقط خانة التاج تُصفَّر وتُعاد إليها الكتابة فوراً.
-  if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origLabel || '✅ تسجيل'; }
-  if(tagInp) tagInp.value = '';
-  renderTagLogRecordsPanel();
-  taglogSetFlash(`تم تسجيل التاج "${trim(tagVal)}" بنجاح.`);
-  if(tagInp) tagInp.focus({preventScroll:true});
-  setTimeout(()=>{ taglogSetFlash(null); }, 3500);
+  // اعتُمد السجل في الذاكرة بشكل مستقل: صفِّر الخانة فوراً وجهّزها للتاج التالي
+  if(tagInp){ tagInp.value = ''; tagInp.focus({preventScroll:true}); }
+  TAGQ.pending.push(res.row.id);
+  TAGQ.lastTag = res.row.tag;
+  taglogSchedulePanelRender();
+  taglogQueuePaint();
+  taglogQueueRun();   // لا ننتظره
 }
 
 /* ---- قراءة التاج بكاميرا الهاتف (بديل اختياري لجهاز Scanner الفيزيائي) ----
@@ -4720,7 +4792,7 @@ function renderTagCaptureTab(el){
         </div>
       </div>
       <div class="desc">اكتب اسم الموقع مرة واحدة، ابحث عن المادة واخترها، ثم امسح التاج — يُحفظ السجل فوراً وتنتقل تلقائياً لمادة جديدة بنفس الموقع.</div>
-      <div id="tlFlash">${TAGLOG_FLASH_MSG ? `<div class="msg ok" style="margin-bottom:0;">✅ ${esc(TAGLOG_FLASH_MSG)}</div>` : ''}</div>
+      <div id="tlFlash">${taglogFlashHtml(TAGLOG_FLASH_MSG, TAGLOG_FLASH_KIND)}</div>
     </div>
 
     <div class="tl-stage">
