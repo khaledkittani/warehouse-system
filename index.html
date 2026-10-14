@@ -194,6 +194,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   tr.sidr-hl td{background:#fff8dc;}
   .sidr-hl-cell{text-align:center;width:34px;}
+  .sid-jump{position:sticky;top:0;z-index:30;display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:8px 0;margin-bottom:10px;background:var(--paper);border-bottom:1px solid var(--line);}
+  .sid-jump button{padding:7px 14px;font-size:13px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--steel-dark);cursor:pointer;font-weight:600;white-space:nowrap;flex:0 0 auto;}
+  .sid-jump button:hover{background:#eaf3f1;}
+  .sid-sec{margin-bottom:14px;}
+  .sid-sec-head{display:flex;align-items:center;gap:8px;width:100%;text-align:start;padding:11px 14px;font-size:15px;font-weight:800;color:#fff;background:var(--steel-dark,#1f5f5c);border:none;border-radius:var(--radius,8px);cursor:pointer;margin-bottom:8px;}
+  .sid-sec-head:hover{filter:brightness(1.08);}
+  .sid-sec-arrow{display:inline-block;width:16px;}
+  .sid-sec-body[hidden]{display:none;}
   .msel-list{margin-top:10px;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));}
   .msel-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;}
   .msel-item:hover{background:#f6f3ea;}
@@ -1853,10 +1861,13 @@ async function sidrCommitBatch(){
       rawRows: (entry.detection && entry.detection.rawAllRows) || [],
     });
   });
-  await saveState(['sidReview']);
+  const sv = await saveState(['sidReview']);
   const skippedDup = SIDR_BATCH.filter(e=>e.action==='duplicate').length;
+  const records = runnable.reduce((n,e)=>n+e.rows.length, 0);
+  const notImported = SIDR_BATCH.filter(e=>!runnable.includes(e)).map(e=>({file:e.fileName, sheet:e.sheetName, site:e.site,
+    reason: e.error ? ('خطأ: '+e.error) : e.skip ? 'مُتجاهَل بقرارك' : e.needsReview ? 'بحاجة لمراجعة الأعمدة' : e.action==='duplicate' ? 'مكرر (مطابق تماماً لاستيراد سابق)' : e.action==='conflict' ? 'تعارض اسم موقع ضمن الدفعة' : 'غير جاهز'}));
   SIDR_BATCH = [];
-  return {ok:true, importedCount: runnable.length, skippedDup};
+  return {ok:true, importedCount: runnable.length, skippedDup, records, notImported, savedOk: !sv || sv.ok!==false, savedRemote: !sv || sv.remote!==false};
 }
 async function sidrDeleteImport(id){
   const idx = STATE.sidReview.imports.findIndex(imp=>imp.id===id);
@@ -2756,6 +2767,7 @@ function renderAdminMode(root){
       if(ACTIVE_TAB===btn.dataset.tab) return;
       if(ACTIVE_TAB==='tagcapture') taglogStopBarcodeScanner(); // أوقف كاميرا رصد التاجات عند الانتقال لقسم آخر
       ACTIVE_TAB = btn.dataset.tab;
+      adminLastTabSave(ACTIVE_TAB);
       root.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===ACTIVE_TAB));
       renderTabContent();
     });
@@ -5541,27 +5553,78 @@ function renderSidTab(el){
 /* ============================================================
    واجهة مراجعة استلام SID — متعدد الملفات/المواقع
    ============================================================ */
-let SIDR_VIEW = 'upload'; // 'upload' | 'sites' | 'summary' | 'schedule'
+let SIDR_VIEW = 'upload'; // القسم المطلوب إظهاره/فتحه: 'upload' | 'summary' | 'sites' | 'schedule'
 
+/* صفحة SID موحّدة: الأقسام الأربعة (رفع ومعالجة، النواقص، مراجعة حسب الموقع، الجدولة والتقارير الأسبوعية) في صفحة واحدة بدل أربع تبويبات منفصلة.
+   كل قسم يعرض نفس الواجهة السابقة بكل وظائفها دون أي تغيير في منطقها (قراءة الملفات، حساب المستلم/النواقص، التقارير)، ويُرسم عند فتحه فقط. */
+const SIDR_SECTIONS = [
+  {id:'upload',   icon:'⬆️', title:()=>'رفع ومعالجة الملفات',                       render:(el)=>renderSidrUploadView(el)},
+  {id:'summary',  icon:'📊', title:()=>'النواقص — ملخص كل المواقع',                  render:(el)=>renderSidrSummaryView(el)},
+  {id:'sites',    icon:'📍', title:()=>`مراجعة حسب الموقع (${STATE.sidReview.imports.length})`, render:(el)=>renderSidrSitesView(el)},
+  {id:'schedule', icon:'🗓️', title:()=>'جدولة المواقع والتقارير الأسبوعية',          render:(el)=>renderSidrScheduleView(el)},
+];
+function sidrSecOpenState(){
+  let st = {upload:true, summary:true, sites:true, schedule:false};
+  try{ const raw = JSON.parse(localStorage.getItem('wms_sid_sections_open')||'null'); if(raw && typeof raw==='object') st = Object.assign(st, raw); }catch(e){}
+  return st;
+}
+function sidrSecSaveState(st){ try{ localStorage.setItem('wms_sid_sections_open', JSON.stringify(st)); }catch(e){} }
+function sidrRenderSection(id){
+  const sec = SIDR_SECTIONS.find(x=>x.id===id); const body = document.getElementById('sidrSec_'+id);
+  if(!sec || !body) return;
+  sec.render(body);
+}
+function sidrSecHeadHtml(sec, open){
+  return `<span class="sid-sec-arrow">${open?'▾':'▸'}</span><span>${sec.icon} ${esc(sec.title())}</span>`;
+}
+function sidrScrollToSection(id){
+  const box = document.getElementById('sidrSecBox_'+id); if(!box) return;
+  try{ box.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){ box.scrollIntoView(); }
+}
+/* يفتح القسم (ويرسمه إن لم يكن مرسوماً) ثم ينتقل إليه */
+function sidrOpenSection(id, scroll){
+  const st = sidrSecOpenState(); st[id] = true; sidrSecSaveState(st);
+  const box = document.getElementById('sidrSecBox_'+id); if(!box) return;
+  const body = document.getElementById('sidrSec_'+id), head = box.querySelector('.sid-sec-head');
+  const sec = SIDR_SECTIONS.find(x=>x.id===id);
+  if(body.hidden || !body.dataset.rendered){ body.hidden = false; sidrRenderSection(id); body.dataset.rendered = '1'; }
+  if(head) head.innerHTML = sidrSecHeadHtml(sec, true);
+  if(scroll) sidrScrollToSection(id);
+}
+/* إعادة رسم أقسام SID المفتوحة بعد تغيّر البيانات (استيراد، حذف، تعديل...) */
+function sidrRefreshPage(scrollTo){
+  const host = document.getElementById('tabContent'); if(!host) return;
+  renderSidReviewSubview(host);
+  if(scrollTo) setTimeout(()=>sidrScrollToSection(scrollTo), 50);
+}
 function renderSidReviewSubview(el){
+  const st = sidrSecOpenState();
+  if(SIDR_VIEW && st.hasOwnProperty(SIDR_VIEW)) st[SIDR_VIEW] = true;   // القسم المطلوب يُفتح دائماً
   el.innerHTML = `
     <div class="msg info">قسم مستقل تماماً لمراجعة ملفات SID متعددة المواقع والملفات (مقارنة الكمية المطلوبة بالكمية الموجودة فعلياً EXIST IN DWH من نفس الملف) — لا يُنفّذ أي صرف فعلي ولا يُغيّر رصيد المخزون أو سجل صرف SID.</div>
-    <nav class="tabs" style="margin-bottom:14px;">
-      <button type="button" data-sidrview="upload" class="${SIDR_VIEW==='upload'?'active':''}">⬆️ رفع ومعالجة الملفات</button>
-      <button type="button" data-sidrview="sites" class="${SIDR_VIEW==='sites'?'active':''}">📍 مراجعة حسب الموقع (${STATE.sidReview.imports.length})</button>
-      <button type="button" data-sidrview="summary" class="${SIDR_VIEW==='summary'?'active':''}">📊 ملخص النواقص لكل المواقع</button>
-      <button type="button" data-sidrview="schedule" class="${SIDR_VIEW==='schedule'?'active':''}">🗓️ جدولة المواقع والتقارير الأسبوعية</button>
-    </nav>
-    <div id="sidrViewArea"></div>
+    <div class="sid-jump" id="sidJumpBar">
+      ${SIDR_SECTIONS.map(sec=>`<button type="button" data-sidrview="${sec.id}">${sec.icon} ${esc(sec.title())}</button>`).join('')}
+    </div>
+    ${SIDR_SECTIONS.map(sec=>`
+      <section class="sid-sec" id="sidrSecBox_${sec.id}">
+        <button type="button" class="sid-sec-head" data-sidsec="${sec.id}">${sidrSecHeadHtml(sec, !!st[sec.id])}</button>
+        <div class="sid-sec-body" id="sidrSec_${sec.id}" ${st[sec.id]?'':'hidden'}></div>
+      </section>`).join('')}
   `;
-  el.querySelectorAll('[data-sidrview]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ SIDR_VIEW = btn.dataset.sidrview; renderSidReviewSubview(el); });
+  SIDR_SECTIONS.forEach(sec=>{
+    if(st[sec.id]){ sidrRenderSection(sec.id); document.getElementById('sidrSec_'+sec.id).dataset.rendered = '1'; }
   });
-  const area = document.getElementById('sidrViewArea');
-  if(SIDR_VIEW==='sites') renderSidrSitesView(area);
-  else if(SIDR_VIEW==='summary') renderSidrSummaryView(area);
-  else if(SIDR_VIEW==='schedule') renderSidrScheduleView(area);
-  else renderSidrUploadView(area);
+  el.querySelectorAll('[data-sidrview]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ SIDR_VIEW = btn.dataset.sidrview; sidrOpenSection(btn.dataset.sidrview, true); });
+  });
+  el.querySelectorAll('[data-sidsec]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.sidsec, body = document.getElementById('sidrSec_'+id), sec = SIDR_SECTIONS.find(x=>x.id===id);
+      const stNow = sidrSecOpenState();
+      if(body.hidden){ sidrOpenSection(id, false); }
+      else { body.hidden = true; stNow[id] = false; sidrSecSaveState(stNow); btn.innerHTML = sidrSecHeadHtml(sec, false); }
+    });
+  });
 }
 
 /* ---- 1) رفع ومعالجة الملفات ---- */
@@ -5574,35 +5637,147 @@ function renderSidrUploadView(el){
         <label class="flabel">ملف/ملفات SID للمراجعة (.xlsx)</label>
         <input type="file" id="sidrFile" accept=".xlsx,.xls" multiple>
       </div>
+      <div id="sidrFileList"></div>
       <div id="sidrMsg"></div>
       <div class="btnrow"><button class="primary" id="btnSidrParse">فحص الملفات وتحضير المعاينة</button></div>
+      <div class="desc" style="margin-top:8px;">${sidrLastImportLine()}</div>
     </div>
     <div id="sidrPreviewArea"></div>
   `;
+  /* قائمة الملفات المختارة وحالة كل ملف (يمكن استبدالها بإعادة الاختيار قبل بدء المعالجة) */
+  const renderFileList = (statusByFile)=>{
+    const inp = document.getElementById('sidrFile'), box = document.getElementById('sidrFileList'); if(!inp || !box) return;
+    const files = Array.from(inp.files||[]);
+    box.innerHTML = files.length ? `<div class="tablewrap" style="margin-bottom:8px;"><table class="data"><thead><tr><th>الملف</th><th>الحجم</th><th>الحالة</th></tr></thead><tbody>${files.map(f=>{
+      const st = statusByFile && statusByFile[f.name];
+      const pill = st ? (st.err ? `<span class="pill bad">❌ ${esc(st.err)}</span>` : `<span class="pill ok">✓ تم فحصه (${st.sheets} شيت)</span>`) : '<span class="pill warn">تم اختياره — لم يُفحص بعد</span>';
+      return `<tr><td>${esc(f.name)}</td><td>${Math.max(1,Math.round(f.size/1024))} KB</td><td>${pill}</td></tr>`; }).join('')}</tbody></table></div>
+      <div class="desc" style="margin-bottom:6px;">لاستبدال الملفات قبل المعالجة أعد الاختيار من الخانة أعلاه ثم اضغط «فحص الملفات».</div>` : '<div class="desc" style="margin-bottom:6px;">لم يُرفع أي ملف بعد.</div>';
+  };
+  renderFileList();
+  document.getElementById('sidrFile').addEventListener('change', ()=>{ SIDR_BATCH = []; const pa = document.getElementById('sidrPreviewArea'); if(pa) pa.innerHTML=''; renderFileList(); });
   document.getElementById('btnSidrParse').addEventListener('click', async ()=>{
     const inp = document.getElementById('sidrFile');
     if(!inp.files.length){ showMsg('sidrMsg','warn','اختر ملفاً واحداً أو أكثر أولاً.'); return; }
     setBusy('btnSidrParse', true, 'جارِ الفحص…');
     SIDR_BATCH = [];
     let sheetsOk=0, sheetsErr=0;
+    const statusByFile = {};
     for(const file of inp.files){
       try{
         const res = await sidrParseWorkbookFile(file);
+        statusByFile[file.name] = {sheets: res.sheets.length};
         res.sheets.forEach(s=>{
           SIDR_BATCH.push({fileName: res.fileName, sheetName: s.sheetName, site: s.site, rows: s.rows||[], detection: s.detection, needsReview: !!s.needsReview, error: s.error||null, manuallyReviewed:false, skip:false});
           if(s.error) sheetsErr++; else sheetsOk++;
         });
       }catch(e){
         SIDR_BATCH.push({fileName:file.name, sheetName:'-', site:'-', rows:[], detection:null, needsReview:false, error:'تعذّرت قراءة الملف: '+e.message, manuallyReviewed:false, skip:false});
+        statusByFile[file.name] = {err:'تعذّرت القراءة'};
         sheetsErr++;
       }
     }
     sidrAnnotateBatchActions();
     showMsg('sidrMsg', sheetsErr?'warn':'ok', `تم فحص ${inp.files.length} ملف: ${sheetsOk} شيت صالح${sheetsErr?`، ${sheetsErr} شيت به مشكلة (موضّحة أدناه)`:''}.`);
+    renderFileList(statusByFile);
     renderSidrBatchPreview();
     setBusy('btnSidrParse', false, 'فحص الملفات وتحضير المعاينة');
+    sidrOpenReviewModal();   // نافذة مراجعة قبل المعالجة: تأكيد أو إلغاء (لا يُحفظ أي شيء قبل التأكيد)
   });
   if(SIDR_BATCH.length) renderSidrBatchPreview();
+}
+function sidrLastImportLine(){
+  const imps = STATE.sidReview.imports; if(!imps.length) return 'لا توجد استيرادات سابقة.';
+  const last = imps.reduce((m,i)=> (i.importedAt||'')>(m.importedAt||'') ? i : m, imps[0]);
+  return `المستورد حالياً: <b>${imps.length}</b> موقع — آخر استيراد: ${esc(String(last.importedAt||'').slice(0,10))} (${esc(last.fileName||'')}).`;
+}
+/* ---- نافذة مراجعة المعالجة: ملخص ما سيُعالَج + تحذيرات، ثم «تأكيد المعالجة» أو «إلغاء» (الإلغاء لا يغيّر أي بيانات) ---- */
+function sidrBatchReviewStats(){
+  sidrAnnotateBatchActions();
+  const ok = SIDR_BATCH.filter(e=>!e.skip && !e.error && !e.needsReview && (e.action==='new'||e.action==='replace'));
+  return {
+    files: new Set(SIDR_BATCH.map(e=>e.fileName)).size,
+    sheets: SIDR_BATCH.length,
+    importable: ok,
+    records: ok.reduce((n,e)=>n+e.rows.length,0),
+    newCount: ok.filter(e=>e.action==='new').length,
+    replaceCount: ok.filter(e=>e.action==='replace').length,
+    dup: SIDR_BATCH.filter(e=>!e.skip && e.action==='duplicate').length,
+    conflict: SIDR_BATCH.filter(e=>!e.skip && e.action==='conflict').length,
+    review: SIDR_BATCH.filter(e=>!e.skip && !e.error && e.needsReview).length,
+    err: SIDR_BATCH.filter(e=>e.error).length,
+    skipped: SIDR_BATCH.filter(e=>e.skip).length,
+  };
+}
+function sidrOpenReviewModal(){
+  if(!SIDR_BATCH.length) return;
+  const stt = sidrBatchReviewStats();
+  const statusOf = e=> e.error ? '<span class="pill bad">به مشكلة</span>' : e.skip ? '<span class="pill bad">مُتجاهَل</span>' : e.needsReview ? '<span class="pill warn">يحتاج مراجعة أعمدة</span>'
+    : e.action==='duplicate' ? '<span class="pill bad">مكرر — سيُتجاهل</span>' : e.action==='conflict' ? '<span class="pill bad">تعارض اسم</span>'
+    : e.action==='replace' ? '<span class="pill warn">سيستبدل استيراداً سابقاً</span>' : '<span class="pill ok">جديد</span>';
+  const warns = [];
+  if(stt.err) warns.push(`${stt.err} شيت/ملف به أخطاء قراءة ولن يُعالَج.`);
+  if(stt.review) warns.push(`${stt.review} شيت يحتاج مراجعة تعيين الأعمدة قبل استيراده (استخدم «مراجعة التفاصيل»).`);
+  if(stt.dup) warns.push(`${stt.dup} شيت مطابق تماماً لاستيراد سابق (مكرر) وسيُتجاهل دون أي تغيير.`);
+  if(stt.conflict) warns.push(`${stt.conflict} شيت بنفس اسم موقع آخر ضمن الدفعة — عدّل اسم الموقع لأحدها أو تجاهل الباقي.`);
+  if(stt.replaceCount) warns.push(`تنبيه: ${stt.replaceCount} موقع له استيراد سابق مختلف البيانات وسيُستبدل بالكامل عند التأكيد (راجع الصفوف المعلَّمة بالأصفر).`);
+  SIDR_BATCH.filter(e=>!e.skip && !e.error && trim(e.site) && !e.rows.length).forEach(e=> warns.push(`الموقع «${e.site}» (${e.sheetName}) لا يحتوي أي صف مواد.`));
+  SIDR_BATCH.filter(e=>!e.skip && !e.error && (!trim(e.site) || trim(e.site)==='-')).forEach(e=> warns.push(`الشيت «${e.sheetName}» بلا اسم موقع صالح.`));
+  openModal('🔎 مراجعة قبل المعالجة', (body)=>{
+    body.innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi"><div class="num">${stt.files}</div><div class="lbl">ملفات</div></div>
+        <div class="kpi"><div class="num">${stt.sheets}</div><div class="lbl">شيتات (مواقع محتملة)</div></div>
+        <div class="kpi"><div class="num">${stt.importable.length}</div><div class="lbl">جاهز للمعالجة</div></div>
+        <div class="kpi"><div class="num">${stt.records}</div><div class="lbl">سجلات متوقعة المعالجة</div></div>
+        <div class="kpi ${stt.dup?'warn':''}"><div class="num">${stt.dup}</div><div class="lbl">مكرر</div></div>
+        <div class="kpi ${(stt.err+stt.review+stt.conflict)?'bad':''}"><div class="num">${stt.err+stt.review+stt.conflict}</div><div class="lbl">مشاكل / تحتاج مراجعة</div></div>
+      </div>
+      ${warns.length?`<div class="msg warn"><b>تحذيرات:</b><ul style="margin:6px 0 0;padding-inline-start:20px;">${warns.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>`:'<div class="msg ok">لا توجد تحذيرات — كل الشيتات الجاهزة سليمة.</div>'}
+      <div class="tablewrap" style="max-height:46vh;"><table class="data">
+        <thead><tr><th>الملف</th><th>الشيت</th><th>الموقع</th><th>السجلات</th><th>الحالة</th></tr></thead>
+        <tbody>${SIDR_BATCH.map(e=>`<tr style="${e.action==='replace'&&!e.skip?'background:var(--amber-bg);':''}"><td>${esc(e.fileName)}</td><td>${esc(e.sheetName)}</td><td>${esc(e.site)}</td><td>${e.error?'—':e.rows.length}</td><td>${statusOf(e)}${e.error?`<div class="or-hint">${esc(e.error)}</div>`:(e.actionNote?`<div class="or-hint">${esc(e.actionNote)}</div>`:'')}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <div id="sidrModalMsg"></div>
+      <div class="btnrow" style="margin-top:12px;">
+        <button type="button" class="primary" id="btnSidrModalConfirm" ${stt.importable.length?'':'disabled'}>✅ تأكيد المعالجة (${stt.importable.length})</button>
+        <button type="button" class="secondary" id="btnSidrModalDetails">🛠️ مراجعة التفاصيل</button>
+        <button type="button" class="danger" id="btnSidrModalCancel">إلغاء</button>
+      </div>
+      <div class="desc">«إلغاء» يتجاهل هذه الدفعة بالكامل دون أي تغيير على البيانات. «مراجعة التفاصيل» يغلق النافذة ويبقي الدفعة للتعديل (أسماء المواقع، الأعمدة، التجاهل).</div>`;
+    document.getElementById('btnSidrModalDetails').addEventListener('click', closeModal);
+    document.getElementById('btnSidrModalCancel').addEventListener('click', ()=>{
+      SIDR_BATCH = []; closeModal();
+      const pa = document.getElementById('sidrPreviewArea'); if(pa) pa.innerHTML = '';
+      const fi = document.getElementById('sidrFile'); if(fi) fi.value = '';
+      const fl = document.getElementById('sidrFileList'); if(fl) fl.innerHTML = '<div class="desc" style="margin-bottom:6px;">لم يُرفع أي ملف بعد.</div>';
+      showMsg('sidrMsg','info','تم إلغاء المعالجة — لم يتغيّر أي شيء في البيانات.');
+    });
+    document.getElementById('btnSidrModalConfirm').addEventListener('click', async ()=>{
+      const cb = document.getElementById('btnSidrModalConfirm');
+      ['btnSidrModalConfirm','btnSidrModalDetails','btnSidrModalCancel'].forEach(id=>{ const b = document.getElementById(id); if(b) b.disabled = true; });
+      cb.textContent = '⏳ جارِ المعالجة…';
+      let res;
+      try{ res = await sidrCommitBatch(); }catch(e){ res = {ok:false, msg:'خطأ غير متوقع: '+e.message}; }
+      if(!res.ok){
+        ['btnSidrModalConfirm','btnSidrModalDetails','btnSidrModalCancel'].forEach(id=>{ const b = document.getElementById(id); if(b) b.disabled = false; });
+        cb.textContent = `✅ تأكيد المعالجة (${stt.importable.length})`;
+        showMsg('sidrModalMsg','bad', res.msg); return;
+      }
+      body.innerHTML = `
+        <div class="msg ${res.savedRemote?'ok':'warn'}"><b>${res.savedRemote?'اكتملت المعالجة بنجاح.':'اكتملت المعالجة محلياً فقط.'}</b>
+          ${res.savedRemote?'':' لم يُؤكَّد الحفظ على قاعدة البيانات المشتركة — البيانات محفوظة في هذا المتصفح وستُزامَن عند عودة الاتصال، فلا تُغلق الصفحة قبل ذلك.'}</div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="num">${res.importedCount}</div><div class="lbl">موقع تمت معالجته</div></div>
+          <div class="kpi"><div class="num">${res.records}</div><div class="lbl">سجل مادة</div></div>
+          <div class="kpi ${res.skippedDup?'warn':''}"><div class="num">${res.skippedDup}</div><div class="lbl">مكرر تم تجاهله</div></div>
+          <div class="kpi ${res.notImported.length?'bad':''}"><div class="num">${res.notImported.length}</div><div class="lbl">لم يُعالَج / أخطاء</div></div>
+        </div>
+        ${res.notImported.length?`<div class="tablewrap"><table class="data"><thead><tr><th>الملف</th><th>الشيت</th><th>السبب</th></tr></thead><tbody>${res.notImported.map(n=>`<tr><td>${esc(n.file)}</td><td>${esc(n.sheet)}</td><td>${esc(n.reason)}</td></tr>`).join('')}</tbody></table></div>`:''}
+        <div class="btnrow" style="margin-top:12px;"><button type="button" class="primary" id="btnSidrResultClose">عرض النواقص</button></div>`;
+      document.getElementById('btnSidrResultClose').addEventListener('click', ()=>{ closeModal(); SIDR_VIEW = 'summary'; sidrRefreshPage('summary'); });
+    });
+  }, {maxWidth:'900px'});
 }
 
 function renderSidrBatchPreview(){
@@ -5626,7 +5801,7 @@ function renderSidrBatchPreview(){
       </div>
       <div class="msg info">الاستيراد سيستبدل أي استيراد سابق لنفس اسم الموقع إن اختلفت بياناته، ويتجاهل أي تطابق تام مع استيراد سابق تلقائياً.</div>
       <div class="btnrow">
-        <button class="primary" id="btnSidrCommit">✅ تأكيد استيراد الجاهز (${importable.length})</button>
+        <button class="primary" id="btnSidrCommit">🔎 مراجعة وتأكيد المعالجة (${importable.length})</button>
         <button class="secondary" id="btnSidrCancelBatch">إلغاء الكل</button>
       </div>
       <div id="sidrCommitMsg"></div>
@@ -5637,21 +5812,9 @@ function renderSidrBatchPreview(){
   SIDR_BATCH.forEach((entry, idx)=>{ cardsWrap.appendChild(buildSidrEntryCard(entry, idx)); });
 
   document.getElementById('btnSidrCancelBatch').addEventListener('click', ()=>{ SIDR_BATCH=[]; area.innerHTML=''; });
-  document.getElementById('btnSidrCommit').addEventListener('click', async ()=>{
+  document.getElementById('btnSidrCommit').addEventListener('click', ()=>{
     if(!importable.length){ showMsg('sidrCommitMsg','warn','لا يوجد أي شيت جاهز للاستيراد الآن.'); return; }
-    if(!confirm(`سيتم استيراد ${importable.length} موقع. أي موقع له استيراد سابق مختلف سيُستبدل بالكامل. هل تريد المتابعة؟`)) return;
-    setBusy('btnSidrCommit', true, 'جارِ الاستيراد…');
-    const res = await sidrCommitBatch();
-    if(res.ok){
-      alert(`تم استيراد ${res.importedCount} موقع بنجاح${res.skippedDup?`، وتم تجاهل ${res.skippedDup} شيت مطابق تماماً لاستيراد سابق`:''}.`);
-      area.innerHTML = '';
-      SIDR_VIEW = 'sites';
-      const host = document.getElementById('tabContent');
-      if(host) renderSidTab(host);
-    } else {
-      setBusy('btnSidrCommit', false, `✅ تأكيد استيراد الجاهز (${importable.length})`);
-      showMsg('sidrCommitMsg','bad', res.msg);
-    }
+    sidrOpenReviewModal();   // التأكيد النهائي عبر نافذة المراجعة
   });
 }
 
@@ -6678,7 +6841,7 @@ function renderSchedPreview(){
     schedApplyUpsert(p.rows, p.fileName);
     await saveState(['siteSchedule']);
     const n = p.rows.length; SCHED_PARSED = null;
-    const area2 = document.getElementById('sidrViewArea'); renderSidrScheduleView(area2);
+    const area2 = document.getElementById('sidrSec_schedule'); if(area2) renderSidrScheduleView(area2);
     showMsg('schedMsg','ok',`تم حفظ جدول المواقع (${n} موقع) — مواقع جديدة أو محدَّثة دون أي تكرار.`);
   });
 }
@@ -6856,7 +7019,7 @@ function renderSidrSoloResult(){
   const add = document.getElementById('btnSidrSoloAdd');
   if(add) add.addEventListener('click', async ()=>{
     const res = await sidrSoloAddToGlobal(entry);
-    if(res.ok){ alert(`تمت إضافة "${entry.site}" إلى الملخص العام.`); const host = document.getElementById('tabContent'); if(host) renderSidTab(host); }
+    if(res.ok){ alert(`تمت إضافة "${entry.site}" إلى الملخص العام.`); sidrRefreshPage('summary'); }
     else if(!res.cancelled) showMsg('sidrSoloAddMsg','warn',res.msg);
   });
   renderSidrSoloTable();
@@ -9198,6 +9361,14 @@ function outreqPrint(id, kind){
   setTimeout(()=>{ try{ window.print(); }catch(e){} }, 50);
 }
 
+/* آخر تبويب إداري مستخدم: يُفتح الوضع الإداري عليه مباشرة بعد تسجيل الدخول (تفضيل محلي على هذا الجهاز فقط) */
+function adminLastTabSave(tab){ try{ localStorage.setItem('wms_last_admin_tab', tab); }catch(e){} }
+function adminLastTabLoad(){
+  try{
+    const t = localStorage.getItem('wms_last_admin_tab');
+    return (t && Array.isArray(TABS) && TABS.some(x=>x.id===t)) ? t : null;
+  }catch(e){ return null; }
+}
 async function boot(){
   if(!SUPABASE_ENABLED){
     // لا مصادقة بدون Supabase مُفعَّل — النظام يعمل محلياً بالكامل كما كان، بصلاحيات كاملة (لا معنى لتقييد الأدوار محلياً)
@@ -9243,7 +9414,10 @@ async function boot(){
   await applySeedDataIfPresent();
   if(migrateReceiptNumbers()) await saveState(['processedFiles','meta']);
   ACTIVE_TAB = Object.keys(STATE.stock).length ? 'stock' : 'setup';
-  APP_MODE = (CURRENT_ROLE==='admin') ? 'quick' : 'viewer';
+  if(CURRENT_ROLE==='admin'){
+    APP_MODE = 'admin';   // الوضع الإداري أول صفحة بعد الدخول، على آخر قسم استُخدم
+    ACTIVE_TAB = adminLastTabLoad() || ACTIVE_TAB;
+  } else APP_MODE = 'viewer';
   try{ await outreqInit(); }catch(e){ console.error('outreqInit failed (ignored):', e); }
   renderApp();
   startSupabasePolling();
