@@ -761,6 +761,8 @@ const LABELS = {
   tab_backup: '💾 نسخ احتياطي',
   tab_tags: 'تاجات المواد المتوفرة',
   tab_tagcapture: '🏷️ رصد التاجات',
+  tab_transport: '🚚 سجل طلبات النقل',
+  tab_dyn: '🧩 إدارة الجداول والأقسام',
   tab_taglog_viewer: 'رصد التاجات',
 
   // عناوين فرعية / أقسام داخلية
@@ -2557,8 +2559,10 @@ const TABS = [
   {id:'goods', lk:'tab_goods', group:'wh'},
   {id:'outreq', lk:'tab_outreq', group:'wh'},
   {id:'tagcapture', lk:'tab_tagcapture', group:'tools'},
+  {id:'transport', lk:'tab_transport', group:'ops'},
+  {id:'dyn', lk:'tab_dyn', group:'ops'},
 ];
-const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات'};
+const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات', 'ops':'🗂️ السجلات والجداول'};
 
 function esc(s){
   return String(s===null||s===undefined?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -2792,6 +2796,8 @@ function renderTabContent(){
   if(ACTIVE_TAB==='goods') return renderGoodsTab(el);
   if(ACTIVE_TAB==='outreq') return renderOutreqTab(el);
   if(ACTIVE_TAB==='tagcapture') return renderTagCaptureTab(el);
+  if(ACTIVE_TAB==='transport') return renderTransportTab(el);
+  if(ACTIVE_TAB==='dyn') return renderDynTab(el);
 }
 
 /* ============================================================
@@ -9360,6 +9366,1260 @@ function outreqPrint(id, kind){
   window.addEventListener('afterprint', cleanup);
   setTimeout(()=>{ try{ window.print(); }catch(e){} }, 50);
 }
+
+/* ============================================================
+   🗂️ سجل طلبات النقل + إدارة الجداول والأقسام + النماذج الرسمية
+   البيانات في Supabase فقط (جداول transport_* و dyn_* و doc_* + bucket «doc-templates») — للمدير فقط عبر RLS.
+   لا حذف نهائي: التعديل يحفظ النسخة السابقة في wms_audit_log مع إمكانية الاسترجاع.
+   ============================================================ */
+function wmsErrMsg(raw, status){
+  const m = String(raw||'');
+  if(/forbidden: admin/i.test(m)) return 'هذا الإجراء للمدير فقط.';
+  if(/driver required/i.test(m)) return 'اسم السائق مطلوب.';
+  if(/reason required/i.test(m)) return 'سبب طلب السيارة مطلوب.';
+  if(/request not found|row not found/i.test(m)) return 'السجل غير موجود.';
+  if(/only UPDATE entries/i.test(m)) return 'لا يمكن استرجاع هذه النسخة.';
+  if(/not authenticated|JWT/i.test(m)) return 'انتهت الجلسة — سجّل الدخول من جديد.';
+  if(/duplicate key|23505/i.test(m)) return 'القيمة موجودة مسبقاً.';
+  if(/row-level security|permission denied|42501/i.test(m)) return 'لا تملك صلاحية هذا الإجراء (المدير فقط).';
+  if(status===404 || /does not exist|PGRST205|schema cache/i.test(m)) return 'جداول هذا القسم غير مفعّلة في قاعدة البيانات بعد.';
+  return m || ('خطأ غير متوقع (HTTP '+status+')');
+}
+async function wmsFetch(method, path, body, extra){
+  const h = Object.assign(body!==undefined ? {'Content-Type':'application/json'} : {}, extra||{});
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${path}`, {method, headers: supabaseAuthHeaders(h), body: body!==undefined ? JSON.stringify(body) : undefined});
+  const txt = await res.text(); let data = null; try{ data = txt ? JSON.parse(txt) : null; }catch(e){}
+  if(!res.ok){
+    const raw = (data && (data.message || data.details || data.hint)) || txt || '';
+    const err = new Error(wmsErrMsg(raw, res.status)); err.raw = raw; err.status = res.status; throw err;
+  }
+  return data;
+}
+async function wmsGetAll(path){
+  let out = [], off = 0;
+  for(;;){
+    const part = await wmsFetch('GET', path + (path.includes('?')?'&':'?') + `limit=1000&offset=${off}`);
+    out = out.concat(part||[]);
+    if(!part || part.length < 1000 || off > 60000) break;
+    off += 1000;
+  }
+  return out;
+}
+const wmsRpc = (name, args)=> wmsFetch('POST', 'rpc/'+name, args||{});
+const wmsInsert = async (table, rows)=> wmsFetch('POST', table, rows, {'Prefer':'return=representation'});
+const wmsPatch = async (table, filter, patch)=> wmsFetch('PATCH', `${table}?${filter}`, Object.assign({}, patch), {'Prefer':'return=representation'});
+function wmsUuid(){ return outreqUuid(); }
+function wmsNorm(s){ return String(s===null||s===undefined?'':s).toLowerCase().normalize('NFKC').replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/\s+/g,' ').trim(); }
+function wmsNowIso(){ return new Date().toISOString(); }
+function wmsMonthStart(){ return todayStr().slice(0,8)+'01'; }
+function wmsFmtDate(d){ return String(d||'').slice(0,10); }
+function wmsCmp(a, b, type){
+  const ea = (a===null||a===undefined||a===''), eb = (b===null||b===undefined||b==='');
+  if(ea && eb) return 0; if(ea) return 1; if(eb) return -1;   // الفارغ دائماً في الآخر
+  if(type==='number'){ const x=Number(a), y=Number(b); if(!isNaN(x)&&!isNaN(y)) return x-y; }
+  return String(a).localeCompare(String(b), 'ar', {numeric:true});
+}
+/* طباعة موحّدة (نفس أسلوب تقارير SID: A4، بلا ترويسة المتصفح) */
+function wmsPrintHtml(title, metaPairs, tableHtml, extraHtml){
+  const meta = `<table class="sr-meta"><tr>${metaPairs.map(([k,v])=>`<td><span>${esc(k)}</span><b>${esc(v)}</b></td>`).join('')}</tr></table>`;
+  const html = `<div class="sr-wrap"><div class="sr-head"><div class="sr-org">نظام إدارة وترصيد مواد المستودع</div><div class="sr-title">${esc(title)}</div></div>${meta}${tableHtml}${extraHtml||''}<div class="sr-foot"><div>إعداد: ................................</div><div>اعتماد / توقيع: ................................</div></div></div>`;
+  return sidrPrintFlowHtml(html, title);
+}
+function wmsTableHtml(headers, rows, opts){
+  opts = opts||{};
+  const cg = opts.widths ? `<colgroup>${opts.widths.map(w=>`<col style="width:${w}%">`).join('')}</colgroup>` : '';
+  const body = rows.length ? rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${(opts.num||[]).includes(i)?'n':''}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="c" colspan="${headers.length}">لا توجد بيانات</td></tr>`;
+  return `<table class="sr-table">${cg}<thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+/* سجل التغييرات + الاسترجاع (للمدير): يعرض نسخ الصف السابقة ويعيد أي نسخة بنقرة (الاسترجاع نفسه يُسجَّل ويمكن التراجع عنه) */
+const WMS_AUDIT_SKIP = new Set(['updated_at','updated_by']);
+function wmsAuditDiff(e){
+  const o = e.old_data||{}, n = e.new_data||{};
+  return Object.keys(n).filter(k=>!WMS_AUDIT_SKIP.has(k) && JSON.stringify(o[k])!==JSON.stringify(n[k]));
+}
+async function wmsOpenHistory(table, rowId, title, onRestored, labelMap){
+  openModal('🕘 سجل التغييرات — '+esc(title||''), (body)=>{ body.innerHTML = '<div class="desc">جارٍ التحميل…</div>'; }, {maxWidth:'820px'});
+  let list = [];
+  try{ list = await wmsFetch('GET', `wms_audit_log?table_name=eq.${table}&row_id=eq.${rowId}&order=id.desc&limit=100`); }
+  catch(e){ const b = document.getElementById('modalBodyEl'); if(b) b.innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; return; }
+  const b = document.getElementById('modalBodyEl'); if(!b) return;
+  const lab = (k)=> (labelMap && labelMap[k]) || k;
+  const fmtV = (v)=> v===null||v===undefined||v==='' ? '—' : (typeof v==='object' ? JSON.stringify(v) : String(v));
+  b.innerHTML = `<div class="desc">كل تعديل يحفظ النسخة السابقة. «استرجاع» يعيد الحقول إلى ما كانت عليه قبل ذلك التعديل (ولا يحذف شيئاً).</div><div id="wmsHistMsg"></div>` + (list.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>الوقت</th><th>بواسطة</th><th>الإجراء</th><th>التغيير</th><th></th></tr></thead><tbody>${
+    list.map(e=>{
+      const isUpd = e.action==='UPDATE';
+      const rowDiff = (k)=>{
+        const ov = (e.old_data||{})[k], nv = (e.new_data||{})[k];
+        if(k==='data' && labelMap && labelMap.__col && ov && nv && typeof ov==='object' && typeof nv==='object'){
+          const ks = Array.from(new Set(Object.keys(ov).concat(Object.keys(nv)))).filter(c=>JSON.stringify(ov[c])!==JSON.stringify(nv[c]));
+          return ks.map(c=>`<div><b>${esc(typeof labelMap.__col==='function' ? labelMap.__col(c) : (labelMap.__col[c]||c))}</b>: ${esc(fmtV(ov[c]))} ← ${esc(fmtV(nv[c]))}</div>`).join('');
+        }
+        return `<div><b>${esc(lab(k))}</b>: ${esc(fmtV(ov))} ← ${esc(fmtV(nv))}</div>`;
+      };
+      const ch = isUpd ? wmsAuditDiff(e).map(rowDiff).join('') : (e.action==='INSERT'?'إنشاء السجل':'—');
+      return `<tr><td>${esc(String(e.changed_at||'').replace('T',' ').slice(0,16))}</td><td>${esc(e.changed_by_name||'')}</td><td>${esc(e.action==='INSERT'?'إنشاء':e.action==='UPDATE'?'تعديل':'حذف')}</td><td>${ch||'—'}</td><td>${isUpd?`<button class="secondary" data-restore="${e.id}">↩️ استرجاع النسخة السابقة</button>`:''}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<div class="msg info">لا توجد تغييرات مسجّلة.</div>');
+  b.querySelectorAll('[data-restore]').forEach(btn=> btn.addEventListener('click', async ()=>{
+    if(!confirm('استرجاع النسخة السابقة؟ سيُسجَّل الاسترجاع نفسه في السجل ويمكن التراجع عنه.')) return;
+    btn.disabled = true;
+    try{
+      await wmsRpc('wms_audit_restore', {p_audit_id: Number(btn.dataset.restore)});
+      closeModal(); if(onRestored) await onRestored();
+    }catch(e){ btn.disabled = false; showMsg('wmsHistMsg','bad', e.message); }
+  }));
+}
+
+/* ============================================================
+   🚚 سجل طلبات النقل
+   ============================================================ */
+const TR = {rows:[], loaded:false, loading:false, err:'', view:'records', q:'', from:'', to:'', driver:'', sortDesc:true, showCancelled:false,
+  rep:{from:'', to:'', driver:'', open:''}, token:null, draft:{date:'', driver:'', reason:'', notes:''}, saving:false, flash:null, shown:200};
+function trDriverKey(n){ return wmsNorm(n); }
+function trDrivers(){
+  const m = new Map();
+  TR.rows.forEach(r=>{ const k = trDriverKey(r.driver_name); if(!m.has(k)) m.set(k, {name:trim(r.driver_name).replace(/\s+/g,' '), n:0}); m.get(k).n++; });
+  return Array.from(m.values()).sort((a,b)=>a.name.localeCompare(b.name,'ar'));
+}
+async function trLoad(){
+  TR.loading = true; TR.err = '';
+  try{
+    TR.rows = await wmsGetAll('transport_requests?select=*&order=request_date.desc,created_at.desc,req_no.desc');
+    TR.loaded = true;
+  }catch(e){ TR.err = e.message; TR.loaded = true; }
+  TR.loading = false;
+  if(ACTIVE_TAB==='transport' && document.getElementById('trRoot')) renderTransportTab(document.getElementById('tabContent'));
+}
+function trFiltered(){
+  const q = wmsNorm(TR.q), dk = TR.driver ? trDriverKey(TR.driver) : '';
+  let rows = TR.rows.filter(r=>{
+    if(!TR.showCancelled && r.status==='cancelled') return false;
+    if(TR.from && wmsFmtDate(r.request_date) < TR.from) return false;
+    if(TR.to && wmsFmtDate(r.request_date) > TR.to) return false;
+    if(dk && trDriverKey(r.driver_name)!==dk) return false;
+    if(q && !(wmsNorm(r.driver_name).includes(q) || wmsNorm(r.req_no).includes(q) || wmsNorm(r.reason).includes(q))) return false;
+    return true;
+  });
+  const dir = TR.sortDesc ? -1 : 1;
+  rows.sort((a,b)=> dir * (wmsFmtDate(a.request_date).localeCompare(wmsFmtDate(b.request_date)) || String(a.created_at).localeCompare(String(b.created_at)) || String(a.req_no).localeCompare(String(b.req_no))));
+  return rows;
+}
+function trFlashHtml(){ return TR.flash ? `<div class="msg ${TR.flash.kind}">${esc(TR.flash.text)}</div>` : ''; }
+function renderTransportTab(el){
+  if(!TR.loaded && !TR.loading) trLoad();
+  if(!TR.draft.date) TR.draft.date = todayStr();
+  if(!TR.rep.from){ TR.rep.from = wmsMonthStart(); TR.rep.to = todayStr(); }
+  el.innerHTML = `<div id="trRoot">
+    <div class="panel"><h2>🚚 سجل طلبات النقل</h2>
+      <div class="desc">توثيق كل مرة يُطلب فيها سيارة نقل (التاريخ، السائق، السبب) للرجوع إليها عند المحاسبة. قسم مستقل عن المخزون وطلبات المواد، ولا يتضمّن مواد أو كميات أو تكاليف.</div>
+      <nav class="tabs" style="margin:8px 0 0;"><button data-trview="records" class="${TR.view==='records'?'active':''}">📋 السجلات</button><button data-trview="reports" class="${TR.view==='reports'?'active':''}">📊 تقارير السائقين</button></nav>
+    </div>
+    <div id="trBody"></div></div>`;
+  el.querySelectorAll('[data-trview]').forEach(b=> b.addEventListener('click', ()=>{ TR.view = b.dataset.trview; TR.flash = null; renderTransportTab(el); }));
+  const body = document.getElementById('trBody');
+  if(!TR.loaded){ body.innerHTML = '<div class="panel"><div class="desc">جارٍ تحميل السجلات…</div></div>'; return; }
+  if(TR.err){ body.innerHTML = `<div class="panel"><div class="msg bad">${esc(TR.err)}</div><div class="btnrow"><button class="secondary" id="trRetry">🔄 إعادة المحاولة</button></div></div>`; document.getElementById('trRetry').addEventListener('click', ()=>{ TR.loaded=false; renderTransportTab(el); }); return; }
+  if(TR.view==='reports') trRenderReports(body); else trRenderRecords(body);
+}
+function trRenderRecords(body){
+  const drivers = trDrivers();
+  const reasons = Array.from(new Set(TR.rows.map(r=>trim(r.reason)).filter(Boolean))).slice(0,60);
+  body.innerHTML = `
+    <div class="panel"><h2 style="font-size:16px;">➕ طلب نقل جديد</h2>
+      <div id="trFlash">${trFlashHtml()}</div>
+      <div class="grid2">
+        <div><label class="lbl">تاريخ الطلب</label><input type="date" id="trDate" value="${esc(TR.draft.date)}"></div>
+        <div><label class="lbl">اسم السائق</label><input type="text" id="trDriver" list="trDriverList" autocomplete="off" placeholder="اسم السائق" value="${esc(TR.draft.driver)}"><datalist id="trDriverList">${drivers.map(d=>`<option value="${esc(d.name)}">`).join('')}</datalist></div>
+      </div>
+      <label class="lbl">سبب طلب السيارة</label><input type="text" id="trReason" list="trReasonList" autocomplete="off" placeholder="مثال: نقل مواد إلى موقع / إرجاع مواد إلى مستودعات جوال / نقل معدات بين المواقع" value="${esc(TR.draft.reason)}"><datalist id="trReasonList">${reasons.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+      <label class="lbl">ملاحظات إضافية (اختياري)</label><textarea id="trNotes" rows="2" placeholder="ملاحظات…">${esc(TR.draft.notes)}</textarea>
+      <div class="btnrow"><button class="primary" id="trSave">💾 حفظ الطلب</button></div>
+      <div id="trSaveMsg"></div>
+    </div>
+    <div class="panel"><h2 style="font-size:16px;">🔎 السجلات</h2>
+      <div class="grid2">
+        <input type="text" id="trQ" autocomplete="off" placeholder="بحث: اسم السائق أو رقم الطلب أو سبب النقل…" value="${esc(TR.q)}">
+        <select id="trDriverSel"><option value="">كل السائقين</option>${drivers.map(d=>`<option value="${esc(d.name)}" ${TR.driver&&trDriverKey(TR.driver)===trDriverKey(d.name)?'selected':''}>${esc(d.name)} (${d.n})</option>`).join('')}</select>
+      </div>
+      <div class="grid2" style="margin-top:8px;">
+        <div><label class="lbl">من تاريخ</label><input type="date" id="trFrom" value="${esc(TR.from)}"></div>
+        <div><label class="lbl">إلى تاريخ</label><input type="date" id="trTo" value="${esc(TR.to)}"></div>
+      </div>
+      <div class="btnrow">
+        <button class="secondary" id="trSort"></button>
+        <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="trCanc" ${TR.showCancelled?'checked':''}> إظهار الملغاة</label>
+        <button class="secondary" id="trClear">مسح التصفية</button>
+        <button class="secondary" id="trRefresh">🔄 تحديث</button>
+        <button class="secondary" id="trPrint">🖨️ طباعة</button>
+        <button class="secondary" id="trXlsx">📥 Excel</button>
+      </div>
+      <div id="trListArea"></div>
+    </div>`;
+  const $ = (id)=>document.getElementById(id);
+  const sortLbl = ()=>{ $('trSort').textContent = TR.sortDesc ? '⬇️ الأحدث أولاً' : '⬆️ الأقدم أولاً'; };
+  sortLbl();
+  ['trDate','trDriver','trReason','trNotes'].forEach(id=> $(id).addEventListener('input', ()=>{ TR.draft = {date:$('trDate').value, driver:$('trDriver').value, reason:$('trReason').value, notes:$('trNotes').value}; }));
+  const submitOnEnter = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); trSave(); } };
+  ['trDate','trDriver','trReason'].forEach(id=> $(id).addEventListener('keydown', submitOnEnter));
+  $('trSave').addEventListener('click', trSave);
+  const refresh = ()=> trRefreshList();
+  $('trQ').addEventListener('input', debounce(()=>{ TR.q = $('trQ').value; TR.shown = 200; refresh(); }, 160));
+  $('trDriverSel').addEventListener('change', ()=>{ TR.driver = $('trDriverSel').value; TR.shown = 200; refresh(); });
+  $('trFrom').addEventListener('change', ()=>{ TR.from = $('trFrom').value; TR.shown = 200; refresh(); });
+  $('trTo').addEventListener('change', ()=>{ TR.to = $('trTo').value; TR.shown = 200; refresh(); });
+  $('trCanc').addEventListener('change', ()=>{ TR.showCancelled = $('trCanc').checked; TR.shown = 200; refresh(); });
+  $('trSort').addEventListener('click', ()=>{ TR.sortDesc = !TR.sortDesc; sortLbl(); refresh(); });
+  $('trClear').addEventListener('click', ()=>{ TR.q=''; TR.from=''; TR.to=''; TR.driver=''; TR.showCancelled=false; TR.shown=200; trRenderRecords(body); });
+  $('trRefresh').addEventListener('click', async ()=>{ TR.loaded=false; TR.flash=null; await trLoad(); });
+  $('trPrint').addEventListener('click', trPrintRecords);
+  $('trXlsx').addEventListener('click', trExportRecords);
+  trRefreshList();
+}
+function trStatusPill(r){ return r.status==='cancelled' ? '<span class="pill bad">ملغي</span>' : '<span class="pill ok">نشط</span>'; }
+function trRefreshList(){
+  const area = document.getElementById('trListArea'); if(!area) return;
+  const rows = trFiltered();
+  const shown = rows.slice(0, TR.shown);
+  area.innerHTML = `<div class="desc" style="margin:8px 0;">عدد النتائج: <b>${rows.length}</b> من أصل ${TR.rows.length} سجل${rows.length>shown.length?` — المعروض ${shown.length}`:''}</div>` + (rows.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>السائق</th><th>سبب الطلب</th><th>ملاحظات</th><th>الحالة</th><th></th></tr></thead><tbody>${
+    shown.map(r=>`<tr class="${r.status==='cancelled'?'short':''}"><td><b>${esc(r.req_no)}</b></td><td>${esc(wmsFmtDate(r.request_date))}</td><td>${esc(r.driver_name)}</td><td>${esc(r.reason)}</td><td>${esc(r.notes||'')}</td><td>${trStatusPill(r)}</td><td><button class="secondary" data-tredit="${esc(r.id)}">✏️ تعديل</button></td></tr>`).join('')}</tbody></table></div>${rows.length>shown.length?'<div class="btnrow"><button class="secondary" id="trMore">عرض المزيد</button></div>':''}` : '<div class="msg info">لا توجد سجلات مطابقة.</div>');
+  area.querySelectorAll('[data-tredit]').forEach(b=> b.addEventListener('click', ()=> trOpenEdit(b.dataset.tredit)));
+  const more = document.getElementById('trMore'); if(more) more.addEventListener('click', ()=>{ TR.shown += 300; trRefreshList(); });
+}
+async function trSave(){
+  if(TR.saving) return;
+  const d = TR.draft;
+  const driver = trim(d.driver), reason = trim(d.reason);
+  if(!driver){ showMsg('trSaveMsg','warn','اسم السائق مطلوب.'); return; }
+  if(!reason){ showMsg('trSaveMsg','warn','سبب طلب السيارة مطلوب.'); return; }
+  if(!d.date){ showMsg('trSaveMsg','warn','تاريخ الطلب مطلوب.'); return; }
+  TR.saving = true; setBusy('trSave', true, '⏳ جارٍ الحفظ…');
+  if(!TR.token) TR.token = wmsUuid();   /* نفس الرمز عند إعادة المحاولة بعد خطأ شبكة ⇒ لا تكرار للسجل */
+  try{
+    const r = await wmsRpc('transport_create_request', {p_date:d.date, p_driver:driver, p_reason:reason, p_notes:trim(d.notes)||null, p_client_token:TR.token});
+    TR.token = null;
+    TR.draft = {date:d.date, driver:'', reason:'', notes:''};
+    TR.flash = {kind:'ok', text: r && r.duplicate ? `هذا الطلب محفوظ مسبقاً برقم ${r.req_no}.` : `تم حفظ الطلب برقم ${r.req_no}.`};
+    TR.saving = false;
+    TR.loaded = false; await trLoad();
+  }catch(e){
+    TR.saving = false; setBusy('trSave', false, '💾 حفظ الطلب');
+    showMsg('trSaveMsg','bad','لم يُحفظ الطلب: '+e.message+' — بياناتك ما زالت في النموذج، أعد المحاولة.');
+  }
+}
+function trOpenEdit(id){
+  const r = TR.rows.find(x=>x.id===id); if(!r) return;
+  openModal('✏️ تعديل طلب النقل '+esc(r.req_no), (b)=>{
+    b.innerHTML = `<div class="desc">يمكنك تعديل البيانات أو إلغاء الطلب (لا يُحذف أي سجل؛ كل نسخة سابقة تبقى في «سجل التغييرات»).</div>
+      <div class="grid2"><div><label class="lbl">التاريخ</label><input type="date" id="trEDate" value="${esc(wmsFmtDate(r.request_date))}"></div>
+      <div><label class="lbl">السائق</label><input type="text" id="trEDriver" value="${esc(r.driver_name)}"></div></div>
+      <label class="lbl">سبب الطلب</label><input type="text" id="trEReason" value="${esc(r.reason)}">
+      <label class="lbl">ملاحظات</label><textarea id="trENotes" rows="2">${esc(r.notes||'')}</textarea>
+      <label class="lbl">الحالة</label><select id="trEStatus"><option value="active" ${r.status!=='cancelled'?'selected':''}>نشط</option><option value="cancelled" ${r.status==='cancelled'?'selected':''}>ملغي (لا يُحتسب في التقارير)</option></select>
+      <div class="btnrow"><button class="primary" id="trESave">💾 حفظ التعديل</button><button class="secondary" id="trEHist">🕘 سجل التغييرات</button><button class="secondary" id="trECancel">إغلاق</button></div><div id="trEMsg"></div>`;
+    document.getElementById('trECancel').addEventListener('click', closeModal);
+    document.getElementById('trEHist').addEventListener('click', ()=> wmsOpenHistory('transport_requests', id, r.req_no, async ()=>{ TR.loaded=false; await trLoad(); }, {request_date:'التاريخ', driver_name:'السائق', reason:'السبب', notes:'ملاحظات', status:'الحالة'}));
+    const save = async ()=>{
+      const driver = trim(document.getElementById('trEDriver').value), reason = trim(document.getElementById('trEReason').value);
+      if(!driver || !reason){ showMsg('trEMsg','warn','السائق والسبب مطلوبان.'); return; }
+      setBusy('trESave', true, '⏳ جارٍ الحفظ…');
+      try{
+        await wmsRpc('transport_update_request', {p_id:id, p_date:document.getElementById('trEDate').value||null, p_driver:driver, p_reason:reason, p_notes:trim(document.getElementById('trENotes').value)||null, p_status:document.getElementById('trEStatus').value});
+        closeModal(); TR.flash = {kind:'ok', text:`تم تعديل الطلب ${r.req_no}.`}; TR.loaded=false; await trLoad();
+      }catch(e){ setBusy('trESave', false, '💾 حفظ التعديل'); showMsg('trEMsg','bad','لم يُحفظ التعديل: '+e.message); }
+    };
+    document.getElementById('trESave').addEventListener('click', save);
+    ['trEDate','trEDriver','trEReason'].forEach(i=> document.getElementById(i).addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); save(); } }));
+  }, {maxWidth:'640px'});
+}
+function trRecordsAoa(rows){
+  return [['رقم الطلب','التاريخ','السائق','سبب الطلب','ملاحظات','الحالة'], ...rows.map(r=>[r.req_no, wmsFmtDate(r.request_date), r.driver_name, r.reason, r.notes||'', r.status==='cancelled'?'ملغي':'نشط'])];
+}
+function trExportRecords(){
+  const rows = trFiltered();
+  if(!rows.length){ alert('لا توجد سجلات للتصدير.'); return; }
+  downloadWorkbook([{name:'طلبات النقل', ws: aoaSheet(trRecordsAoa(rows), [16,12,22,40,34,10])}], `سجل_طلبات_النقل_${todayStr()}.xlsx`);
+}
+function trPrintRecords(){
+  const rows = trFiltered();
+  if(!rows.length){ alert('لا توجد سجلات للطباعة.'); return; }
+  const meta = [['عدد الطلبات', String(rows.length)], ['الفترة', (TR.from||'—')+' → '+(TR.to||'—')], ['السائق', TR.driver||'الكل'], ['تاريخ الطباعة', todayStr()+' '+nowTimeStr()]];
+  const th = wmsTableHtml(['رقم الطلب','التاريخ','السائق','سبب الطلب','ملاحظات','الحالة'], rows.map(r=>[esc(r.req_no), esc(wmsFmtDate(r.request_date)), esc(r.driver_name), esc(r.reason), esc(r.notes||''), r.status==='cancelled'?'ملغي':'نشط']), {widths:[14,11,17,29,20,9]});
+  wmsPrintHtml('سجل طلبات النقل', meta, th);
+}
+/* ---- تقارير السائقين: فترة زمنية → إجمالي، عدد لكل سائق، وتفاصيل كل سائق (التاريخ والسبب). بلا أي مبالغ مالية ---- */
+function trReportData(){
+  const R = TR.rep, dk = R.driver ? trDriverKey(R.driver) : '';
+  const rows = TR.rows.filter(r=> r.status!=='cancelled' && (!R.from || wmsFmtDate(r.request_date)>=R.from) && (!R.to || wmsFmtDate(r.request_date)<=R.to) && (!dk || trDriverKey(r.driver_name)===dk))
+    .sort((a,b)=> wmsFmtDate(a.request_date).localeCompare(wmsFmtDate(b.request_date)) || String(a.created_at).localeCompare(String(b.created_at)));
+  const m = new Map();
+  rows.forEach(r=>{ const k = trDriverKey(r.driver_name); if(!m.has(k)) m.set(k, {key:k, name:trim(r.driver_name).replace(/\s+/g,' '), rows:[]}); m.get(k).rows.push(r); });
+  const drivers = Array.from(m.values()).sort((a,b)=> b.rows.length-a.rows.length || a.name.localeCompare(b.name,'ar'));
+  return {rows, drivers, total: rows.length};
+}
+function trRenderReports(body){
+  const R = TR.rep;
+  body.innerHTML = `<div class="panel"><h2 style="font-size:16px;">📊 تقرير السائقين</h2>
+    <div class="desc">اختر الفترة لعرض إجمالي الطلبات وعدد طلبات كل سائق وتفاصيلها (التاريخ والسبب). الطلبات الملغاة لا تُحتسب. لا تُحتسب أي مبالغ مالية لأنها غير مسجّلة.</div>
+    <div class="grid2"><div><label class="lbl">من تاريخ</label><input type="date" id="trRFrom" value="${esc(R.from)}"></div><div><label class="lbl">إلى تاريخ</label><input type="date" id="trRTo" value="${esc(R.to)}"></div></div>
+    <label class="lbl">السائق</label><select id="trRDriver"><option value="">كل السائقين</option>${trDrivers().map(d=>`<option value="${esc(d.name)}" ${R.driver&&trDriverKey(R.driver)===trDriverKey(d.name)?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+    <div class="btnrow"><button class="secondary" id="trRMonth">هذا الشهر</button><button class="secondary" id="trRAll">كل الفترات</button><button class="secondary" id="trRPrint">🖨️ طباعة</button><button class="secondary" id="trRXlsx">📥 Excel</button></div>
+    <div id="trRArea"></div></div>`;
+  const $ = (id)=>document.getElementById(id);
+  const upd = ()=>{ R.from = $('trRFrom').value; R.to = $('trRTo').value; R.driver = $('trRDriver').value; trRefreshReport(); };
+  ['trRFrom','trRTo','trRDriver'].forEach(i=> $(i).addEventListener('change', upd));
+  $('trRMonth').addEventListener('click', ()=>{ R.from = wmsMonthStart(); R.to = todayStr(); trRenderReports(body); });
+  $('trRAll').addEventListener('click', ()=>{ R.from = ''; R.to = ''; trRenderReports(body); });
+  $('trRPrint').addEventListener('click', trPrintReport);
+  $('trRXlsx').addEventListener('click', trExportReport);
+  trRefreshReport();
+}
+function trRefreshReport(){
+  const area = document.getElementById('trRArea'); if(!area) return;
+  const d = trReportData();
+  if(!d.total){ area.innerHTML = '<div class="msg info" style="margin-top:10px;">لا توجد طلبات نقل ضمن هذه الفترة.</div>'; return; }
+  area.innerHTML = `<div class="kpi-grid"><div class="kpi"><div class="num">${d.total}</div><div class="lbl">إجمالي طلبات النقل</div></div><div class="kpi"><div class="num">${d.drivers.length}</div><div class="lbl">عدد السائقين</div></div></div>
+    <table class="data"><thead><tr><th>السائق</th><th>عدد الطلبات</th><th></th></tr></thead><tbody>${d.drivers.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td class="n">${x.rows.length}</td><td><button class="secondary" data-trdet="${esc(x.key)}">${TR.rep.open===x.key?'إخفاء التفاصيل':'عرض التفاصيل'}</button></td></tr>${(TR.rep.open===x.key||TR.rep.driver)?`<tr><td colspan="3" style="padding:0 0 10px 0;"><table class="data" style="margin:6px 0;"><thead><tr><th>رقم الطلب</th><th>التاريخ</th><th>سبب الطلب</th><th>ملاحظات</th></tr></thead><tbody>${x.rows.map(r=>`<tr><td>${esc(r.req_no)}</td><td>${esc(wmsFmtDate(r.request_date))}</td><td>${esc(r.reason)}</td><td>${esc(r.notes||'')}</td></tr>`).join('')}</tbody></table></td></tr>`:''}`).join('')}
+    <tr class="sch-total"><td><b>الإجمالي</b></td><td class="n">${d.total}</td><td></td></tr></tbody></table>`;
+  area.querySelectorAll('[data-trdet]').forEach(b=> b.addEventListener('click', ()=>{ TR.rep.open = TR.rep.open===b.dataset.trdet ? '' : b.dataset.trdet; trRefreshReport(); }));
+}
+function trExportReport(){
+  const d = trReportData(); if(!d.total){ alert('لا توجد بيانات للتصدير.'); return; }
+  const sum = [['السائق','عدد الطلبات'], ...d.drivers.map(x=>[x.name, x.rows.length]), ['الإجمالي', d.total]];
+  const det = [['السائق','رقم الطلب','التاريخ','سبب الطلب','ملاحظات']];
+  d.drivers.forEach(x=> x.rows.forEach(r=> det.push([x.name, r.req_no, wmsFmtDate(r.request_date), r.reason, r.notes||''])));
+  downloadWorkbook([{name:'ملخص السائقين', ws: aoaSheet(sum,[26,14])}, {name:'تفاصيل الطلبات', ws: aoaSheet(det,[24,16,12,40,34])}], `تقرير_السائقين_${TR.rep.from||'البداية'}_${TR.rep.to||'اليوم'}.xlsx`);
+}
+function trPrintReport(){
+  const d = trReportData(); if(!d.total){ alert('لا توجد بيانات للطباعة.'); return; }
+  const meta = [['الفترة', (TR.rep.from||'—')+' → '+(TR.rep.to||'—')], ['إجمالي الطلبات', String(d.total)], ['عدد السائقين', String(d.drivers.length)], ['تاريخ الطباعة', todayStr()+' '+nowTimeStr()]];
+  const sum = wmsTableHtml(['السائق','عدد الطلبات'], [...d.drivers.map(x=>[esc(x.name), String(x.rows.length)]), ['<b>الإجمالي</b>', `<b>${d.total}</b>`]], {widths:[70,30], num:[1]});
+  const det = d.drivers.map(x=> `<div class="sch-sub">${esc(x.name)} — ${x.rows.length} طلب</div>` + wmsTableHtml(['رقم الطلب','التاريخ','سبب الطلب','ملاحظات'], x.rows.map(r=>[esc(r.req_no), esc(wmsFmtDate(r.request_date)), esc(r.reason), esc(r.notes||'')]), {widths:[18,14,40,28]})).join('');
+  wmsPrintHtml('تقرير طلبات النقل حسب السائق', meta, `<div class="sch-sub">ملخص السائقين</div>`+sum, det);
+}
+
+
+/* ============================================================
+   🧩 إدارة الجداول والأقسام (ديناميكية): dyn_sections → dyn_tables → dyn_columns / dyn_rows (JSONB) — بلا جدول قاعدة بيانات لكل جدول
+   ============================================================ */
+const DYN = {loaded:false, loading:false, err:'', sections:[], tables:[], columns:[], rows:{}, sectionId:null, tableId:null, tab:'data', showArchived:false, showHiddenCols:false,
+  flash:null, q:'', sortCol:'', sortDir:1, fCol:'', fVal:'', fFrom:'', fTo:'', shown:200, tpl:null};
+const DYN_TYPES = {text:'نص', number:'رقم', date:'تاريخ', select:'قائمة خيارات'};
+function dynNewKey(){ return ('c'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)).replace(/[^a-z0-9_]/g,'').slice(0,40); }
+async function dynLoad(){
+  DYN.loading = true; DYN.err = '';
+  try{
+    const [s,t,c] = await Promise.all([
+      wmsGetAll('dyn_sections?select=*&order=sort_order.asc,created_at.asc,id.asc'),
+      wmsGetAll('dyn_tables?select=*&order=sort_order.asc,created_at.asc,id.asc'),
+      wmsGetAll('dyn_columns?select=*&order=sort_order.asc,created_at.asc,id.asc')]);
+    DYN.sections = s; DYN.tables = t; DYN.columns = c; DYN.loaded = true;
+  }catch(e){ DYN.err = e.message; DYN.loaded = true; }
+  DYN.loading = false;
+  dynRerender();
+}
+async function dynLoadRows(tableId){
+  const st = DYN.rows[tableId] = DYN.rows[tableId] || {list:[], loaded:false, loading:false, err:''};
+  st.loading = true; st.err = '';
+  try{ st.list = await wmsGetAll(`dyn_rows?select=*&table_id=eq.${tableId}&deleted_at=is.null&order=created_at.asc,id.asc`); st.loaded = true; }
+  catch(e){ st.err = e.message; st.loaded = true; }
+  st.loading = false;
+  dynRerender();
+}
+function dynRerender(){ if(ACTIVE_TAB==='dyn' && document.getElementById('dynRoot')) renderDynTab(document.getElementById('tabContent')); }
+const dynFlash = (kind, text)=>{ DYN.flash = {kind, text}; };
+const dynSection = (id)=> DYN.sections.find(s=>s.id===id);
+const dynTable = (id)=> DYN.tables.find(t=>t.id===id);
+const dynCols = (tid, all)=> DYN.columns.filter(c=>c.table_id===tid && (all || (!c.is_hidden && !c.archived_at)));
+const dynVisible = (x)=> DYN.showArchived || (!x.is_hidden && !x.archived_at);
+function dynBadges(x){ return (x.archived_at?'<span class="pill bad">مؤرشف</span> ':'') + (x.is_hidden?'<span class="pill warn">مخفي</span>':''); }
+async function dynReorder(list, table, id, dir){
+  const arr = list.slice().sort((a,b)=> (a.sort_order-b.sort_order) || String(a.created_at).localeCompare(String(b.created_at)));
+  const i = arr.findIndex(x=>x.id===id), j = i+dir; if(i<0 || j<0 || j>=arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  const changed = arr.map((x,k)=>({x, k})).filter(o=>o.x.sort_order!==o.k);
+  await Promise.all(changed.map(o=> wmsPatch(table, `id=eq.${o.x.id}`, {sort_order:o.k, updated_at:wmsNowIso()})));
+  changed.forEach(o=>{ o.x.sort_order = o.k; });
+  const byOrder = (a,b)=> (a.sort_order-b.sort_order) || String(a.created_at).localeCompare(String(b.created_at));
+  DYN.sections.sort(byOrder); DYN.tables.sort(byOrder); DYN.columns.sort(byOrder);
+}
+function dynCrumb(){
+  const s = DYN.sectionId ? dynSection(DYN.sectionId) : null, t = DYN.tableId ? dynTable(DYN.tableId) : null;
+  return `<div class="desc" style="margin-bottom:8px;"><a href="#" data-dynnav="root">🧩 الأقسام</a>${s?` ‹ <a href="#" data-dynnav="section">${esc(s.name)}</a>`:''}${t?` ‹ <b>${esc(t.name)}</b>`:''}</div>`;
+}
+function renderDynTab(el){
+  if(!DYN.loaded && !DYN.loading) dynLoad();
+  if(DYN.sectionId && DYN.loaded && !dynSection(DYN.sectionId)){ DYN.sectionId = null; DYN.tableId = null; }
+  if(DYN.tableId && DYN.loaded && !dynTable(DYN.tableId)){ DYN.tableId = null; }
+  el.innerHTML = `<div id="dynRoot"><div class="panel"><h2>🧩 إدارة الجداول والأقسام</h2>
+    <div class="desc">أنشئ أقسامًا وجداول بأعمدتك الخاصة (نص، رقم، تاريخ، قائمة خيارات) وأدخل بياناتها وابحث وافرز واطبع وصدّر إلى Excel — دون تعديل الكود. تُحفظ في Supabase وتظهر من أي جهاز. لا حذف نهائي: الإخفاء والأرشفة والحذف الناعم مع سجل تغييرات واسترجاع.</div>
+    ${DYN.flash?`<div class="msg ${DYN.flash.kind}">${esc(DYN.flash.text)}</div>`:''}
+    ${dynCrumb()}</div><div id="dynBody"></div></div>`;
+  el.querySelectorAll('[data-dynnav]').forEach(a=> a.addEventListener('click', (e)=>{ e.preventDefault(); DYN.flash = null; if(a.dataset.dynnav==='root'){ DYN.sectionId=null; DYN.tableId=null; } else { DYN.tableId=null; } DYN.q=''; DYN.sortCol=''; DYN.fCol=''; DYN.fVal=''; DYN.fFrom=''; DYN.fTo=''; renderDynTab(el); }));
+  const body = document.getElementById('dynBody');
+  if(!DYN.loaded){ body.innerHTML = '<div class="panel"><div class="desc">جارٍ التحميل…</div></div>'; return; }
+  if(DYN.err){ body.innerHTML = `<div class="panel"><div class="msg bad">${esc(DYN.err)}</div><div class="btnrow"><button class="secondary" id="dynRetry">🔄 إعادة المحاولة</button></div></div>`; document.getElementById('dynRetry').addEventListener('click', ()=>{ DYN.loaded=false; renderDynTab(el); }); return; }
+  if(!DYN.sectionId) return dynRenderSections(body);
+  if(!DYN.tableId) return dynRenderTables(body);
+  return dynRenderTable(body);
+}
+/* ---- الأقسام ---- */
+function dynRenderSections(body){
+  const list = DYN.sections.filter(dynVisible);
+  body.innerHTML = `<div class="panel"><h2 style="font-size:16px;">الأقسام</h2>
+    <div class="grid2"><input type="text" id="dynNewSec" autocomplete="off" placeholder="اسم قسم جديد (مثال: الدوام، الديزل، المطالبات المالية)"><button class="primary" id="dynAddSec">➕ إضافة قسم</button></div><div id="dynSecMsg"></div>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin:8px 0;"><input type="checkbox" id="dynShowArch" ${DYN.showArchived?'checked':''}> إظهار المخفي والمؤرشف</label>
+    ${list.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>القسم</th><th>الجداول</th><th></th></tr></thead><tbody>${list.map(s=>`<tr><td><b>${esc(s.name)}</b> ${dynBadges(s)}</td><td class="n">${DYN.tables.filter(t=>t.section_id===s.id && !t.archived_at).length}</td><td>
+      <button class="primary" data-secopen="${s.id}">فتح</button>
+      <button class="secondary" data-secren="${s.id}">✏️ تسمية</button>
+      <button class="secondary" data-secup="${s.id}" title="تقديم">▲</button><button class="secondary" data-secdn="${s.id}" title="تأخير">▼</button>
+      <button class="secondary" data-sechide="${s.id}">${s.is_hidden?'👁 إظهار':'🙈 إخفاء'}</button>
+      <button class="secondary" data-secarch="${s.id}">${s.archived_at?'♻️ استعادة':'🗄️ أرشفة'}</button>
+      <button class="secondary" data-sechist="${s.id}">🕘</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="msg info">لا توجد أقسام بعد. أضف أول قسم من الأعلى.</div>'}</div>`;
+  const $ = (id)=>document.getElementById(id);
+  $('dynShowArch').addEventListener('change', ()=>{ DYN.showArchived = $('dynShowArch').checked; dynRerender(); });
+  const add = async ()=>{
+    const name = trim($('dynNewSec').value); if(!name){ showMsg('dynSecMsg','warn','اكتب اسم القسم.'); return; }
+    if(DYN.sections.some(s=>wmsNorm(s.name)===wmsNorm(name) && !s.archived_at)){ showMsg('dynSecMsg','warn','يوجد قسم بهذا الاسم.'); return; }
+    setBusy('dynAddSec', true, '⏳ …');
+    try{
+      const r = await wmsInsert('dyn_sections', [{name, sort_order: DYN.sections.reduce((m,s)=>Math.max(m,s.sort_order+1),0)}]);
+      DYN.sections.push(r[0]); dynFlash('ok', `تم إنشاء القسم «${name}».`); dynRerender();
+    }catch(e){ setBusy('dynAddSec', false, '➕ إضافة قسم'); showMsg('dynSecMsg','bad','لم يُنشأ القسم: '+e.message); }
+  };
+  $('dynAddSec').addEventListener('click', add);
+  $('dynNewSec').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
+  const act = (attr, fn)=> body.querySelectorAll(`[data-${attr}]`).forEach(b=> b.addEventListener('click', async ()=>{ b.disabled = true; try{ await fn(b.dataset[attr.replace(/-./g,m=>m[1].toUpperCase())]); }catch(e){ dynFlash('bad', 'تعذّر الإجراء: '+e.message); } dynRerender(); }));
+  act('secopen', (id)=>{ DYN.sectionId = id; DYN.flash = null; });
+  act('secren', async (id)=>{ const s = dynSection(id); const n = prompt('اسم القسم الجديد:', s.name); if(n===null) return; const name = trim(n); if(!name) throw new Error('الاسم فارغ'); const r = await wmsPatch('dyn_sections', `id=eq.${id}`, {name, updated_at:wmsNowIso()}); Object.assign(s, r[0]); dynFlash('ok','تم تعديل الاسم.'); });
+  act('secup', async (id)=>{ await dynReorder(DYN.sections, 'dyn_sections', id, -1); });
+  act('secdn', async (id)=>{ await dynReorder(DYN.sections, 'dyn_sections', id, 1); });
+  act('sechide', async (id)=>{ const s = dynSection(id); const r = await wmsPatch('dyn_sections', `id=eq.${id}`, {is_hidden:!s.is_hidden, updated_at:wmsNowIso()}); Object.assign(s, r[0]); dynFlash('ok', s.is_hidden?'تم إخفاء القسم (بياناته محفوظة).':'تم إظهار القسم.'); });
+  act('secarch', async (id)=>{ const s = dynSection(id); const r = await wmsPatch('dyn_sections', `id=eq.${id}`, {archived_at: s.archived_at?null:wmsNowIso(), updated_at:wmsNowIso()}); Object.assign(s, r[0]); dynFlash('ok', s.archived_at?'تمت أرشفة القسم (بياناته محفوظة ويمكن استعادته).':'تمت استعادة القسم.'); });
+  body.querySelectorAll('[data-sechist]').forEach(b=> b.addEventListener('click', ()=>{ const s = dynSection(b.dataset.sechist); wmsOpenHistory('dyn_sections', s.id, s.name, async ()=>{ await dynLoad(); }, {name:'الاسم', sort_order:'الترتيب', is_hidden:'مخفي', archived_at:'مؤرشف'}); }));
+}
+/* ---- الجداول داخل قسم ---- */
+function dynRenderTables(body){
+  const sec = dynSection(DYN.sectionId);
+  const list = DYN.tables.filter(t=>t.section_id===sec.id && dynVisible(t));
+  body.innerHTML = `<div class="panel"><h2 style="font-size:16px;">جداول القسم «${esc(sec.name)}»</h2>
+    <div class="grid2"><input type="text" id="dynNewTbl" autocomplete="off" placeholder="اسم جدول جديد"><button class="primary" id="dynAddTbl">➕ إضافة جدول</button></div><div id="dynTblMsg"></div>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin:8px 0;"><input type="checkbox" id="dynShowArch" ${DYN.showArchived?'checked':''}> إظهار المخفي والمؤرشف</label>
+    ${list.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>الجدول</th><th>الأعمدة</th><th></th></tr></thead><tbody>${list.map(t=>`<tr><td><b>${esc(t.name)}</b> ${dynBadges(t)}</td><td class="n">${dynCols(t.id).length}</td><td>
+      <button class="primary" data-tblopen="${t.id}">فتح</button><button class="secondary" data-tblren="${t.id}">✏️ تسمية</button>
+      <button class="secondary" data-tblup="${t.id}">▲</button><button class="secondary" data-tbldn="${t.id}">▼</button>
+      <button class="secondary" data-tblhide="${t.id}">${t.is_hidden?'👁 إظهار':'🙈 إخفاء'}</button><button class="secondary" data-tblarch="${t.id}">${t.archived_at?'♻️ استعادة':'🗄️ أرشفة'}</button>
+      <button class="secondary" data-tblhist="${t.id}">🕘</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="msg info">لا توجد جداول في هذا القسم. أضف أول جدول.</div>'}</div>`;
+  const $ = (id)=>document.getElementById(id);
+  $('dynShowArch').addEventListener('change', ()=>{ DYN.showArchived = $('dynShowArch').checked; dynRerender(); });
+  const add = async ()=>{
+    const name = trim($('dynNewTbl').value); if(!name){ showMsg('dynTblMsg','warn','اكتب اسم الجدول.'); return; }
+    if(DYN.tables.some(t=>t.section_id===sec.id && !t.archived_at && wmsNorm(t.name)===wmsNorm(name))){ showMsg('dynTblMsg','warn','يوجد جدول بهذا الاسم في القسم.'); return; }
+    setBusy('dynAddTbl', true, '⏳ …');
+    try{
+      const r = await wmsInsert('dyn_tables', [{section_id:sec.id, name, sort_order: DYN.tables.filter(t=>t.section_id===sec.id).reduce((m,t)=>Math.max(m,t.sort_order+1),0)}]);
+      DYN.tables.push(r[0]); DYN.tableId = r[0].id; DYN.tab = 'columns'; dynFlash('ok', `تم إنشاء الجدول «${name}» — أضف أعمدته الآن.`); dynRerender();
+    }catch(e){ setBusy('dynAddTbl', false, '➕ إضافة جدول'); showMsg('dynTblMsg','bad','لم يُنشأ الجدول: '+e.message); }
+  };
+  $('dynAddTbl').addEventListener('click', add);
+  $('dynNewTbl').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
+  const act = (attr, fn)=> body.querySelectorAll(`[data-${attr}]`).forEach(b=> b.addEventListener('click', async ()=>{ b.disabled = true; try{ await fn(b.dataset[attr]); }catch(e){ dynFlash('bad','تعذّر الإجراء: '+e.message); } dynRerender(); }));
+  act('tblopen', (id)=>{ DYN.tableId = id; DYN.tab = 'data'; DYN.flash = null; DYN.q=''; DYN.sortCol=''; DYN.fCol=''; DYN.shown=200; if(!(DYN.rows[id]&&DYN.rows[id].loaded)) dynLoadRows(id); });
+  act('tblren', async (id)=>{ const t = dynTable(id); const n = prompt('اسم الجدول الجديد:', t.name); if(n===null) return; const name = trim(n); if(!name) throw new Error('الاسم فارغ'); const r = await wmsPatch('dyn_tables', `id=eq.${id}`, {name, updated_at:wmsNowIso()}); Object.assign(t, r[0]); dynFlash('ok','تم تعديل الاسم.'); });
+  act('tblup', async (id)=>{ await dynReorder(DYN.tables.filter(t=>t.section_id===sec.id), 'dyn_tables', id, -1); });
+  act('tbldn', async (id)=>{ await dynReorder(DYN.tables.filter(t=>t.section_id===sec.id), 'dyn_tables', id, 1); });
+  act('tblhide', async (id)=>{ const t = dynTable(id); const r = await wmsPatch('dyn_tables', `id=eq.${id}`, {is_hidden:!t.is_hidden, updated_at:wmsNowIso()}); Object.assign(t, r[0]); dynFlash('ok', t.is_hidden?'تم إخفاء الجدول (بياناته محفوظة).':'تم إظهار الجدول.'); });
+  act('tblarch', async (id)=>{ const t = dynTable(id); const r = await wmsPatch('dyn_tables', `id=eq.${id}`, {archived_at: t.archived_at?null:wmsNowIso(), updated_at:wmsNowIso()}); Object.assign(t, r[0]); dynFlash('ok', t.archived_at?'تمت أرشفة الجدول (بياناته محفوظة).':'تمت استعادة الجدول.'); });
+  body.querySelectorAll('[data-tblhist]').forEach(b=> b.addEventListener('click', ()=>{ const t = dynTable(b.dataset.tblhist); wmsOpenHistory('dyn_tables', t.id, t.name, async ()=>{ await dynLoad(); }, {name:'الاسم', sort_order:'الترتيب', is_hidden:'مخفي', archived_at:'مؤرشف'}); }));
+}
+/* ---- شاشة الجدول: البيانات | الأعمدة | النموذج المعتمد ---- */
+function dynRenderTable(body){
+  const t = dynTable(DYN.tableId);
+  body.innerHTML = `<div class="panel"><h2 style="font-size:16px;">📋 ${esc(t.name)}</h2>
+    <nav class="tabs" style="margin:6px 0 0;"><button data-dtab="data" class="${DYN.tab==='data'?'active':''}">📄 البيانات</button><button data-dtab="columns" class="${DYN.tab==='columns'?'active':''}">⚙️ الأعمدة</button><button data-dtab="tpl" class="${DYN.tab==='tpl'?'active':''}">📎 النموذج المعتمد</button></nav></div><div id="dynTabBody"></div>`;
+  body.querySelectorAll('[data-dtab]').forEach(b=> b.addEventListener('click', ()=>{ DYN.tab = b.dataset.dtab; DYN.flash = null; dynRerender(); }));
+  const tb = document.getElementById('dynTabBody');
+  if(DYN.tab==='columns') return dynRenderColumns(tb, t);
+  if(DYN.tab==='tpl') return (typeof dynTplRender==='function') ? dynTplRender(tb, t) : (tb.innerHTML = '<div class="panel"><div class="msg info">النماذج غير متاحة.</div></div>');
+  return dynRenderData(tb, t);
+}
+/* ---- الأعمدة ---- */
+function dynRenderColumns(tb, t){
+  const all = dynCols(t.id, true).filter(c=>!c.archived_at);
+  const list = all.filter(c=> DYN.showHiddenCols || !c.is_hidden);
+  const hasRows = !!(DYN.rows[t.id] && DYN.rows[t.id].list.length);
+  tb.innerHTML = `<div class="panel"><h2 style="font-size:16px;">أعمدة الجدول</h2>
+    <div class="desc">«إزالة» عمود = إخفاؤه فقط؛ بياناته تبقى محفوظة ويمكن إظهاره لاحقاً. تغيير اسم العمود لا يمس بياناته.</div>
+    <div class="grid2"><input type="text" id="dcLabel" autocomplete="off" placeholder="اسم العمود"><select id="dcType">${Object.entries(DYN_TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div>
+    <div id="dcOptWrap" style="display:none;"><label class="lbl">خيارات القائمة (سطر لكل خيار أو مفصولة بفاصلة)</label><textarea id="dcOpts" rows="3"></textarea></div>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin:6px 0;"><input type="checkbox" id="dcReq"> حقل مطلوب</label>
+    <div class="btnrow"><button class="primary" id="dcAdd">➕ إضافة عمود</button></div><div id="dcMsg"></div>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin:8px 0;"><input type="checkbox" id="dcShowHid" ${DYN.showHiddenCols?'checked':''}> إظهار الأعمدة المخفية</label>
+    ${list.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>#</th><th>العمود</th><th>النوع</th><th>الخيارات</th><th>مطلوب</th><th></th></tr></thead><tbody>${list.map((c,i)=>`<tr class="${c.is_hidden?'short':''}"><td>${i+1}</td><td><b>${esc(c.label)}</b> ${c.is_hidden?'<span class="pill warn">مخفي</span>':''}</td><td>${DYN_TYPES[c.col_type]}</td><td>${c.col_type==='select'?esc((c.options||[]).join('، ')):''}</td><td>${c.is_required?'نعم':''}</td><td>
+      <button class="secondary" data-cedit="${c.id}">✏️ تعديل</button><button class="secondary" data-cup="${c.id}">▲</button><button class="secondary" data-cdn="${c.id}">▼</button>
+      <button class="secondary" data-chide="${c.id}">${c.is_hidden?'👁 إظهار':'🙈 إزالة (إخفاء)'}</button><button class="secondary" data-chist="${c.id}">🕘</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="msg info">لا توجد أعمدة بعد. أضف عموداً واحداً على الأقل لإدخال البيانات.</div>'}</div>`;
+  const $ = (id)=>document.getElementById(id);
+  const parseOpts = (s)=> Array.from(new Set(String(s||'').split(/[\n,،]+/).map(x=>trim(x)).filter(Boolean)));
+  $('dcType').addEventListener('change', ()=>{ $('dcOptWrap').style.display = $('dcType').value==='select' ? '' : 'none'; });
+  $('dcShowHid').addEventListener('change', ()=>{ DYN.showHiddenCols = $('dcShowHid').checked; dynRerender(); });
+  const add = async ()=>{
+    const label = trim($('dcLabel').value); if(!label){ showMsg('dcMsg','warn','اكتب اسم العمود.'); return; }
+    if(all.some(c=>wmsNorm(c.label)===wmsNorm(label))){ showMsg('dcMsg','warn','يوجد عمود بهذا الاسم.'); return; }
+    const type = $('dcType').value, opts = type==='select' ? parseOpts($('dcOpts').value) : [];
+    if(type==='select' && !opts.length){ showMsg('dcMsg','warn','أدخل خياراً واحداً على الأقل للقائمة.'); return; }
+    setBusy('dcAdd', true, '⏳ …');
+    try{
+      const r = await wmsInsert('dyn_columns', [{table_id:t.id, col_key:dynNewKey(), label, col_type:type, options:opts, is_required:$('dcReq').checked, sort_order: all.reduce((m,c)=>Math.max(m,c.sort_order+1),0)}]);
+      DYN.columns.push(r[0]); dynFlash('ok', `تمت إضافة العمود «${label}».`); dynRerender();
+    }catch(e){ setBusy('dcAdd', false, '➕ إضافة عمود'); showMsg('dcMsg','bad','لم يُضَف العمود: '+e.message); }
+  };
+  $('dcAdd').addEventListener('click', add);
+  $('dcLabel').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
+  const act = (attr, fn)=> tb.querySelectorAll(`[data-${attr}]`).forEach(b=> b.addEventListener('click', async ()=>{ b.disabled = true; try{ await fn(b.dataset[attr]); }catch(e){ dynFlash('bad','تعذّر الإجراء: '+e.message); } dynRerender(); }));
+  act('cup', async (id)=>{ await dynReorder(all, 'dyn_columns', id, -1); });
+  act('cdn', async (id)=>{ await dynReorder(all, 'dyn_columns', id, 1); });
+  act('chide', async (id)=>{ const c = DYN.columns.find(x=>x.id===id); if(!c.is_hidden && !confirm(`إزالة العمود «${c.label}» من الجدول؟ سيُخفى فقط وتبقى بياناته محفوظة ويمكن إظهاره لاحقاً.`)) return; const r = await wmsPatch('dyn_columns', `id=eq.${id}`, {is_hidden:!c.is_hidden, updated_at:wmsNowIso()}); Object.assign(c, r[0]); dynFlash('ok', c.is_hidden?'تم إخفاء العمود (البيانات محفوظة).':'تم إظهار العمود.'); });
+  tb.querySelectorAll('[data-chist]').forEach(b=> b.addEventListener('click', ()=>{ const c = DYN.columns.find(x=>x.id===b.dataset.chist); wmsOpenHistory('dyn_columns', c.id, c.label, async ()=>{ await dynLoad(); }, {label:'الاسم', col_type:'النوع', options:'الخيارات', is_required:'مطلوب', is_hidden:'مخفي', sort_order:'الترتيب'}); }));
+  tb.querySelectorAll('[data-cedit]').forEach(b=> b.addEventListener('click', ()=> dynEditColumn(b.dataset.cedit, hasRows)));
+}
+function dynEditColumn(id, hasRows){
+  const c = DYN.columns.find(x=>x.id===id);
+  openModal('✏️ تعديل العمود', (b)=>{
+    b.innerHTML = `<label class="lbl">اسم العمود</label><input type="text" id="ceLabel" value="${esc(c.label)}">
+      <label class="lbl">النوع</label><select id="ceType">${Object.entries(DYN_TYPES).map(([k,v])=>`<option value="${k}" ${c.col_type===k?'selected':''}>${v}</option>`).join('')}</select>
+      ${hasRows?'<div class="msg warn">تغيير النوع لا يعدّل القيم المخزّنة سابقاً؛ تُعرض كما هي.</div>':''}
+      <div id="ceOptWrap" style="${c.col_type==='select'?'':'display:none;'}"><label class="lbl">خيارات القائمة</label><textarea id="ceOpts" rows="3">${esc((c.options||[]).join('\n'))}</textarea><div class="desc">حذف خيار من القائمة لا يمس الصفوف التي تستخدمه.</div></div>
+      <label style="display:inline-flex;gap:6px;align-items:center;margin:6px 0;"><input type="checkbox" id="ceReq" ${c.is_required?'checked':''}> حقل مطلوب</label>
+      <div class="btnrow"><button class="primary" id="ceSave">💾 حفظ</button><button class="secondary" id="ceClose">إغلاق</button></div><div id="ceMsg"></div>`;
+    const $ = (i)=>document.getElementById(i);
+    $('ceType').addEventListener('change', ()=>{ $('ceOptWrap').style.display = $('ceType').value==='select' ? '' : 'none'; });
+    $('ceClose').addEventListener('click', closeModal);
+    $('ceSave').addEventListener('click', async ()=>{
+      const label = trim($('ceLabel').value); if(!label){ showMsg('ceMsg','warn','اسم العمود مطلوب.'); return; }
+      const type = $('ceType').value; const opts = type==='select' ? Array.from(new Set($('ceOpts').value.split(/[\n,،]+/).map(x=>trim(x)).filter(Boolean))) : [];
+      if(type==='select' && !opts.length){ showMsg('ceMsg','warn','أدخل خياراً واحداً على الأقل.'); return; }
+      setBusy('ceSave', true, '⏳ …');
+      try{ const r = await wmsPatch('dyn_columns', `id=eq.${id}`, {label, col_type:type, options:opts, is_required:$('ceReq').checked, updated_at:wmsNowIso()}); Object.assign(c, r[0]); closeModal(); dynFlash('ok','تم حفظ تعديل العمود.'); dynRerender(); }
+      catch(e){ setBusy('ceSave', false, '💾 حفظ'); showMsg('ceMsg','bad','لم يُحفظ: '+e.message); }
+    });
+  }, {maxWidth:'560px'});
+}
+/* ---- البيانات ---- */
+function dynFmtCell(c, v){
+  if(v===null||v===undefined||v==='') return '';
+  if(c.col_type==='number'){ const n = Number(v); return isNaN(n) ? String(v) : String(n); }
+  return String(v);
+}
+function dynFilteredRows(t, cols){
+  const st = DYN.rows[t.id]; if(!st) return [];
+  const q = wmsNorm(DYN.q);
+  let rows = st.list.filter(r=>{
+    const d = r.data||{};
+    if(q && !cols.some(c=> wmsNorm(d[c.col_key]).includes(q))) return false;
+    if(DYN.fCol){
+      const c = cols.find(x=>x.col_key===DYN.fCol);
+      if(c){
+        const v = d[c.col_key];
+        if(c.col_type==='select'){ if(DYN.fVal && String(v||'')!==DYN.fVal) return false; }
+        else if(c.col_type==='text'){ if(DYN.fVal && !wmsNorm(v).includes(wmsNorm(DYN.fVal))) return false; }
+        else if(c.col_type==='number'){ if(DYN.fFrom!=='' && !(Number(v)>=Number(DYN.fFrom))) return false; if(DYN.fTo!=='' && !(Number(v)<=Number(DYN.fTo))) return false; }
+        else if(c.col_type==='date'){ if(DYN.fFrom && !(String(v||'')>=DYN.fFrom)) return false; if(DYN.fTo && !(String(v||'')<=DYN.fTo)) return false; }
+      }
+    }
+    return true;
+  });
+  if(DYN.sortCol){
+    const c = cols.find(x=>x.col_key===DYN.sortCol);
+    if(c) rows = rows.slice().sort((a,b)=> DYN.sortDir * wmsCmp((a.data||{})[c.col_key], (b.data||{})[c.col_key], c.col_type));
+  }
+  return rows;
+}
+function dynRenderData(tb, t){
+  const cols = dynCols(t.id);
+  const st = DYN.rows[t.id];
+  if(!st || !st.loaded){ if(!st || !st.loading) dynLoadRows(t.id); tb.innerHTML = '<div class="panel"><div class="desc">جارٍ تحميل صفوف الجدول…</div></div>'; return; }
+  if(st.err){ tb.innerHTML = `<div class="panel"><div class="msg bad">${esc(st.err)}</div><div class="btnrow"><button class="secondary" id="drRetry">🔄 إعادة المحاولة</button></div></div>`; document.getElementById('drRetry').addEventListener('click', ()=>{ st.loaded=false; dynLoadRows(t.id); }); return; }
+  if(!cols.length){ tb.innerHTML = '<div class="panel"><div class="msg info">أضف أعمدة للجدول أولاً من تبويب «الأعمدة».</div></div>'; return; }
+  const fc = DYN.fCol ? cols.find(c=>c.col_key===DYN.fCol) : null;
+  tb.innerHTML = `<div class="panel">
+    <div class="btnrow" style="margin-top:0;"><button class="primary" id="drAdd">➕ صف جديد</button><button class="secondary" id="drPrint">🖨️ طباعة</button><button class="secondary" id="drXlsx">📥 Excel</button><button class="secondary" id="drRefresh">🔄 تحديث</button></div>
+    <div class="grid2"><input type="text" id="drQ" autocomplete="off" placeholder="بحث في كل أعمدة الجدول…" value="${esc(DYN.q)}">
+      <select id="drFCol"><option value="">تصفية حسب عمود…</option>${cols.map(c=>`<option value="${c.col_key}" ${DYN.fCol===c.col_key?'selected':''}>${esc(c.label)}</option>`).join('')}</select></div>
+    <div id="drFArea" style="margin-top:6px;">${!fc?'':fc.col_type==='select'?`<select id="drFVal"><option value="">الكل</option>${(fc.options||[]).map(o=>`<option ${DYN.fVal===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`:fc.col_type==='text'?`<input type="text" id="drFVal" placeholder="يحتوي على…" value="${esc(DYN.fVal)}">`:`<div class="grid2"><input type="${fc.col_type==='date'?'date':'number'}" id="drFFrom" value="${esc(DYN.fFrom)}"><input type="${fc.col_type==='date'?'date':'number'}" id="drFTo" value="${esc(DYN.fTo)}"></div><div class="desc">من — إلى</div>`}</div>
+    <div id="drList"></div></div>`;
+  const $ = (id)=>document.getElementById(id);
+  $('drAdd').addEventListener('click', ()=> dynOpenRow(t, null));
+  $('drPrint').addEventListener('click', ()=> dynPrintTable(t));
+  $('drXlsx').addEventListener('click', ()=> dynExportTable(t));
+  $('drRefresh').addEventListener('click', ()=>{ st.loaded=false; dynLoadRows(t.id); });
+  $('drQ').addEventListener('input', debounce(()=>{ DYN.q = $('drQ').value; DYN.shown = 200; dynRefreshRows(t); }, 160));
+  $('drFCol').addEventListener('change', ()=>{ DYN.fCol = $('drFCol').value; DYN.fVal=''; DYN.fFrom=''; DYN.fTo=''; dynRerender(); });
+  ['drFVal','drFFrom','drFTo'].forEach(id=>{ const e = $(id); if(!e) return; e.addEventListener(e.tagName==='SELECT'||e.type==='date'?'change':'input', debounce(()=>{ if(id==='drFVal') DYN.fVal = e.value; if(id==='drFFrom') DYN.fFrom = e.value; if(id==='drFTo') DYN.fTo = e.value; DYN.shown = 200; dynRefreshRows(t); }, 160)); });
+  dynRefreshRows(t);
+}
+function dynRefreshRows(t){
+  const area = document.getElementById('drList'); if(!area) return;
+  const cols = dynCols(t.id); const rows = dynFilteredRows(t, cols); const shown = rows.slice(0, DYN.shown);
+  const total = DYN.rows[t.id].list.length;
+  area.innerHTML = `<div class="desc" style="margin:8px 0;">عدد الصفوف: <b>${rows.length}</b> من ${total}</div>` + (rows.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>#</th>${cols.map(c=>`<th><button type="button" class="linkbtn" data-sort="${c.col_key}" style="background:none;border:0;font:inherit;color:inherit;cursor:pointer;">${esc(c.label)}${DYN.sortCol===c.col_key?(DYN.sortDir>0?' ▲':' ▼'):''}</button></th>`).join('')}<th></th></tr></thead><tbody>${
+    shown.map((r,i)=>`<tr><td>${i+1}</td>${cols.map(c=>`<td class="${c.col_type==='number'?'n':''}">${esc(dynFmtCell(c,(r.data||{})[c.col_key]))}</td>`).join('')}<td style="white-space:nowrap;"><button class="secondary" data-redit="${r.id}">✏️</button><button class="secondary" data-rhist="${r.id}">🕘</button><button class="secondary" data-rdel="${r.id}">🗑️</button></td></tr>`).join('')}</tbody></table></div>${rows.length>shown.length?'<div class="btnrow"><button class="secondary" id="drMore">عرض المزيد</button></div>':''}` : `<div class="msg info">${total?'لا توجد نتائج مطابقة.':'لا توجد صفوف بعد. اضغط «صف جديد».'}</div>`);
+  area.querySelectorAll('[data-sort]').forEach(b=> b.addEventListener('click', ()=>{ if(DYN.sortCol===b.dataset.sort) DYN.sortDir = -DYN.sortDir; else { DYN.sortCol = b.dataset.sort; DYN.sortDir = 1; } dynRefreshRows(t); }));
+  area.querySelectorAll('[data-redit]').forEach(b=> b.addEventListener('click', ()=> dynOpenRow(t, b.dataset.redit)));
+  area.querySelectorAll('[data-rhist]').forEach(b=> b.addEventListener('click', ()=> wmsOpenHistory('dyn_rows', b.dataset.rhist, t.name, async ()=>{ await dynLoadRows(t.id); }, {data:'البيانات', deleted_at:'محذوف', __col:(k)=>{ const c = DYN.columns.find(x=>x.col_key===k && x.table_id===t.id); return c?c.label:k; }})));
+  area.querySelectorAll('[data-rdel]').forEach(b=> b.addEventListener('click', async ()=>{
+    if(!confirm('حذف هذا الصف؟ سيُخفى من الجدول (حذف ناعم) ويبقى محفوظاً في سجل التغييرات ويمكن استرجاعه.')) return;
+    b.disabled = true;
+    try{ const r = await wmsPatch('dyn_rows', `id=eq.${b.dataset.rdel}&deleted_at=is.null`, {deleted_at:wmsNowIso(), updated_at:wmsNowIso(), updated_by:CURRENT_SESSION.user.id}); if(!r.length) throw new Error('السجل لم يعد موجوداً'); DYN.rows[t.id].list = DYN.rows[t.id].list.filter(x=>x.id!==b.dataset.rdel); dynFlash('ok','تم حذف الصف (حذف ناعم قابل للاسترجاع من سجل التغييرات).'); dynRerender(); }
+    catch(e){ b.disabled = false; dynFlash('bad','تعذّر الحذف: '+e.message); dynRerender(); }
+  }));
+  const more = document.getElementById('drMore'); if(more) more.addEventListener('click', ()=>{ DYN.shown += 300; dynRefreshRows(t); });
+}
+function dynToLatinDigits(s){ return String(s).replace(/[٠-٩]/g, d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g, d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/٫/g,'.').replace(/٬/g,''); }
+function dynReadForm(cols){
+  const data = {}, errs = [];
+  cols.forEach(c=>{
+    const el = document.getElementById('dr_'+c.col_key); let v = el ? trim(el.value) : '';
+    if(v===''){ if(c.is_required) errs.push(`«${c.label}» مطلوب`); return; }
+    if(c.col_type==='number'){ const n = Number(dynToLatinDigits(v)); if(!isFinite(n)){ errs.push(`«${c.label}» يجب أن يكون رقماً`); return; } data[c.col_key] = n; }
+    else if(c.col_type==='date'){ if(!/^\d{4}-\d{2}-\d{2}$/.test(v) || isNaN(Date.parse(v))){ errs.push(`«${c.label}» تاريخ غير صالح`); return; } data[c.col_key] = v; }
+    else data[c.col_key] = v;
+  });
+  return {data, errs};
+}
+function dynOpenRow(t, rowId){
+  const cols = dynCols(t.id); const st = DYN.rows[t.id];
+  const row = rowId ? st.list.find(r=>r.id===rowId) : null;
+  const d = row ? (row.data||{}) : {};
+  const field = (c)=>{
+    const v = d[c.col_key]; const id = 'dr_'+c.col_key;
+    const lab = `<label class="lbl">${esc(c.label)}${c.is_required?' *':''}</label>`;
+    if(c.col_type==='select'){ const opts = (c.options||[]).slice(); if(v && !opts.includes(String(v))) opts.unshift(String(v)); return lab+`<select id="${id}"><option value=""></option>${opts.map(o=>`<option ${String(v)===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`; }
+    if(c.col_type==='date') return lab+`<input type="date" id="${id}" value="${esc(v||'')}">`;
+    if(c.col_type==='number') return lab+`<input type="text" inputmode="decimal" id="${id}" value="${esc(v===undefined?'':v)}" autocomplete="off">`;
+    return lab+`<input type="text" id="${id}" value="${esc(v||'')}" autocomplete="off">`;
+  };
+  openModal(row?'✏️ تعديل صف':'➕ صف جديد', (b)=>{
+    b.innerHTML = cols.map(field).join('') + `<div class="btnrow"><button class="primary" id="drSave">💾 حفظ</button>${row?'':'<button class="secondary" id="drSaveNew">💾 حفظ وإضافة آخر</button>'}<button class="secondary" id="drClose">إغلاق</button></div><div id="drMsg"></div>`;
+    const first = b.querySelector('input,select'); if(first) first.focus();
+    document.getElementById('drClose').addEventListener('click', closeModal);
+    const save = async (again)=>{
+      const {data, errs} = dynReadForm(cols);
+      if(errs.length){ showMsg('drMsg','warn', errs.join('، ')); return; }
+      setBusy('drSave', true, '⏳ …'); const bn = document.getElementById('drSaveNew'); if(bn) bn.disabled = true;
+      try{
+        if(row){
+          /* لا استبدال صامت: يُحدَّث الصف فقط إن لم يتغيّر منذ فتحه */
+          const r = await wmsPatch('dyn_rows', `id=eq.${row.id}&updated_at=eq.${encodeURIComponent(row.updated_at)}`, {data:Object.assign({}, d, Object.fromEntries(cols.map(c=>[c.col_key, null])), data), updated_at:wmsNowIso(), updated_by:CURRENT_SESSION.user.id});
+          if(!r.length) throw new Error('تم تعديل هذا الصف من مكان آخر — حدّث الجدول ثم أعد المحاولة.');
+          const clean = Object.assign({}, r[0]); clean.data = Object.fromEntries(Object.entries(clean.data||{}).filter(([,v])=>v!==null));
+          Object.assign(row, clean); dynFlash('ok','تم حفظ تعديل الصف.'); closeModal(); dynRerender();
+        } else {
+          const r = await wmsInsert('dyn_rows', [{table_id:t.id, data}]);
+          st.list.push(r[0]); dynFlash('ok','تم حفظ الصف.');
+          if(again){ closeModal(); dynRerender(); dynOpenRow(t, null); } else { closeModal(); dynRerender(); }
+        }
+      }catch(e){ setBusy('drSave', false, '💾 حفظ'); if(bn) bn.disabled = false; showMsg('drMsg','bad','لم يُحفظ: '+e.message); }
+    };
+    document.getElementById('drSave').addEventListener('click', ()=>save(false));
+    const bn = document.getElementById('drSaveNew'); if(bn) bn.addEventListener('click', ()=>save(true));
+    b.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); save(false); } }));
+  }, {maxWidth:'620px'});
+}
+function dynTableAoa(t, rows, cols){
+  return [cols.map(c=>c.label), ...rows.map(r=> cols.map(c=>{ const v = (r.data||{})[c.col_key]; if(v===undefined||v===null||v==='') return ''; return c.col_type==='number' ? Number(v) : v; }))];
+}
+function dynExportTable(t){
+  const cols = dynCols(t.id); const rows = dynFilteredRows(t, cols);
+  if(!rows.length){ alert('لا توجد صفوف للتصدير.'); return; }
+  const ws = aoaSheet(dynTableAoa(t, rows, cols), cols.map(c=>Math.max(12, Math.min(40, c.label.length+6))));
+  downloadWorkbook([{name: safeSheetName(t.name), ws}], `${t.name}_${todayStr()}.xlsx`);
+}
+function dynTableHtmlForPrint(t, rows, cols){
+  return wmsTableHtml(['#', ...cols.map(c=>c.label)], rows.map((r,i)=>[String(i+1), ...cols.map(c=>esc(dynFmtCell(c,(r.data||{})[c.col_key])))]), {num: cols.map((c,i)=>c.col_type==='number'?i+1:-1)});
+}
+function dynPrintTable(t){
+  const cols = dynCols(t.id); const rows = dynFilteredRows(t, cols);
+  if(!rows.length){ alert('لا توجد صفوف للطباعة.'); return; }
+  const sec = dynSection(t.section_id);
+  wmsPrintHtml(t.name, [['القسم', sec?sec.name:''], ['عدد الصفوف', String(rows.length)], ['تاريخ الطباعة', todayStr()+' '+nowTimeStr()]], dynTableHtmlForPrint(t, rows, cols));
+}
+
+
+/* ============================================================
+   النماذج الرسمية — محرك التحليل والتعبئة (Excel / Word) — بلا واجهة.
+   مبدأ العمل: يُنسخ ملف النموذج كما هو (ZIP) ويُعدَّل داخل XML فقط المواضع المطلوبة، فيبقى كل ما عداها
+   كما هو (الترويسة والتذييل والشعار والخطوط والدمج وعرض الأعمدة). لا إعادة بناء للملف من الصفر.
+   ============================================================ */
+const TPL_MIME = {
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+};
+const TPL_MAX_BYTES = 20*1024*1024;
+function tplKindOf(fileName){
+  const m = String(fileName||'').toLowerCase().match(/\.([a-z0-9]+)$/);
+  return m && (m[1]==='xlsx' || m[1]==='docx') ? m[1] : (m ? m[1] : '');
+}
+function tplXmlUnesc(s){ return String(s).replace(/&#x([0-9a-fA-F]+);/g,(m,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&#(\d+);/g,(m,d)=>String.fromCodePoint(parseInt(d,10))).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&'); }
+function tplUnzip(bytes){
+  if(typeof fflate==='undefined') throw new Error('مكتبة ضغط الملفات (fflate) غير محمَّلة.');
+  return fflate.unzipSync(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+}
+/* تحقق أساسي من أن الملف Excel/Word حديث وسليم (وليس .xls/.doc قديماً أو ملفاً تالفاً) */
+function tplValidate(kind, bytes){
+  if(!bytes || !bytes.byteLength) throw new Error('الملف فارغ.');
+  if(bytes.byteLength > TPL_MAX_BYTES) throw new Error('حجم الملف أكبر من 20MB.');
+  let z; try{ z = tplUnzip(bytes); }catch(e){ throw new Error('الملف تالف أو ليس بصيغة Excel/Word حديثة (.xlsx / .docx).'); }
+  if(kind==='xlsx' && !z['xl/workbook.xml']) throw new Error('الملف ليس مصنّف Excel صحيحاً (.xlsx).');
+  if(kind==='docx' && !z['word/document.xml']) throw new Error('الملف ليس مستند Word صحيحاً (.docx).');
+  return z;
+}
+async function tplSha256(bytes){
+  try{ const h = await crypto.subtle.digest('SHA-256', bytes); return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join(''); }catch(e){ return null; }
+}
+const TPL_TOKEN_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
+function tplDocxXmlParts(z){ return Object.keys(z).filter(n=> n==='word/document.xml' || /^word\/(header|footer)\d*\.xml$/.test(n)); }
+function tplXlsxXmlParts(z){ return Object.keys(z).filter(n=> n==='xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(n)); }
+/* نصوص <t> داخل عنصر (si / is / p) مجمّعة */
+function tplJoinT(xml, tag){
+  const re = tag==='w' ? /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g : /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+  let out = '', m; while((m = re.exec(xml))) out += tplXmlUnesc(m[1]);
+  return out;
+}
+/* قائمة الوسوم {{...}} الموجودة في النموذج (بأسمائها) */
+function tplFindTokens(kind, bytes){
+  const z = tplUnzip(bytes); const set = new Set();
+  const addFrom = (txt)=>{ let m; const re = new RegExp(TPL_TOKEN_RE.source,'g'); while((m = re.exec(txt))) set.add(m[1].trim()); };
+  if(kind==='docx'){
+    tplDocxXmlParts(z).forEach(n=>{
+      const xml = fflate.strFromU8(z[n]);
+      (xml.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)||[]).forEach(p=> addFrom(tplJoinT(p,'w')));
+    });
+  } else {
+    tplXlsxXmlParts(z).forEach(n=>{
+      const xml = fflate.strFromU8(z[n]);
+      (xml.match(/<si\b[^>]*>[\s\S]*?<\/si>/g)||[]).forEach(s=> addFrom(tplJoinT(s,'x')));
+      (xml.match(/<is\b[^>]*>[\s\S]*?<\/is>/g)||[]).forEach(s=> addFrom(tplJoinT(s,'x')));
+      (xml.match(/<(?:odd|even|first)(?:Header|Footer)>[\s\S]*?<\/(?:odd|even|first)(?:Header|Footer)>/g)||[]).forEach(s=> addFrom(tplXmlUnesc(s)));
+    });
+  }
+  return Array.from(set);
+}
+/* حلّال الوسوم: اسم العمود (بعد توحيد الحروف) أو مفتاحه، أو وسم خاص */
+function tplFmtValue(col, v){
+  if(v===null||v===undefined||v==='') return '';
+  if(col && col.col_type==='date'){ const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v); }
+  if(col && col.col_type==='number'){ const n = Number(v); return isNaN(n) ? String(v) : String(n); }
+  return String(v);
+}
+function tplMakeResolver(cols, rec, ctx){
+  const byName = new Map();
+  cols.forEach(c=>{ byName.set(wmsNorm(c.label), c); byName.set(wmsNorm(c.col_key), c); });
+  return (name)=>{
+    const k = wmsNorm(name);
+    if(byName.has(k)) return tplFmtValue(byName.get(k), rec ? (rec.data||{})[byName.get(k).col_key] : '');
+    if(k==='اليوم' || k==='التاريخ_اليوم') return tplFmtValue({col_type:'date'}, ctx.today);
+    if(k==='الجدول') return ctx.tableName||'';
+    if(k==='القسم') return ctx.sectionName||'';
+    if(k==='عدد_الصفوف' || k==='عدد الصفوف') return String(ctx.count);
+    if(k==='رقم_الصف' || k==='رقم الصف' || k==='#') return String(ctx.index||1);
+    return null;
+  };
+}
+function tplReplaceTokens(text, resolver, stats){
+  return text.replace(new RegExp(TPL_TOKEN_RE.source,'g'), (m, name)=>{
+    const v = resolver(name.trim());
+    if(v===null){ stats.unmatched.add(name.trim()); return m; }
+    stats.used.add(name.trim()); return v;
+  });
+}
+/* استبدال داخل مجموعة عناصر <t> تنتمي لفقرة/نص واحد: يحاول أولاً داخل كل <t> منفردة (يحفظ تنسيق بقية المقاطع)،
+   ثم — إن بقي وسم مقسوم على أكثر من مقطع — يدمج نص الفقرة كله في أول <t> (يحفظ تنسيق أول مقطع فقط) */
+function tplReplaceInGroup(xml, tagPrefix, resolver, stats){
+  const tRe = tagPrefix==='w' ? /<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g : /<t\b([^>]*)>([\s\S]*?)<\/t>/g;
+  const open = tagPrefix==='w' ? 'w:t' : 't';
+  let changed = false;
+  let out = xml.replace(tRe, (m, attrs, txt)=>{
+    const u = tplXmlUnesc(txt);
+    if(!new RegExp(TPL_TOKEN_RE.source).test(u)) return m;
+    const r = tplReplaceTokens(u, resolver, stats); if(r===u) return m;
+    changed = true; return `<${open} xml:space="preserve">${xmlEsc(r)}</${open}>`;
+  });
+  const joined = tplJoinT(out, tagPrefix);
+  if(new RegExp(TPL_TOKEN_RE.source).test(joined)){
+    const r = tplReplaceTokens(joined, resolver, stats);
+    if(r!==joined){
+      let first = true;
+      out = out.replace(tRe, (m)=>{ if(first){ first = false; return `<${open} xml:space="preserve">${xmlEsc(r)}</${open}>`; } return `<${open}></${open}>`; });
+      changed = true;
+    }
+  }
+  return {xml: out, changed};
+}
+function tplDocxReplaceParas(xml, resolver, stats){
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (p)=>{
+    if(!new RegExp(TPL_TOKEN_RE.source).test(tplJoinT(p,'w'))) return p;
+    return tplReplaceInGroup(p, 'w', resolver, stats).xml;
+  });
+}
+/* صفوف جدول Word التي تحوي وسوماً تُكرَّر لكل سجل مختار */
+function tplDocxRepeatRows(xml, recs, mkResolver, stats, ctx){
+  let repeated = 0;
+  const out = xml.replace(/<w:tr\b[^>]*>(?:(?!<w:tr\b)[\s\S])*?<\/w:tr>/g, (tr)=>{
+    if(!new RegExp(TPL_TOKEN_RE.source).test(tplJoinT(tr,'w'))) return tr;
+    repeated++;
+    return recs.map((rec,i)=> tplDocxReplaceParas(tr, mkResolver(rec, i+1), stats)).join('');
+  });
+  return {xml: out, repeated};
+}
+function tplFillDocx(bytes, cols, recs, ctx){
+  const z = tplUnzip(bytes); const stats = {used:new Set(), unmatched:new Set()}; const warnings = [];
+  let repeatedTotal = 0;
+  const mk = (rec, idx)=> tplMakeResolver(cols, rec, Object.assign({}, ctx, {index: idx}));
+  tplDocxXmlParts(z).forEach(n=>{
+    let xml = fflate.strFromU8(z[n]);
+    const rr = tplDocxRepeatRows(xml, recs, mk, stats, ctx); xml = rr.xml; repeatedTotal += rr.repeated;
+    xml = tplDocxReplaceParas(xml, mk(recs[0], 1), stats);
+    z[n] = fflate.strToU8(xml);
+  });
+  if(recs.length>1 && !repeatedTotal) warnings.push('اخترتَ أكثر من صف لكن النموذج لا يحتوي صفّ جدول فيه وسوم {{...}} ليتكرّر؛ عُبِّئ النموذج بالصف الأول فقط. ضع الوسوم داخل صف في جدول Word ليتكرّر لكل صف.');
+  if(recs.length>1 && repeatedTotal) warnings.push('الوسوم الموجودة خارج جدول التكرار (إن وُجدت) عُبِّئت بقيم الصف الأول.');
+  return {z, stats, warnings};
+}
+/* ---- Excel ---- */
+function tplXlsxFirstSheetPath(z){
+  const wb = fflate.strFromU8(z['xl/workbook.xml']);
+  const rels = z['xl/_rels/workbook.xml.rels'] ? fflate.strFromU8(z['xl/_rels/workbook.xml.rels']) : '';
+  const sm = wb.match(/<sheet\b[^>]*\/?>/); let path = 'xl/worksheets/sheet1.xml';
+  if(sm){
+    const rid = (sm[0].match(/r:id="([^"]+)"/)||[])[1];
+    if(rid && rels){
+      const rm = rels.match(new RegExp('<Relationship\\b[^>]*Id="'+rid+'"[^>]*\\/?>'));
+      const tg = rm && (rm[0].match(/Target="([^"]+)"/)||[])[1];
+      if(tg) path = tg.startsWith('/') ? tg.slice(1) : 'xl/'+tg.replace(/^\.\//,'');
+    }
+  }
+  if(!z[path]) throw new Error('تعذّر تحديد ورقة العمل الأولى داخل النموذج.');
+  return path;
+}
+function tplXlsxColLetter(i){ let s=''; i++; while(i>0){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; }
+/* تحليل ترويسة Excel: أفضل صف (من أول 40 صفاً) تطابق نصوصه أسماء أعمدة الجدول */
+function tplXlsxDetectHeader(bytes, cols){
+  if(typeof XLSX==='undefined') return null;
+  const wb = XLSX.read(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), {type:'array'});
+  const ws = wb.Sheets[wb.SheetNames[0]]; if(!ws || !ws['!ref']) return {headerRow:1, startRow:2, cells:[], map:{}, score:0};
+  const rng = XLSX.utils.decode_range(ws['!ref']); const labels = new Map(cols.map(c=>[wmsNorm(c.label), c.col_key]));
+  let best = null;
+  for(let r=rng.s.r; r<=Math.min(rng.e.r, rng.s.r+39); r++){
+    const cells = [], map = {}; let score = 0, filled = 0;
+    for(let c=rng.s.c; c<=rng.e.c; c++){
+      const cell = ws[XLSX.utils.encode_cell({r,c})]; const txt = cell && cell.v!==undefined && cell.v!==null ? String(cell.v).trim() : '';
+      if(!txt) continue; filled++;
+      const L = tplXlsxColLetter(c); cells.push({letter:L, text:txt});
+      const k = labels.get(wmsNorm(txt)); if(k){ map[L] = k; score++; }
+    }
+    if(filled && (!best || score>best.score || (score===best.score && score===0 && filled>best.filled))) best = {headerRow:r+1, startRow:r+2, cells, map, score, filled};
+  }
+  return best || {headerRow:1, startRow:2, cells:[], map:{}, score:0};
+}
+function tplFillXlsxPlaceholders(bytes, cols, rec, ctx){
+  const z = tplUnzip(bytes); const stats = {used:new Set(), unmatched:new Set()}; const warnings = [];
+  const resolver = tplMakeResolver(cols, rec, Object.assign({}, ctx, {index:1}));
+  const hasTok = (s)=> new RegExp(TPL_TOKEN_RE.source).test(s);
+  tplXlsxXmlParts(z).forEach(n=>{
+    let xml = fflate.strFromU8(z[n]);
+    xml = xml.replace(/<si\b[^>]*>[\s\S]*?<\/si>/g, (si)=> hasTok(tplJoinT(si,'x')) ? tplReplaceInGroup(si,'x',resolver,stats).xml : si);
+    xml = xml.replace(/<is\b[^>]*>[\s\S]*?<\/is>/g, (is)=> hasTok(tplJoinT(is,'x')) ? tplReplaceInGroup(is,'x',resolver,stats).xml : is);
+    xml = xml.replace(/<((?:odd|even|first)(?:Header|Footer))>([\s\S]*?)<\/\1>/g, (m, tag, inner)=>{
+      const u = tplXmlUnesc(inner); if(!hasTok(u)) return m; return `<${tag}>${xmlEsc(tplReplaceTokens(u, resolver, stats))}</${tag}>`;
+    });
+    z[n] = fflate.strToU8(xml);
+  });
+  return {z, stats, warnings};
+}
+function tplFillXlsxTable(bytes, cols, recs, ctx, mapping){
+  const z = tplUnzip(bytes); const warnings = []; const stats = {used:new Set(), unmatched:new Set()};
+  const startRow = Math.max(1, parseInt(mapping.startRow,10) || 2);
+  const map = mapping.cols || {}; const letters = Object.keys(map).filter(L=>map[L]).sort((a,b)=>colLetterToIndex(a)-colLetterToIndex(b));
+  if(!letters.length) throw new Error('لم تُربَط أي أعمدة بالنموذج — افتح «الربط» وحدّد عمود الجدول المقابل لكل عمود في النموذج.');
+  const sheetPath = tplXlsxFirstSheetPath(z); const sheetTxt = fflate.strFromU8(z[sheetPath]);
+  const sdm = sheetTxt.match(/<sheetData(?:\s[^>]*)?>([\s\S]*?)<\/sheetData>|<sheetData(?:\s[^>]*)?\/>/);
+  if(!sdm) throw new Error('النموذج لا يحتوي بيانات ورقة صالحة.');
+  const inner = sdm[1] || '';
+  const rowsXml = inner.match(/<row\b[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g) || [];
+  const rnum = (rx)=> parseInt((rx.match(/\br="(\d+)"/)||[])[1],10);
+  const keep = rowsXml.filter(rx=> rnum(rx) < startRow);
+  const tail = rowsXml.filter(rx=> rnum(rx) >= startRow);
+  const tplRow = tail.find(rx=> rnum(rx)===startRow) || null;
+  if(tail.some(rx=> /<v>|<is>/.test(rx) && rnum(rx)>startRow)) warnings.push(`كان في النموذج محتوى أسفل الصف ${startRow} (مثل ملاحظات أو توقيعات) وقد استُبدل ببيانات الجدول. إن أردت الإبقاء عليه ضع صف البداية أسفل ذلك المحتوى أو استخدم وسوم {{...}}.`);
+  const styleBy = {}; letters.forEach(L=>{ styleBy[L] = tplRow ? taglogExtractCellStyle(tplRow, L, startRow) : null; });
+  if(!letters.some(L=>styleBy[L])) warnings.push(`لا يوجد تنسيق في الصف ${startRow} من النموذج؛ كُتبت البيانات بلا تنسيق مطابق. نسّق صفاً واحداً فارغاً أسفل العناوين في النموذج ليُنسخ تنسيقه.`);
+  const rowAttrs = tplRow ? ((tplRow.match(/<row\b([^>]*?)\/?>/)||[])[1]||'').replace(/\br="\d+"/,'').replace(/\bspans="[^"]*"/,'') : '';
+  const colByKey = new Map(cols.map(c=>[c.col_key,c]));
+  let newRows = '';
+  recs.forEach((rec,i)=>{
+    const rn = startRow + i; let cells = '';
+    letters.forEach(L=>{
+      const col = colByKey.get(map[L]); const s = styleBy[L] ? ` s="${styleBy[L]}"` : '';
+      if(!col){ cells += `<c r="${L}${rn}"${s}/>`; return; }
+      const v = (rec.data||{})[col.col_key];
+      if(v===undefined||v===null||v===''){ cells += `<c r="${L}${rn}"${s}/>`; return; }
+      if(col.col_type==='number' && isFinite(Number(v))) cells += `<c r="${L}${rn}"${s}><v>${Number(v)}</v></c>`;
+      else cells += `<c r="${L}${rn}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(tplFmtValue(col, v))}</t></is></c>`;
+    });
+    newRows += `<row r="${rn}"${rowAttrs}>${cells}</row>`;
+  });
+  let out = taglogReplaceSheetDataInner(sheetTxt, keep.join('') + newRows);
+  const lastRow = startRow + recs.length - 1;
+  out = out.replace(/<dimension\s+ref="([^"]*)"\s*\/>/, (m, ref)=>{
+    const endCol = (ref.split(':')[1]||ref).match(/[A-Z]+/); const maxL = letters[letters.length-1];
+    const e = endCol && colLetterToIndex(endCol[0]) > colLetterToIndex(maxL) ? endCol[0] : maxL;
+    return `<dimension ref="A1:${e}${Math.max(lastRow, 1)}"/>`;
+  });
+  /* الدمج الواقع أسفل صف البداية يتعارض مع الصفوف الجديدة فيُحذف (التنسيق فوقه لا يُمَسّ) */
+  let droppedMerges = 0;
+  out = out.replace(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/, (m, body)=>{
+    const kept = (body.match(/<mergeCell\b[^>]*\/>/g)||[]).filter(mc=>{ const r = parseInt(((mc.match(/ref="[A-Z]+(\d+)/)||[])[1]),10); if(r>=startRow){ droppedMerges++; return false; } return true; });
+    return kept.length ? `<mergeCells count="${kept.length}">${kept.join('')}</mergeCells>` : '';
+  });
+  if(droppedMerges) warnings.push(`أُزيل ${droppedMerges} دمج خلايا واقع أسفل الصف ${startRow} لأنه يتعارض مع صفوف البيانات.`);
+  z[sheetPath] = fflate.strToU8(out);
+  if(z['xl/calcChain.xml']){ /* لا نلمس الصيغ، لكن سلسلة الحساب قد تشير لخلايا استُبدلت: نحذفها فيعيد Excel بناءها تلقائياً */ delete z['xl/calcChain.xml'];
+    if(z['[Content_Types].xml']) z['[Content_Types].xml'] = fflate.strToU8(fflate.strFromU8(z['[Content_Types].xml']).replace(/<Override\b[^>]*calcChain[^>]*\/>/,''));
+    if(z['xl/_rels/workbook.xml.rels']) z['xl/_rels/workbook.xml.rels'] = fflate.strToU8(fflate.strFromU8(z['xl/_rels/workbook.xml.rels']).replace(/<Relationship\b[^>]*calcChain[^>]*\/>/,''));
+  }
+  return {z, stats, warnings};
+}
+function tplBuild(kind, bytes, mapping, cols, recs, ctx){
+  if(!recs.length) throw new Error('اختر صفاً واحداً على الأقل.');
+  let r;
+  if(kind==='docx') r = tplFillDocx(bytes, cols, recs, ctx);
+  else if(mapping && mapping.mode==='table'){
+    /* وسوم الترويسة/التذييل أو أي خلية (مثل {{الجدول}} و{{اليوم}}) تُعبَّأ أولاً بقيم الصف الأول/السياق، ثم تُكتب صفوف الجدول */
+    const pre = tplFillXlsxPlaceholders(bytes, cols, recs[0], ctx);
+    r = tplFillXlsxTable(fflate.zipSync(pre.z, {level:6}), cols, recs, ctx, mapping);
+    pre.stats.used.forEach(x=>r.stats.used.add(x)); pre.stats.unmatched.forEach(x=>r.stats.unmatched.add(x));
+  }
+  else {
+    if(recs.length>1) throw new Error('وضع الوسوم في Excel يملأ سجلاً واحداً. اختر صفاً واحداً، أو اضبط الربط على «جدول» لتعبئة عدة صفوف.');
+    r = tplFillXlsxPlaceholders(bytes, cols, recs[0], ctx);
+  }
+  if(r.stats.unmatched.size) r.warnings.push('وسوم لا يقابلها أي عمود في الجدول (تُركت كما هي): '+Array.from(r.stats.unmatched).map(x=>`{{${x}}}`).join('، '));
+  const out = fflate.zipSync(r.z, {level:6});
+  return {bytes: out, blob: new Blob([out], {type: TPL_MIME[kind]}), warnings: r.warnings, used: Array.from(r.stats.used)};
+}
+/* ---- معاينة تقريبية (ليست نسخة طبق الأصل من Word/Excel) ---- */
+function tplPreviewHtml(kind, outBytes){
+  if(kind==='xlsx'){
+    const wb = XLSX.read(outBytes, {type:'array'}); const ws = wb.Sheets[wb.SheetNames[0]];
+    return `<div class="tpl-pv tpl-pv-x" dir="rtl">${XLSX.utils.sheet_to_html(ws, {editable:false})}</div>`;
+  }
+  const z = tplUnzip(outBytes);
+  const conv = (xml)=>{
+    const body = xml;
+    const para = (p)=>{
+      const jc = (p.match(/<w:jc\b[^>]*w:val="([a-z]+)"/)||[])[1]; const al = jc==='center'?'center':jc==='right'?'right':jc==='left'?'left':'';
+      const runs = (p.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g)||[]).map(r=>{
+        const t = (r.match(/<w:t\b[^>]*>[\s\S]*?<\/w:t>/g)||[]).map(x=>tplXmlUnesc(x.replace(/<[^>]+>/g,''))).join('') + (/<w:br\b/.test(r)?'\n':'');
+        if(!t) return ''; let h = esc(t).replace(/\n/g,'<br>');
+        if(/<w:b\b(?![a-zA-Z])(?![^>]*w:val="(?:0|false)")/.test(r)) h = `<b>${h}</b>`; return h;
+      }).join('');
+      return runs ? `<p style="margin:2px 0;${al?`text-align:${al};`:''}">${runs}</p>` : '<p style="margin:2px 0;">&nbsp;</p>';
+    };
+    const walk = (x)=> x.replace(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g, (tbl)=>{
+      const rows = (tbl.match(/<w:tr\b[^>]*>(?:(?!<w:tr\b)[\s\S])*?<\/w:tr>/g)||[]).map(tr=>`<tr>${(tr.match(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g)||[]).map(tc=>`<td style="border:1px solid #888;padding:3px 6px;vertical-align:top;">${(tc.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)||[]).map(para).join('')}</td>`).join('')}</tr>`).join('');
+      return `\u0001TBL<table style="border-collapse:collapse;width:100%;margin:6px 0;">${rows}</table>\u0002`;
+    });
+    const marked = walk(body);
+    const parts = marked.split(/(\u0001TBL[\s\S]*?\u0002)/);
+    return parts.map(seg=> seg.startsWith('\u0001TBL') ? seg.slice(4,-1) : (seg.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)||[]).map(para).join('')).join('');
+  };
+  const parts = [];
+  ['word/header1.xml','word/header2.xml'].forEach(n=>{ if(z[n]) parts.push('<div class="tpl-pv-hf" style="color:#666;border-bottom:1px dashed #bbb;margin-bottom:6px;">'+conv(fflate.strFromU8(z[n]))+'</div>'); });
+  parts.push(conv(fflate.strFromU8(z['word/document.xml'])));
+  ['word/footer1.xml','word/footer2.xml'].forEach(n=>{ if(z[n]) parts.push('<div class="tpl-pv-hf" style="color:#666;border-top:1px dashed #bbb;margin-top:6px;">'+conv(fflate.strFromU8(z[n]))+'</div>'); });
+  return `<div class="tpl-pv tpl-pv-d" dir="rtl" style="background:#fff;padding:14px;line-height:1.7;">${parts.join('')}</div>`;
+}
+
+
+/* ============================================================
+   النماذج الرسمية — الواجهة (تبويب «النموذج المعتمد» داخل كل جدول ديناميكي)
+   الملفات في Storage الخاص (bucket: doc-templates) + بيانات النسخ والربط في doc_templates / doc_template_versions.
+   لا حذف نهائي: النسخة الجديدة تُضاف دائماً والقديمة تبقى محفوظة وقابلة للتنزيل والتفعيل.
+   ============================================================ */
+const TPL = {tableId:null, templates:[], versions:[], loaded:false, loading:false, err:'', flash:null, tplId:'', mode:'all', pick:new Set(), pickQ:'', bytes:{}, showArchived:false};
+(function(){
+  if(document.getElementById('tplStyle')) return;
+  const st = document.createElement('style'); st.id = 'tplStyle';
+  st.textContent = '.tpl-pv-x table{border-collapse:collapse;font-size:12px}.tpl-pv-x td,.tpl-pv-x th{border:1px solid #bbb;padding:2px 6px}.tpl-pv{overflow:auto;max-height:56vh;border:1px solid #d8d2c2;border-radius:6px;background:#fff}';
+  document.head.appendChild(st);
+})();
+async function tplLoad(tableId){
+  TPL.loading = true; TPL.err = '';
+  try{
+    const tpls = await wmsGetAll(`doc_templates?select=*&table_id=eq.${tableId}&order=created_at.asc`);
+    const vers = tpls.length ? await wmsGetAll(`doc_template_versions?select=*&template_id=in.(${tpls.map(t=>t.id).join(',')})&order=version_no.desc`) : [];
+    TPL.templates = tpls; TPL.versions = vers; TPL.tableId = tableId; TPL.loaded = true;
+  }catch(e){ TPL.err = e.message; TPL.loaded = true; TPL.tableId = tableId; }
+  TPL.loading = false;
+  if(ACTIVE_TAB==='dyn' && DYN.tab==='tpl' && DYN.tableId===tableId) dynRerender();
+}
+const tplVersionsOf = (tid)=> TPL.versions.filter(v=>v.template_id===tid).sort((a,b)=>b.version_no-a.version_no);
+const tplActiveVersion = (t)=> TPL.versions.find(v=>v.id===t.active_version_id) || tplVersionsOf(t.id)[0] || null;
+const tplFlash = (kind, text)=>{ TPL.flash = {kind, text}; };
+/* ---- Storage (خاص — بلا رابط عام) ---- */
+async function tplStorageUpload(path, bytes, mime){
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/storage/v1/object/doc-templates/${path}`, {method:'POST', headers: supabaseAuthHeaders({'Content-Type':mime, 'x-upsert':'false'}), body: bytes});
+  if(!res.ok){ let raw=''; try{ const j = await res.json(); raw = j.message || j.error || ''; }catch(e){} throw new Error(wmsErrMsg(raw, res.status)); }
+}
+async function tplStorageDownload(path){
+  if(TPL.bytes[path]) return TPL.bytes[path];
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/storage/v1/object/authenticated/doc-templates/${path}`, {method:'GET', headers: supabaseAuthHeaders()});
+  if(!res.ok){ let raw=''; try{ const j = await res.json(); raw = j.message || j.error || ''; }catch(e){} throw new Error(wmsErrMsg(raw, res.status) || 'تعذّر تنزيل ملف النموذج.'); }
+  const bytes = new Uint8Array(await res.arrayBuffer()); TPL.bytes[path] = bytes; return bytes;
+}
+function tplRand(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+function tplAutoMapping(kind, bytes, cols){
+  if(kind==='docx') return {mode:'placeholders'};
+  const d = tplXlsxDetectHeader(bytes, cols);
+  /* صف عناوين يطابق عمودين فأكثر من أسماء الأعمدة ⇒ وضع الجدول (الوسوم الأخرى كـ{{الجدول}} في الترويسة تُعبَّأ أيضاً) */
+  if(d && d.score>=2) return {mode:'table', headerRow:d.headerRow, startRow:d.startRow, cols:d.map};
+  if(tplFindTokens('xlsx', bytes).length) return {mode:'placeholders'};
+  return {mode:'table', headerRow:d.headerRow, startRow:d.startRow, cols:d.map};
+}
+function tplXlsxRowCells(bytes, rowNo){
+  const wb = XLSX.read(bytes, {type:'array'}); const ws = wb.Sheets[wb.SheetNames[0]]; const out = [];
+  if(!ws || !ws['!ref']) return out;
+  const rng = XLSX.utils.decode_range(ws['!ref']);
+  for(let c=rng.s.c; c<=rng.e.c; c++){ const cell = ws[XLSX.utils.encode_cell({r:rowNo-1, c})]; const txt = cell && cell.v!==undefined && cell.v!==null ? String(cell.v).trim() : ''; if(txt) out.push({letter:tplXlsxColLetter(c), text:txt}); }
+  return out;
+}
+/* ---- الشاشة ---- */
+function dynTplRender(tb, t){
+  if(TPL.tableId!==t.id){ Object.assign(TPL, {tableId:t.id, loaded:false, loading:false, templates:[], versions:[], tplId:'', mode:'all', pick:new Set(), pickQ:'', err:'', flash:null}); }
+  if(!TPL.loaded && !TPL.loading) tplLoad(t.id);
+  const st = DYN.rows[t.id]; if(!st || (!st.loaded && !st.loading)) dynLoadRows(t.id);
+  if(!TPL.loaded){ tb.innerHTML = '<div class="panel"><div class="desc">جارٍ تحميل النماذج…</div></div>'; return; }
+  if(TPL.err){ tb.innerHTML = `<div class="panel"><div class="msg bad">${esc(TPL.err)}</div><div class="desc">إن كان الخطأ «relation does not exist» فجداول النماذج لم تُنشأ بعد في Supabase.</div><div class="btnrow"><button class="secondary" id="tplRetry">🔄 إعادة المحاولة</button></div></div>`; document.getElementById('tplRetry').addEventListener('click', ()=>{ TPL.loaded=false; dynRerender(); }); return; }
+  const list = TPL.templates.filter(x=> TPL.showArchived || !x.archived_at);
+  const live = TPL.templates.filter(x=>!x.archived_at);
+  if(!live.some(x=>x.id===TPL.tplId)) TPL.tplId = live.length ? live[0].id : '';
+  tb.innerHTML = `<div class="panel"><h2 style="font-size:16px;">📎 النماذج الرسمية لهذا الجدول</h2>
+    <div class="desc">ارفع نموذج Excel (.xlsx) أو Word (.docx) رسمياً (بشعاره وترويسته وتذييله) لتُعبَّأ به بيانات هذا الجدول. <b>PDF سيُدعَم لاحقاً.</b><br>
+    <b>طريقتان للتعبئة:</b> (1) <b>الوسوم</b>: اكتب في النموذج مثل <code>{{اسم العمود}}</code> فيُستبدل بقيمة الصف (في Word: وسوم داخل صف جدول تتكرر لكل صف مختار). وسوم خاصة: <code>{{اليوم}}</code> <code>{{الجدول}}</code> <code>{{عدد_الصفوف}}</code> <code>{{رقم_الصف}}</code>. (2) <b>جدول Excel</b>: صف عناوين بأسماء أعمدة الجدول نفسها وتُكتب البيانات أسفله بنفس تنسيق الصف الأول الفارغ.</div>
+    <div id="tplFlash">${TPL.flash?`<div class="msg ${TPL.flash.kind}">${esc(TPL.flash.text)}</div>`:''}</div>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin:6px 0;"><input type="checkbox" id="tplShowArch" ${TPL.showArchived?'checked':''}> إظهار المؤرشف</label>
+    ${list.length ? `<div style="overflow-x:auto;"><table class="data"><thead><tr><th>النموذج</th><th>النوع</th><th>النسخة الفعّالة</th><th></th></tr></thead><tbody>${list.map(x=>{ const v = tplActiveVersion(x); return `<tr class="${x.archived_at?'short':''}"><td><b>${esc(x.name)}</b> ${x.archived_at?'<span class="pill bad">مؤرشف</span>':''}</td><td>${esc(x.kind==='xlsx'?'Excel':x.kind==='docx'?'Word':x.kind)}</td><td>${v?`v${v.version_no} — ${esc(v.file_name)} <span class="desc">(${esc(String(v.uploaded_at||'').slice(0,10))} · ${tplSize(v.size_bytes)})</span>`:'—'}</td><td>
+      ${x.archived_at ? `<button class="secondary" data-tplarch="${x.id}">♻️ استعادة</button>` : `<button class="secondary" data-tplnew="${x.id}">📤 نسخة جديدة (استبدال)</button><button class="secondary" data-tplvers="${x.id}">🗂️ النسخ (${tplVersionsOf(x.id).length})</button><button class="secondary" data-tplmap="${x.id}">⚙️ الربط</button><button class="secondary" data-tplarch="${x.id}">🗄️ أرشفة</button>`}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="msg info">لا توجد نماذج لهذا الجدول بعد. ارفع أول نموذج من الأسفل.</div>'}
+    <h3 style="font-size:14px;margin:14px 0 6px;">رفع نموذج جديد</h3>
+    <div class="grid2"><input type="text" id="tplNewName" autocomplete="off" placeholder="اسم النموذج (مثال: مطالبة مالية)"><input type="file" id="tplNewFile" accept=".xlsx,.docx"></div>
+    <div class="btnrow"><button class="primary" id="tplCreate">📤 رفع النموذج</button></div><div id="tplCreateMsg"></div></div>
+    <div class="panel" id="tplFillPanel"></div>`;
+  const $ = (id)=>document.getElementById(id);
+  $('tplShowArch').addEventListener('change', ()=>{ TPL.showArchived = $('tplShowArch').checked; dynRerender(); });
+  $('tplCreate').addEventListener('click', ()=> tplCreate(t));
+  tb.querySelectorAll('[data-tplnew]').forEach(b=> b.addEventListener('click', ()=> tplOpenNewVersion(t, b.dataset.tplnew)));
+  tb.querySelectorAll('[data-tplvers]').forEach(b=> b.addEventListener('click', ()=> tplOpenVersions(t, b.dataset.tplvers)));
+  tb.querySelectorAll('[data-tplmap]').forEach(b=> b.addEventListener('click', ()=> tplOpenMapping(t, b.dataset.tplmap)));
+  tb.querySelectorAll('[data-tplarch]').forEach(b=> b.addEventListener('click', async ()=>{
+    const x = TPL.templates.find(y=>y.id===b.dataset.tplarch); b.disabled = true;
+    try{ const r = await wmsPatch('doc_templates', `id=eq.${x.id}`, {archived_at: x.archived_at?null:wmsNowIso(), updated_at:wmsNowIso()}); Object.assign(x, r[0]); tplFlash('ok', x.archived_at?'تمت أرشفة النموذج (ملفاته ونسخه محفوظة).':'تمت استعادة النموذج.'); }
+    catch(e){ tplFlash('bad','تعذّر الإجراء: '+e.message); }
+    dynRerender();
+  }));
+  tplRenderFill(t, $('tplFillPanel'));
+}
+function tplSize(n){ n = Number(n)||0; return n>1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1,Math.round(n/1024))+' KB'; }
+async function tplReadPicked(inputEl, expectKind){
+  const f = inputEl.files && inputEl.files[0]; if(!f) throw new Error('اختر ملف النموذج أولاً.');
+  const kind = tplKindOf(f.name);
+  if(kind==='pdf') throw new Error('PDF سيُدعَم في مرحلة لاحقة. استخدم Excel (.xlsx) أو Word (.docx) الآن.');
+  if(kind!=='xlsx' && kind!=='docx') throw new Error('الصيغة غير مدعومة. الملفات المدعومة: Excel (.xlsx) وWord (.docx) فقط (الصيغ القديمة .xls/.doc تُحفظ من البرنامج بصيغة حديثة أولاً).');
+  if(expectKind && kind!==expectKind) throw new Error(`النسخة الجديدة يجب أن تكون من النوع نفسه (${expectKind==='xlsx'?'Excel':'Word'}).`);
+  const bytes = new Uint8Array(await readFileAsArrayBuffer(f));
+  tplValidate(kind, bytes);
+  return {file:f, kind, bytes};
+}
+async function tplCreate(t){
+  const name = trim(document.getElementById('tplNewName').value);
+  if(!name){ showMsg('tplCreateMsg','warn','اكتب اسم النموذج.'); return; }
+  if(TPL.templates.some(x=>!x.archived_at && wmsNorm(x.name)===wmsNorm(name))){ showMsg('tplCreateMsg','warn','يوجد نموذج بهذا الاسم لهذا الجدول.'); return; }
+  setBusy('tplCreate', true, '⏳ جارٍ الرفع…');
+  let tplRow = null;
+  try{
+    const {file, kind, bytes} = await tplReadPicked(document.getElementById('tplNewFile'));
+    const id = wmsUuid(); const path = `${t.id}/${id}/v1_${tplRand()}.${kind}`;
+    const mapping = tplAutoMapping(kind, bytes, dynCols(t.id));
+    const sha = await tplSha256(bytes);
+    await tplStorageUpload(path, bytes, TPL_MIME[kind]);
+    tplRow = (await wmsInsert('doc_templates', [{id, table_id:t.id, name, kind}]))[0];
+    const ver = (await wmsInsert('doc_template_versions', [{template_id:id, version_no:1, file_name:file.name, storage_path:path, mime_type:TPL_MIME[kind], size_bytes:bytes.byteLength, sha256:sha, mapping}]))[0];
+    const upd = await wmsPatch('doc_templates', `id=eq.${id}`, {active_version_id:ver.id, updated_at:wmsNowIso()});
+    TPL.bytes[path] = bytes; TPL.tplId = id;
+    tplFlash('ok', `تم رفع النموذج «${name}» (${kind==='xlsx'?'Excel':'Word'}). راجع «⚙️ الربط» ثم جرّب المعاينة.`);
+    TPL.loaded = false; dynRerender();
+  }catch(e){
+    if(tplRow){ try{ await wmsPatch('doc_templates', `id=eq.${tplRow.id}`, {archived_at: wmsNowIso(), updated_at:wmsNowIso()}); }catch(_){} }
+    setBusy('tplCreate', false, '📤 رفع النموذج'); showMsg('tplCreateMsg','bad','لم يُرفع النموذج: '+e.message);
+  }
+}
+function tplOpenNewVersion(t, tplId){
+  const x = TPL.templates.find(y=>y.id===tplId); const prev = tplActiveVersion(x);
+  openModal('📤 نسخة جديدة من «'+esc(x.name)+'»', (b)=>{
+    b.innerHTML = `<div class="desc">تُضاف كنسخة جديدة وتصبح الفعّالة، والنسخ القديمة تبقى محفوظة ويمكن تنزيلها أو إعادة تفعيلها. يجب أن تكون من نوع ${x.kind==='xlsx'?'Excel (.xlsx)':'Word (.docx)'}.</div>
+      <input type="file" id="tvFile" accept=".${x.kind}"><label class="lbl">ملاحظة (اختياري)</label><input type="text" id="tvNote" autocomplete="off" placeholder="ماذا تغيّر في هذه النسخة؟">
+      <div class="btnrow"><button class="primary" id="tvSave">📤 رفع النسخة</button><button class="secondary" id="tvClose">إغلاق</button></div><div id="tvMsg"></div>`;
+    document.getElementById('tvClose').addEventListener('click', closeModal);
+    document.getElementById('tvSave').addEventListener('click', async ()=>{
+      setBusy('tvSave', true, '⏳ جارٍ الرفع…');
+      try{
+        const {file, kind, bytes} = await tplReadPicked(document.getElementById('tvFile'), x.kind);
+        const no = tplVersionsOf(x.id).reduce((m,v)=>Math.max(m, v.version_no), 0) + 1;
+        const path = `${t.id}/${x.id}/v${no}_${tplRand()}.${kind}`;
+        const cols = dynCols(t.id); let mapping = tplAutoMapping(kind, bytes, cols);
+        if(prev && prev.mapping && prev.mapping.mode==='table' && mapping.mode==='table'){ const det = tplXlsxDetectHeader(bytes, cols); if(!det || det.score < Object.keys(prev.mapping.cols||{}).length) mapping = prev.mapping; }
+        const sha = await tplSha256(bytes);
+        await tplStorageUpload(path, bytes, TPL_MIME[kind]);
+        const ver = (await wmsInsert('doc_template_versions', [{template_id:x.id, version_no:no, file_name:file.name, storage_path:path, mime_type:TPL_MIME[kind], size_bytes:bytes.byteLength, sha256:sha, mapping, note:trim(document.getElementById('tvNote').value)||null}]))[0];
+        const r = await wmsPatch('doc_templates', `id=eq.${x.id}`, {active_version_id:ver.id, updated_at:wmsNowIso()}); Object.assign(x, r[0]);
+        TPL.bytes[path] = bytes; closeModal(); tplFlash('ok', `أُضيفت النسخة v${no} وأصبحت الفعّالة (النسخ السابقة محفوظة). راجع «⚙️ الربط» إن تغيّر شكل النموذج.`); TPL.loaded = false; dynRerender();
+      }catch(e){ setBusy('tvSave', false, '📤 رفع النسخة'); showMsg('tvMsg','bad','لم تُرفع النسخة: '+e.message); }
+    });
+  }, {maxWidth:'560px'});
+}
+function tplDownloadVersion(v){
+  tplStorageDownload(v.storage_path).then(bytes=> downloadBlobAs(new Blob([bytes], {type:v.mime_type||'application/octet-stream'}), v.file_name))
+    .catch(e=> alert('تعذّر التنزيل: '+e.message));
+}
+function tplOpenVersions(t, tplId){
+  const x = TPL.templates.find(y=>y.id===tplId);
+  openModal('🗂️ نسخ «'+esc(x.name)+'»', (b)=>{
+    const vers = tplVersionsOf(x.id); const act = tplActiveVersion(x);
+    b.innerHTML = `<div class="desc">كل نسخة سابقة محفوظة دائماً. «تفعيل» يجعل نسخة قديمة هي المستخدمة في التعبئة (دون حذف أي شيء).</div><div id="tvvMsg"></div>
+      <div style="overflow-x:auto;"><table class="data"><thead><tr><th>النسخة</th><th>الملف</th><th>الحجم</th><th>التاريخ</th><th>ملاحظة</th><th></th></tr></thead><tbody>${vers.map(v=>`<tr><td>v${v.version_no} ${act&&act.id===v.id?'<span class="pill ok">فعّالة</span>':''}</td><td>${esc(v.file_name)}</td><td>${tplSize(v.size_bytes)}</td><td>${esc(String(v.uploaded_at||'').replace('T',' ').slice(0,16))}</td><td>${esc(v.note||'')}</td><td><button class="secondary" data-vdl="${v.id}">⬇️ تنزيل</button>${act&&act.id===v.id?'':`<button class="secondary" data-vact="${v.id}">✔️ تفعيل</button>`}</td></tr>`).join('')}</tbody></table></div>
+      <div class="btnrow"><button class="secondary" id="tvvClose">إغلاق</button></div>`;
+    document.getElementById('tvvClose').addEventListener('click', closeModal);
+    b.querySelectorAll('[data-vdl]').forEach(btn=> btn.addEventListener('click', ()=> tplDownloadVersion(TPL.versions.find(v=>v.id===btn.dataset.vdl))));
+    b.querySelectorAll('[data-vact]').forEach(btn=> btn.addEventListener('click', async ()=>{
+      btn.disabled = true;
+      try{ const r = await wmsPatch('doc_templates', `id=eq.${x.id}`, {active_version_id:btn.dataset.vact, updated_at:wmsNowIso()}); Object.assign(x, r[0]); closeModal(); tplFlash('ok','تم تفعيل النسخة المختارة.'); dynRerender(); }
+      catch(e){ btn.disabled = false; showMsg('tvvMsg','bad',e.message); }
+    }));
+  }, {maxWidth:'760px'});
+}
+function tplOpenMapping(t, tplId){
+  const x = TPL.templates.find(y=>y.id===tplId); const v = tplActiveVersion(x); const cols = dynCols(t.id);
+  if(!v){ tplFlash('bad','لا توجد نسخة لهذا النموذج.'); dynRerender(); return; }
+  openModal('⚙️ ربط «'+esc(x.name)+'» (v'+v.version_no+')', (b)=>{ b.innerHTML = '<div class="desc">جارٍ قراءة النموذج…</div>'; }, {maxWidth:'720px'});
+  tplStorageDownload(v.storage_path).then(bytes=>{
+    const b = document.getElementById('modalBodyEl'); if(!b) return;
+    const toks = tplFindTokens(x.kind, bytes); const byName = new Set(); cols.forEach(c=>{ byName.add(wmsNorm(c.label)); byName.add(wmsNorm(c.col_key)); });
+    const special = ['اليوم','التاريخ_اليوم','الجدول','القسم','عدد_الصفوف','عدد الصفوف','رقم_الصف','رقم الصف','#'].map(wmsNorm);
+    const tokHtml = toks.length ? `<table class="data"><thead><tr><th>الوسم في النموذج</th><th>الحالة</th></tr></thead><tbody>${toks.map(k=>{ const ok = byName.has(wmsNorm(k)) || special.includes(wmsNorm(k)); return `<tr><td><code>{{${esc(k)}}}</code></td><td>${ok?'<span class="pill ok">مطابق</span>':'<span class="pill bad">لا يوجد عمود بهذا الاسم</span>'}</td></tr>`; }).join('')}</tbody></table>` : '<div class="msg info">لا توجد وسوم {{...}} في النموذج.</div>';
+    const cur = (v.mapping && v.mapping.mode) ? v.mapping : tplAutoMapping(x.kind, bytes, cols);
+    b.innerHTML = `<div id="tmMsg"></div>
+      ${x.kind==='xlsx' ? `<label class="lbl">طريقة التعبئة</label><select id="tmMode"><option value="placeholders" ${cur.mode!=='table'?'selected':''}>وسوم {{...}} (سجل واحد)</option><option value="table" ${cur.mode==='table'?'selected':''}>جدول: صفوف بيانات أسفل صف العناوين (عدة صفوف)</option></select>` : '<div class="desc">نماذج Word تُعبَّأ بالوسوم فقط. ضع الوسوم داخل صف جدول لتتكرر لكل صف.</div>'}
+      <div id="tmTable" style="${x.kind==='xlsx' && cur.mode==='table' ? '' : 'display:none;'}">
+        <div class="grid2"><div><label class="lbl">رقم صف العناوين في النموذج</label><input type="number" min="1" id="tmHdr" value="${esc(cur.headerRow||1)}"></div><div><label class="lbl">رقم أول صف بيانات</label><input type="number" min="1" id="tmStart" value="${esc(cur.startRow||((cur.headerRow||1)+1))}"></div></div>
+        <div class="btnrow"><button class="secondary" id="tmDetect">🔍 كشف تلقائي</button></div>
+        <div class="desc">اربط كل عمود في النموذج بعمود الجدول. ستُكتب البيانات من الصف المحدد وتُنسَخ تنسيقاته من أول صف بيانات في النموذج (اتركه فارغاً ومنسَّقاً). ما أسفله يُستبدل.</div>
+        <div id="tmCols"></div></div>
+      <h3 style="font-size:14px;margin:12px 0 6px;">الوسوم الموجودة</h3>${tokHtml}
+      <div class="btnrow"><button class="primary" id="tmSave">💾 حفظ الربط</button><button class="secondary" id="tmClose">إغلاق</button></div>`;
+    const $ = (id)=>document.getElementById(id);
+    let map = Object.assign({}, cur.cols||{});
+    const drawCols = ()=>{
+      const cells = tplXlsxRowCells(bytes, parseInt($('tmHdr').value,10)||1);
+      $('tmCols').innerHTML = cells.length ? `<table class="data"><thead><tr><th>العمود في النموذج</th><th>النص</th><th>عمود الجدول</th></tr></thead><tbody>${cells.map(c=>`<tr><td>${esc(c.letter)}</td><td>${esc(c.text)}</td><td><select data-tmcol="${esc(c.letter)}"><option value="">— لا شيء —</option>${cols.map(k=>`<option value="${esc(k.col_key)}" ${map[c.letter]===k.col_key?'selected':''}>${esc(k.label)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>` : '<div class="msg warn">لا نصوص في هذا الصف من النموذج.</div>';
+      $('tmCols').querySelectorAll('[data-tmcol]').forEach(s=> s.addEventListener('change', ()=>{ if(s.value) map[s.dataset.tmcol] = s.value; else delete map[s.dataset.tmcol]; }));
+    };
+    if(x.kind==='xlsx'){
+      $('tmMode').addEventListener('change', ()=>{ $('tmTable').style.display = $('tmMode').value==='table' ? '' : 'none'; if($('tmMode').value==='table') drawCols(); });
+      $('tmHdr').addEventListener('change', ()=>{ $('tmStart').value = (parseInt($('tmHdr').value,10)||1)+1; map = {}; drawCols(); });
+      $('tmDetect').addEventListener('click', ()=>{ const d = tplXlsxDetectHeader(bytes, cols); $('tmHdr').value = d.headerRow; $('tmStart').value = d.startRow; map = Object.assign({}, d.map); drawCols(); showMsg('tmMsg', d.score ? 'ok' : 'warn', d.score ? `رُبط ${d.score} عمود تلقائياً بحسب تطابق الأسماء.` : 'لم يُعثر على صف عناوين مطابق لأسماء الأعمدة؛ اربط يدوياً.'); });
+      if(cur.mode==='table') drawCols();
+    }
+    $('tmClose').addEventListener('click', closeModal);
+    $('tmSave').addEventListener('click', async ()=>{
+      let mapping = {mode:'placeholders'};
+      if(x.kind==='xlsx' && $('tmMode').value==='table'){
+        if(!Object.keys(map).length){ showMsg('tmMsg','warn','اربط عموداً واحداً على الأقل.'); return; }
+        mapping = {mode:'table', headerRow:parseInt($('tmHdr').value,10)||1, startRow:parseInt($('tmStart').value,10)||2, cols:map};
+      }
+      setBusy('tmSave', true, '⏳ …');
+      try{ const r = await wmsPatch('doc_template_versions', `id=eq.${v.id}`, {mapping}); Object.assign(v, r[0]); closeModal(); tplFlash('ok','تم حفظ الربط.'); dynRerender(); }
+      catch(e){ setBusy('tmSave', false, '💾 حفظ الربط'); showMsg('tmMsg','bad','لم يُحفظ الربط: '+e.message); }
+    });
+  }).catch(e=>{ const b = document.getElementById('modalBodyEl'); if(b) b.innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; });
+}
+/* ---- التعبئة والمعاينة ---- */
+function tplSelectedRows(t){
+  const st = DYN.rows[t.id]; const all = st && st.list ? st.list : []; const cols = dynCols(t.id);
+  if(TPL.mode==='filtered') return dynFilteredRows(t, cols);
+  if(TPL.mode==='pick') return all.filter(r=>TPL.pick.has(r.id));
+  return all;
+}
+function tplRenderFill(t, panel){
+  const live = TPL.templates.filter(x=>!x.archived_at); const st = DYN.rows[t.id]; const cols = dynCols(t.id);
+  if(!live.length){ panel.innerHTML = '<h2 style="font-size:16px;">🖨️ تعبئة النموذج</h2><div class="msg info">ارفع نموذجاً أولاً لتتمكن من التعبئة.</div>'; return; }
+  if(!st || !st.loaded){ panel.innerHTML = '<h2 style="font-size:16px;">🖨️ تعبئة النموذج</h2><div class="desc">جارٍ تحميل صفوف الجدول…</div>'; return; }
+  const all = st.list || [];
+  panel.innerHTML = `<h2 style="font-size:16px;">🖨️ تعبئة النموذج بالبيانات</h2>
+    <label class="lbl">النموذج</label><select id="tfSel">${live.map(x=>`<option value="${x.id}" ${x.id===TPL.tplId?'selected':''}>${esc(x.name)} (${x.kind==='xlsx'?'Excel':'Word'}${tplActiveVersion(x)?' v'+tplActiveVersion(x).version_no:''})</option>`).join('')}</select>
+    <label class="lbl">الصفوف</label>
+    <div class="btnrow" style="margin-top:2px;">
+      <label><input type="radio" name="tfMode" value="all" ${TPL.mode==='all'?'checked':''}> كل الصفوف (${all.length})</label>
+      <label><input type="radio" name="tfMode" value="filtered" ${TPL.mode==='filtered'?'checked':''}> المعروض حالياً في «البيانات» حسب البحث/التصفية</label>
+      <label><input type="radio" name="tfMode" value="pick" ${TPL.mode==='pick'?'checked':''}> صفوف أحدّدها</label></div>
+    <div id="tfPick" style="${TPL.mode==='pick'?'':'display:none;'}"></div>
+    <div class="desc" id="tfCount"></div>
+    <div class="btnrow"><button class="primary" id="tfPreview">👁️ معاينة قبل الطباعة</button><button class="secondary" id="tfDownload">📥 تنزيل الملف المعبّأ</button></div><div id="tfMsg"></div>`;
+  const $ = (id)=>document.getElementById(id);
+  const upd = ()=>{ const n = tplSelectedRows(t).length; $('tfCount').textContent = `عدد الصفوف التي ستُعبَّأ: ${n}`; };
+  const drawPick = ()=>{
+    const q = wmsNorm(TPL.pickQ); const shown = all.filter(r=> !q || cols.some(c=> wmsNorm((r.data||{})[c.col_key]).includes(q))).slice(0,300);
+    $('tfPick').innerHTML = `<input type="text" id="tfPickQ" autocomplete="off" placeholder="بحث في الصفوف…" value="${esc(TPL.pickQ)}"><div class="btnrow"><button class="secondary" id="tfPickAll">تحديد المعروض</button><button class="secondary" id="tfPickNone">مسح التحديد</button></div>
+      <div style="overflow:auto;max-height:260px;"><table class="data"><tbody>${shown.map(r=>`<tr><td><input type="checkbox" data-tfp="${r.id}" ${TPL.pick.has(r.id)?'checked':''}></td>${cols.slice(0,4).map(c=>`<td>${esc(dynFmtCell(c,(r.data||{})[c.col_key]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    $('tfPickQ').addEventListener('input', debounce(()=>{ TPL.pickQ = $('tfPickQ').value; drawPick(); }, 160));
+    $('tfPickAll').addEventListener('click', ()=>{ shown.forEach(r=>TPL.pick.add(r.id)); drawPick(); upd(); });
+    $('tfPickNone').addEventListener('click', ()=>{ TPL.pick.clear(); drawPick(); upd(); });
+    $('tfPick').querySelectorAll('[data-tfp]').forEach(c=> c.addEventListener('change', ()=>{ if(c.checked) TPL.pick.add(c.dataset.tfp); else TPL.pick.delete(c.dataset.tfp); upd(); }));
+  };
+  $('tfSel').addEventListener('change', ()=>{ TPL.tplId = $('tfSel').value; });
+  panel.querySelectorAll('[name=tfMode]').forEach(r=> r.addEventListener('change', ()=>{ TPL.mode = r.value; $('tfPick').style.display = TPL.mode==='pick' ? '' : 'none'; if(TPL.mode==='pick') drawPick(); upd(); }));
+  if(TPL.mode==='pick') drawPick();
+  upd();
+  $('tfPreview').addEventListener('click', ()=> tplRunFill(t, 'preview'));
+  $('tfDownload').addEventListener('click', ()=> tplRunFill(t, 'download'));
+}
+async function tplRunFill(t, action){
+  const x = TPL.templates.find(y=>y.id===TPL.tplId); const v = x && tplActiveVersion(x);
+  if(!v){ showMsg('tfMsg','warn','اختر نموذجاً له نسخة فعّالة.'); return; }
+  const rows = tplSelectedRows(t); const cols = dynCols(t.id);
+  if(!rows.length){ showMsg('tfMsg','warn','لا توجد صفوف لتعبئتها — اختر صفاً واحداً على الأقل.'); return; }
+  const btn = document.getElementById(action==='preview'?'tfPreview':'tfDownload'); const lbl = btn.textContent; btn.disabled = true; btn.textContent = '⏳ جارٍ التحضير…';
+  try{
+    const bytes = await tplStorageDownload(v.storage_path);
+    const mapping = (v.mapping && v.mapping.mode) ? v.mapping : tplAutoMapping(x.kind, bytes, cols);
+    const sec = dynSection(t.section_id);
+    const res = tplBuild(x.kind, bytes, mapping, cols, rows, {today:todayStr(), tableName:t.name, sectionName: sec?sec.name:'', count: rows.length});
+    const fname = `${x.name}_${t.name}_${todayStr()}.${x.kind}`;
+    if(action==='download'){ downloadBlobAs(res.blob, fname); showMsg('tfMsg', res.warnings.length?'warn':'ok', res.warnings.length ? 'نُزّل الملف مع تنبيهات: '+res.warnings.join(' | ') : `تم إنشاء الملف (${rows.length} صف) وتنزيله.`); }
+    else tplOpenPreview(x, v, res, rows.length, fname);
+  }catch(e){ showMsg('tfMsg','bad','تعذّرت التعبئة: '+e.message); }
+  btn.disabled = false; btn.textContent = lbl;
+}
+function tplOpenPreview(x, v, res, n, fname){
+  const html = tplPreviewHtml(x.kind, res.bytes);
+  openModal('👁️ معاينة — '+esc(x.name), (b)=>{
+    b.innerHTML = `<div class="msg warn">المعاينة <b>تقريبية</b> (نص وجداول فقط)؛ لا تُظهر الشعار والخطوط والتنسيق الدقيق. للحصول على الشكل الرسمي الدقيق نزّل الملف وافتحه في ${x.kind==='xlsx'?'Excel':'Word'} واطبع منه.</div>
+      <div class="desc">النموذج: ${esc(x.name)} · النسخة v${v.version_no} · عدد الصفوف: ${n}</div>
+      ${res.warnings.length ? `<div class="msg bad"><b>تنبيهات:</b><ul style="margin:4px 0 0;padding-inline-start:18px;">${res.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+      <div id="tpPv">${html}</div>
+      <div class="btnrow"><button class="primary" id="tpDl">📥 تنزيل الملف المعبّأ</button><button class="secondary" id="tpPrint">🖨️ طباعة المعاينة</button><button class="secondary" id="tpClose">إغلاق</button></div>`;
+    document.getElementById('tpClose').addEventListener('click', closeModal);
+    document.getElementById('tpDl').addEventListener('click', ()=> downloadBlobAs(res.blob, fname));
+    document.getElementById('tpPrint').addEventListener('click', ()=>{ closeModal(); sidrPrintFlowHtml(`<div class="sr-wrap">${html}</div>`, x.name); });
+  }, {maxWidth:'920px'});
+}
+
 
 /* آخر تبويب إداري مستخدم: يُفتح الوضع الإداري عليه مباشرة بعد تسجيل الدخول (تفضيل محلي على هذا الجهاز فقط) */
 function adminLastTabSave(tab){ try{ localStorage.setItem('wms_last_admin_tab', tab); }catch(e){} }
