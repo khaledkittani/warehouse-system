@@ -3932,6 +3932,32 @@ function taglogFilteredSortedRows(){
   }
   return rows;
 }
+/* تصدير كل التاجات المسجَّلة إلى Excel — مستقل عن البحث/الفرز المعروض حالياً،
+   ويشمل كل صفوف STATE.tagLog (الأحدث إدخالاً أولاً). */
+function taglogScanTimeText(ts){
+  if(!ts) return '';
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function taglogExportAllToExcel(){
+  const rows = STATE.tagLog.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if(!rows.length){ alert('لا توجد تاجات مسجَّلة للتصدير.'); return; }
+  const header = ['التاج','اسم القطعة','النوع','اسم الموقع','تاريخ التركيب','تاريخ الإدخال'];
+  const aoa = [header, ...rows.map(r=>[
+    r.tag || '',
+    r.materialName || '',
+    r.type === 'Dismantled' ? 'Dismantled' : 'Installed',
+    r.siteName || '',
+    r.installDate || '',
+    taglogScanTimeText(r.createdAt)
+  ])];
+  downloadWorkbook(
+    [{name:'رصد التاجات', ws: aoaSheet(aoa, [24,36,14,26,14,18])}],
+    `رصد_التاجات_${todayStr()}.xlsx`
+  );
+}
 function taglogSetSort(col){
   if(TAGLOG_SORT_COL===col){ TAGLOG_SORT_DIR = TAGLOG_SORT_DIR==='asc' ? 'desc' : 'asc'; }
   else { TAGLOG_SORT_COL = col; TAGLOG_SORT_DIR = 'asc'; }
@@ -4027,7 +4053,10 @@ function renderTagLogRecordsPanel(onlyResults){
     return;
   }
   panel.innerHTML = `
-    <h2 style="margin:0 0 10px;" id="tlRecordsHead">${headHtml}</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 10px;">
+      <h2 style="margin:0;" id="tlRecordsHead">${headHtml}</h2>
+      <button type="button" class="secondary" id="btnTlExportAll" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;" title="تنزيل ملف Excel بكل التاجات المسجَّلة (وليس نتائج البحث الحالية فقط)">📥 تصدير كل التاجات إلى Excel</button>
+    </div>
     <input type="text" id="tlRecordsFilter" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TAGLOG_FILTER_QUERY)}" style="margin-bottom:10px;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div id="tlRecordsTableBox">${tableHtml}</div>
   `;
@@ -4037,6 +4066,7 @@ function renderTagLogRecordsPanel(onlyResults){
     TAGLOG_FILTER_QUERY = filterInp.value;
     debouncedRecordsFilterRender();
   });
+  document.getElementById('btnTlExportAll').addEventListener('click', taglogExportAllToExcel);
   wireResults();
 }
 
