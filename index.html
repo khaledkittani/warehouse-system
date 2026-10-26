@@ -527,6 +527,28 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 .admin-settings-row{display:flex;flex-wrap:wrap;gap:10px;padding:12px 0 4px;border-top:1px dashed #ddd;margin-top:10px;}
 .qm-location-banner{display:flex;align-items:center;gap:10px;background:#f2efe7;border:1px solid #e0dac8;border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:13.5px;}
 
+  /* ===== إدارة صلاحيات المستخدمين ===== */
+  .perm-ro-banner{position:sticky;top:0;z-index:4;background:#fff4d6;border:1px solid #e8cf8a;color:#6b4e00;border-radius:10px;padding:9px 14px;margin-bottom:12px;font-size:13.5px;font-weight:700;}
+  .perm-ro-banner.flash{animation:permFlash .55s ease;}
+  @keyframes permFlash{0%,100%{background:#fff4d6;}50%{background:#ffe08a;}}
+  .perm-readonly .perm-disabled{opacity:.55;cursor:not-allowed !important;}
+  .perm-chip{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:20px;margin-inline-start:5px;vertical-align:middle;}
+  .perm-chip.read{background:#e1ecf3;color:#24506b;}
+  .perm-chip.edit{background:#e3f1e4;color:#236b2d;}
+  .perm-chip.none{background:#f1eee5;color:#7b7460;}
+  .perm-matrix{width:100%;border-collapse:collapse;font-size:13px;}
+  .perm-matrix th,.perm-matrix td{border-bottom:1px solid #eee;padding:9px 7px;text-align:start;vertical-align:middle;}
+  .perm-matrix th{background:#f7f5ef;font-size:12px;color:#6b6555;}
+  .perm-matrix tr:last-child td{border-bottom:none;}
+  .perm-matrix .perm-sec-name{font-weight:700;}
+  .perm-matrix .perm-sec-hint{display:block;font-size:11px;color:#8a8264;font-weight:400;margin-top:2px;}
+  .perm-matrix label{white-space:nowrap;cursor:pointer;}
+  .perm-matrix input[type=radio]{margin-inline-end:4px;vertical-align:middle;}
+  .perm-modal-tools{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px;}
+  .perm-modal-tools button{font-size:12px;padding:6px 11px;}
+  .perm-user-summary{font-size:12px;color:#6b6555;line-height:1.7;}
+  .perm-user-summary b{color:#3d3a32;}
+
   /* ===== طلبات إخراج البضاعة ===== */
   .pill.info{background:#e1ecf3;color:var(--steel-dark);}
   .outreq-bell{font-family:'Cairo',sans-serif;font-weight:800;font-size:13px;background:var(--rust);color:#fff;border:none;padding:7px 14px;border-radius:20px;cursor:pointer;animation:orPulse 2.2s ease-in-out infinite;}
@@ -745,8 +767,11 @@ const LABELS = {
   app_quick_mode: 'وضع المستودع',
   app_admin_mode: 'الوضع الإداري',
   app_viewer_chip: '👁️ وضع القراءة فقط',
+  app_custom_chip: '🔐 صلاحيات مخصصة',
   app_admin_heading: 'الوضع الإداري ⚙️',
   app_admin_sub: 'Phase 2 — تتبّع الاستلام، الفكّ، الصرف حسب SID، والرصيد الدائم',
+  app_custom_heading: '🔐 وضع مخصص — حسب صلاحياتك',
+  app_custom_sub: 'تظهر لك الأقسام المسموحة فقط، مع تحديد واضح بين القراءة والتعديل.',
   app_footer: '© جميع الحقوق محفوظة للمهندس خالد كتانة',
   tab_setup: 'استلام مواد 4G',
   tab_receipts: 'سجل استلام مواد 4G',
@@ -764,6 +789,7 @@ const LABELS = {
   tab_transport: '🚚 سجل طلبات النقل',
   tab_dyn: '🧩 إدارة الجداول والأقسام',
   tab_taglog_viewer: 'رصد التاجات',
+  tab_users: '👥 المستخدمون والصلاحيات',
 
   // عناوين فرعية / أقسام داخلية
   tags_heading: 'تاجات المواد المتوفرة',
@@ -899,6 +925,8 @@ let SUPABASE_ROW_META_CACHE = {}; // آخر updated_at معروف لكل صف (k
 const SUPABASE_SESSION_KEY = 'wms_supabase_session_v1';
 let CURRENT_SESSION = null; // {access_token, refresh_token, expires_at(ms), user:{id,email}}
 let CURRENT_ROLE = null;    // 'admin' | 'viewer' | null (قبل تسجيل الدخول)
+let CURRENT_SECTIONS = null; // null = الوضع الافتراضي القديم | object = خريطة صلاحيات صريحة {section: 'none'|'read'|'edit'}
+let SECTIONS_DB_READY = false; // هل عمود profiles.sections موجود في قاعدة البيانات؟
 
 function saveSessionLocally(session){
   try{ localStorage.setItem(SUPABASE_SESSION_KEY, JSON.stringify(session)); }catch(e){}
@@ -917,6 +945,9 @@ function supabaseAuthHeaders(extra){
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': 'Bearer ' + token,
   }, extra||{});
+}
+function supabaseAuthedHeadersJson(extra){
+  return supabaseAuthHeaders(Object.assign({'Content-Type':'application/json'}, extra||{}));
 }
 async function authSignIn(email, password){
   try{
@@ -1004,36 +1035,64 @@ async function ensureFreshSession(){
   return await authRefresh();
 }
 function authSignOut(){
-  CURRENT_SESSION = null; CURRENT_ROLE = null;
+  CURRENT_SESSION = null; CURRENT_ROLE = null; CURRENT_SECTIONS = null; SECTIONS_DB_READY = false;
+  PERM_ACTIVE_TAB = null;
+  if(typeof disconnectPermReadOnlyObserver==='function') disconnectPermReadOnlyObserver();
+  if(typeof USERS_STATE!=='undefined'){
+    USERS_STATE.loaded = false; USERS_STATE.loading = false; USERS_STATE.rows = [];
+    USERS_STATE.q = ''; USERS_STATE.error = null; USERS_STATE.rpcReady = false;
+  }
   if(typeof outreqReset==='function') outreqReset();
   clearSessionLocally();
   if(SUPABASE_POLL_TIMER){ clearInterval(SUPABASE_POLL_TIMER); SUPABASE_POLL_TIMER = null; }
 }
 async function fetchMyRole(){
-  if(!CURRENT_SESSION) return {role:null, reason:'no-session'};
+  if(!CURRENT_SESSION) return {role:null, sections:null, reason:'no-session'};
   try{
-    const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/profiles?select=role&id=eq.${CURRENT_SESSION.user.id}`, {
+    const base = `${SUPABASE_URL}/rest/v1/profiles?id=eq.${CURRENT_SESSION.user.id}`;
+    let sectionsQuery = true;
+    let res = await supabaseAuthedFetch(`${base}&select=role,sections`, {
       headers: supabaseAuthHeaders()
     });
+    // توافق خلفي: إذا لم يكن عمود sections موجوداً بعد (قبل تنفيذ migration الصلاحيات)
+    // نُكمل بالوضع القديم بدل إظهار خطأ عام يمنع الدخول.
+    if(res.status === 400){
+      const body400 = await res.text().catch(()=> '');
+      if(/sections|42703|column .* does not exist/i.test(body400)){
+        SECTIONS_DB_READY = false;
+        sectionsQuery = false;
+        res = await supabaseAuthedFetch(`${base}&select=role`, { headers: supabaseAuthHeaders() });
+      } else {
+        console.error('fetchMyRole failed (session kept):', res.status, body400);
+        return {role:null, sections:null, reason:'error', status:400, detail:body400};
+      }
+    }
     if(res.status === 401){
       if(res.__sessionInvalid){
         // supabaseAuthedFetch حاول التجديد داخلياً وتأكَّد أن refresh_token مرفوض فعلاً من Supabase — بطلان حقيقي هنا فقط
-        return {role:null, reason:'unauthorized'};
+        return {role:null, sections:null, reason:'unauthorized'};
       }
       // 401 لكن لم يُتأكَّد بطلان الجلسة (قد تكون محاولة التجديد فشلت مؤقتاً بسبب الشبكة) — لا نُسقط جلسة قد تكون سليمة
-      return {role:null, reason:'error', status:401, detail:'تعذّر تجديد الجلسة مؤقتاً — قد تكون مشكلة اتصال'};
+      return {role:null, sections:null, reason:'error', status:401, detail:'تعذّر تجديد الجلسة مؤقتاً — قد تكون مشكلة اتصال'};
     }
     if(!res.ok){
       // أي خطأ آخر (الجدول غير موجود بعد، مشكلة RLS، عطل شبكة مؤقت...) — لا نُسقط الجلسة الصحيحة بسببه
       const bodyText = await res.text().catch(()=> '');
       console.error('fetchMyRole failed (session kept):', res.status, bodyText);
-      return {role:null, reason:'error', status:res.status, detail:bodyText};
+      return {role:null, sections:null, reason:'error', status:res.status, detail:bodyText};
     }
     const rows = await res.json();
-    return {role: rows.length ? rows[0].role : 'viewer', reason:'ok'};
+    const row = rows.length ? rows[0] : null;
+    // إذا وصلنا هنا بالاستعلام الأول (فيه sections) فالعمود موجود. في مسار fallback يبقى false.
+    if(sectionsQuery) SECTIONS_DB_READY = true;
+    return {
+      role: row ? (row.role || 'viewer') : 'viewer',
+      sections: row && Object.prototype.hasOwnProperty.call(row, 'sections') ? permNormalizeSections(row.sections) : null,
+      reason:'ok'
+    };
   }catch(e){
     console.error('fetchMyRole network error (session kept):', e);
-    return {role:null, reason:'error', detail:e.message};
+    return {role:null, sections:null, reason:'error', detail:e.message};
   }
 }
 /* غلاف موحّد لأي طلب لقاعدة بيانات وقت العمل: يعيد المحاولة تلقائياً مرة واحدة بعد تجديد الجلسة لو رجع 401 (توكن منتهي).
@@ -1084,6 +1143,24 @@ async function supabaseFetchRowsByKeys(keys){
 }
 async function supabaseUpsertRow(key, value){
   const ts = new Date().toISOString();
+  // المستخدم غير المدير الذي لديه خريطة صلاحيات صريحة: كل كتابة تمر عبر RPC محمي
+  // يتحقق من صلاحية تعديل القسم في قاعدة البيانات. الحسابات القديمة (sections=null)
+  // تبقى على مسارها السابق للتوافق الخلفي (مثل can_fulfill في طلبات الإخراج).
+  if(CURRENT_SESSION && CURRENT_ROLE && CURRENT_ROLE!=='admin' && hasCustomPermissions()){
+    const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/rpc/wms_write_state`, {
+      method:'POST', headers: supabaseAuthedHeadersJson(),
+      body: JSON.stringify({p_key:key, p_value:value})
+    });
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      const msg = permRpcError(txt, res.status);
+      const err = new Error(msg);
+      err.code = (res.status===404 || /Could not find the function|does not exist|PGRST202/i.test(txt)) ? 'PERM_SETUP'
+        : (/forbidden|no edit permission|not allowed/i.test(txt) ? 'PERM_DENIED' : 'WRITE');
+      throw err;
+    }
+    return ts;
+  }
   const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}`, {
     method: 'POST',
     headers: supabaseAuthHeaders({'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal'}),
@@ -1181,6 +1258,19 @@ async function loadAllState(){
 }
 async function saveState(keys){
   const list = keys || Object.keys(STORE_KEYS);
+  // حارس الواجهة: لا نبدأ أي حفظ جزئي إذا كان أحد المفاتيح يخص قسماً غير قابل للتعديل.
+  // (RPC wms_write_state يطبّق نفس القاعدة مرة أخرى على الخادم.)
+  if(CURRENT_ROLE && CURRENT_ROLE!=='admin'){
+    const blocked = list.filter(k=>!canEditStateKey(k));
+    if(blocked.length){
+      const names = blocked.map(k=>{
+        const secs = STATE_KEY_SECTIONS[k] || [];
+        return secs.map(s=>(PERM_SECTION_MAP[s]||{}).label).filter(Boolean).join(' / ') || k;
+      });
+      alert('ما عندك صلاحية تعديل هذا القسم:\n' + Array.from(new Set(names)).join('\n') + '\n\nاطلب من مدير النظام منحك صلاحية «تعديل».');
+      return {ok:false, remote:false, denied:true};
+    }
+  }
   let allOk = true;
   let remoteAll = true;   // هل أُكِّد الحفظ على قاعدة البيانات المشتركة فعلاً (وليس نسخة محلية بديلة فقط)
   for(const key of list){
@@ -1195,6 +1285,12 @@ async function saveState(keys){
         SUPABASE_ONLINE = true;
         SUPABASE_LAST_SYNC_TIME = nowTimeStr();
       }catch(e){
+        if(e && (e.code==='PERM_DENIED' || e.code==='PERM_SETUP')){
+          alert(e.message);
+          LAST_SAVE_OK = false;
+          updateSaveIndicator();
+          return {ok:false, remote:false, denied:true};
+        }
         console.error('فشل الحفظ إلى Supabase، سيُحفظ محلياً كبديل مؤقت:', key, e);
         SUPABASE_ONLINE = false;
       }
@@ -2561,8 +2657,236 @@ const TABS = [
   {id:'tagcapture', lk:'tab_tagcapture', group:'tools'},
   {id:'transport', lk:'tab_transport', group:'ops'},
   {id:'dyn', lk:'tab_dyn', group:'ops'},
+  {id:'users', lk:'tab_users', group:'admin', adminOnly:true},
 ];
-const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات', 'ops':'🗂️ السجلات والجداول'};
+const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات', 'ops':'🗂️ السجلات والجداول', 'admin':'🛡️ الإدارة'};
+
+/* ============================================================
+   🔐 صلاحيات الأقسام لكل مستخدم
+   - admin: كل الأقسام دائماً (لا تُقرأ صلاحياته من الجدول).
+   - مستخدم قديم بدون إعداد صريح (profiles.sections = null): نفس واجهة
+     القراءة الحالية (stock/goods/taglog) حفاظاً على عدم كسر أي حساب.
+   - مستخدم بإعداد صريح: ما يظهر في الخريطة فقط، وأي قسم غير مذكور = مخفي.
+   - القيمة 'read' = عرض فقط، 'edit' = تحكم كامل بالقسم، 'none' = مخفي.
+   ============================================================ */
+const PERM_SECTIONS = [
+  {id:'setup',      label:'استلام مواد 4G',            group:'4g',   canEdit:true},
+  {id:'sid',        label:'رفع SID ومعالجته',          group:'4g',   canEdit:true},
+  {id:'stock',      label:'مخزون 4G',                  group:'4g',   canEdit:false, hint:'عرض فقط — تعديل المخزون يتم عبر استلام 4G أو SID أو الحركة السريعة'},
+  {id:'goods',      label:'مخزون المستودع',            group:'wh',   canEdit:true},
+  {id:'outreq',     label:'طلبات الإخراج',             group:'wh',   canEdit:true,  hint:'التنفيذ يخصم من المخزون؛ «تعديل» تمنح أيضاً كتابة مخزون 4G والمستودع اللازمة للتنفيذ'},
+  {id:'quick',      label:'الحركة السريعة',            group:'tools',canEdit:true,  hint:'إدخال/إخراج سريع لمخزون المستودع ومواد 4G'},
+  {id:'tagcapture', label:'رصد التاجات',               group:'tools',canEdit:true},
+  {id:'taglog',     label:'سجل التاجات',               group:'tools',canEdit:false, hint:'عرض فقط — سجل كل التاجات المرصودة'},
+  {id:'transport',  label:'سجل طلبات النقل',           group:'ops',  canEdit:true},
+  {id:'dyn',        label:'إدارة الجداول والأقسام',     group:'ops',  canEdit:true},
+];
+const PERM_SECTION_MAP = {};
+PERM_SECTIONS.forEach(s=>{ PERM_SECTION_MAP[s.id] = s; });
+const LEGACY_VIEWER_SECTIONS = {stock:'read', goods:'read', taglog:'read'};
+const PERM_SECTION_IDS = PERM_SECTIONS.map(s=>s.id);
+
+/* ربط مفاتيح wms_state بالأقسام — يُستخدم لمنع الحفظ من غير المصرّح له في الواجهة,
+   وتُطبَّق نفس القاعدة مرة أخرى داخل RPC wms_write_state في قاعدة البيانات. */
+const STATE_KEY_SECTIONS = {
+  // outreq مضافة للمفاتيح الأربعة لأن تنفيذ طلبات الإخراج يخصم من المخزون فعلياً.
+  // من يملك «تعديل طلبات الإخراج» يحتاج هذه الكتابة، ومن لا يملكها لا يستطيع العبور من الواجهة.
+  stock:            ['setup','sid','stock','quick','tagcapture','outreq'],
+  dismantled:       ['setup','stock','quick'],
+  ledger:           ['setup','sid','stock','quick','outreq'],
+  processedSids:    ['sid'],
+  issues:           ['setup','sid','stock','quick','goods'],
+  processedFiles:   ['setup'],
+  meta:             ['setup'],
+  goodsCatalog:     ['goods','quick','outreq'],
+  goodsLedger:      ['goods','quick','outreq'],
+  tagLog:           ['tagcapture'],
+  tagLogTemplate:   ['tagcapture'],
+  tagApprovedSites: ['tagcapture'],
+  tagShortcuts:     ['tagcapture'],
+  sidReview:        ['sid'],
+  siteSchedule:     ['sid'],
+  sidHighlights:    ['sid'],
+  cableItems:       [],  // legacy — admin فقط
+  cableLedger:      [],  // legacy — admin فقط
+};
+
+function permNormalizeSections(raw){
+  if(!raw || typeof raw!=='object' || Array.isArray(raw)) return null;
+  const out = {};
+  PERM_SECTION_IDS.forEach(id=>{
+    const v = raw[id];
+    if(v==='read' || v==='edit' || v==='none'){
+      const def = PERM_SECTION_MAP[id];
+      out[id] = (v==='edit' && def && !def.canEdit) ? 'read' : v;
+    }
+  });
+  return out;
+}
+function hasCustomPermissions(){
+  return CURRENT_ROLE!=='admin' && !!CURRENT_SECTIONS && typeof CURRENT_SECTIONS==='object' && !Array.isArray(CURRENT_SECTIONS);
+}
+function sectionAccess(id){
+  if(CURRENT_ROLE==='admin') return 'edit';
+  if(hasCustomPermissions()){
+    const v = CURRENT_SECTIONS[id];
+    if(v==='edit'){
+      const def = PERM_SECTION_MAP[id];
+      return (def && !def.canEdit) ? 'read' : 'edit';
+    }
+    if(v==='read') return 'read';
+    return 'none';
+  }
+  // الوضع القديم: نفس تبويبات القراءة الحالية، مع إبقاء طلبات الإخراج مرتبطة بصلاحياتها القديمة
+  if(id==='outreq') return (typeof outreqHasAccess==='function' && outreqHasAccess()) ? 'read' : 'none';
+  return LEGACY_VIEWER_SECTIONS[id] || 'none';
+}
+function canReadSection(id){ return sectionAccess(id)!=='none'; }
+function canEditSection(id){ return sectionAccess(id)==='edit'; }
+function permVisibleSections(){
+  return PERM_SECTIONS.filter(s=>sectionAccess(s.id)!=='none');
+}
+function canEditStateKey(key){
+  if(CURRENT_ROLE==='admin') return true;
+  // توافق خلفي: حساب can_fulfill قديم (sections=null) كان يكتب مفاتيح المخزون
+  // الأربعة عند تنفيذ طلبات الإخراج. نُبقي ذلك حتى لا يتعطّل التنفيذ قبل إعداد صلاحياته.
+  if(!hasCustomPermissions() && typeof outreqCanFulfill==='function' && outreqCanFulfill()
+     && ['stock','ledger','goodsCatalog','goodsLedger'].includes(key)) return true;
+  const secs = STATE_KEY_SECTIONS[key] || [];
+  return secs.some(s=>canEditSection(s));
+}
+
+/* ---- حارس القراءة فقط: يعطّل كل ما قد يكتب، ويُبقي البحث/الفلترة/التصدير/التنقل/الإغلاق ---- */
+let PERM_RO_OBSERVER = null;
+let PERM_RO_DOC_OBSERVER = null;
+let PERM_READONLY_SECTION = null;
+let PERM_RO_DOC_CLICK_BOUND = false;
+let PERM_RO_EL = null;
+function disconnectPermReadOnlyObserver(){
+  if(PERM_RO_OBSERVER){ try{ PERM_RO_OBSERVER.disconnect(); }catch(e){} PERM_RO_OBSERVER = null; }
+  if(PERM_RO_DOC_OBSERVER){ try{ PERM_RO_DOC_OBSERVER.disconnect(); }catch(e){} PERM_RO_DOC_OBSERVER = null; }
+  if(PERM_RO_EL){ try{ PERM_RO_EL.classList.remove('perm-readonly'); }catch(e){} PERM_RO_EL = null; }
+  PERM_READONLY_SECTION = null;
+}
+function permReadOnlyControlAllowed(node){
+  if(!node || !node.tagName) return false;
+  if(node.closest && node.closest('nav, .tabs, [data-perm-allow], .modal-close')) return true;
+  const id = String(node.id||'').toLowerCase();
+  const cls = String(node.className||'').toLowerCase();
+  const txt = String(node.textContent||'').trim();
+  const tag = node.tagName.toUpperCase();
+  if(/(export|print|search|filter|sort|view|close|cancel|back|return|home|first|last|prev|next|page|refresh|sync|retry|reload|download|copy|tab|nav|details|expand|xlsx|csv|excel)/.test(id+' '+cls)) return true;
+  if(/(تصدير|طباعة|بحث|فلتر|إغلاق|إلغاء|رجوع|عودة|للطلبات|للقائمة|إلى القائمة|السابق|التالي|عرض|تفاصيل|فتح|استعراض|معاينة|تنزيل|نسخ|تحديث|مزامنة|تقرير|السجل|سجل الاستلام|سجل الحركات|سجل الطلبات|سجل التاجات|السجل الكامل)/.test(txt)) return true;
+  if(node.hasAttribute && (node.hasAttribute('data-tab') || node.hasAttribute('data-sort') || node.hasAttribute('data-view') || node.hasAttribute('data-open') || node.hasAttribute('data-trview') || node.hasAttribute('data-dtab')
+     || node.hasAttribute('data-secopen') || node.hasAttribute('data-tblopen') || node.hasAttribute('data-dynnav')
+     || node.hasAttribute('data-sechist') || node.hasAttribute('data-tblhist') || node.hasAttribute('data-chist') || node.hasAttribute('data-rhist')
+     || node.hasAttribute('data-sidrview') || node.hasAttribute('data-sidsec'))) return true;
+  if((tag==='INPUT' || tag==='SELECT') && node.closest && node.closest('.or-filters, .filters, .filterbar, .filters-row, .table-toolbar, .searchbar')) return true;
+  // عناصر تصفية/عرض سجل النقل (أسماء ثابتة في هذا الملف) — مع استثناء أزرار الحفظ/المسودة.
+  if(/^(trq|trfrom|trto|trdriversel|trcanc|trsort|trclear|trrefresh|trprint|trxlsx)$/.test(id)) return true;
+  // عناصر تصفية جداول «ديناميكي» (ليست ضمن حاوية .filters في هذا الملف).
+  if(/^(drq|drfcol|drfval|drffrom|drfto)$/.test(id)) return true;
+  // «مسح/إعادة تعيين» مسموح فقط داخل شريط تصفية، لا داخل نوافذ/سجلات قابلة للتعديل.
+  if((tag==='BUTTON' || tag==='A') && /(clear|reset)/.test(id+' '+cls)
+     && node.closest && node.closest('.or-filters, .filters, .filterbar, .filters-row, .table-toolbar, .searchbar, .tr-filters')) return true;
+  if(tag==='INPUT'){
+    const type = String(node.type||'text').toLowerCase();
+    if(type==='search') return true;
+    if((type==='checkbox' || type==='radio') && /(filter|hide|show|only|available|short|zero|select|tab)/.test(id+' '+cls)) return true;
+    if(/(search|filter|query|from|to|date|sort)/.test(id)) return true;
+  }
+  if(tag==='SELECT' && /(filter|sort|view|type|date|mode|tab)/.test(id)) return true;
+  return false;
+}
+function permApplyControls(root){
+  if(!root) return;
+  root.querySelectorAll('button, input, select, textarea, [contenteditable="true"]').forEach(node=>{
+    if(node.dataset && node.dataset.permAllow === '1') return;
+    if(permReadOnlyControlAllowed(node)){
+      try{ node.dataset.permAllow = '1'; }catch(e){}
+      return;
+    }
+    try{
+      node.disabled = true;
+      node.classList.add('perm-disabled');
+      node.setAttribute('title','وضع القراءة فقط');
+    }catch(e){}
+    if(node.getAttribute && node.getAttribute('contenteditable')){ try{ node.setAttribute('contenteditable','false'); }catch(e){} }
+  });
+}
+function permApplyToModals(){
+  if(!PERM_READONLY_SECTION) return;
+  const overlay = document.getElementById('activeModalOverlay');
+  if(!overlay) return;
+  overlay.querySelectorAll('.modal-box').forEach(box=>{
+    const body = box.querySelector('.modal-body');
+    if(body && !body.querySelector('.perm-ro-banner')){
+      const b = document.createElement('div');
+      b.className = 'perm-ro-banner';
+      b.style.position = 'static';
+      b.style.marginBottom = '10px';
+      b.textContent = '👁️ وضع القراءة فقط — أزرار التعديل والحفظ والحذف معطّلة في هذا القسم.';
+      body.insertBefore(b, body.firstChild);
+    }
+    permApplyControls(box);
+  });
+}
+function applyPermReadOnlyGuard(el, sectionId){
+  // إذا أُعيد رسم الشاشة بالكامل أثناء الرسم، فهذا العنصر صار مفصولاً عن الصفحة؛
+  // لا نلمس المؤقّت/المراقب الجديد الذي أُنشئ للشاشة الجديدة.
+  if(!el || el.isConnected === false) return;
+  disconnectPermReadOnlyObserver();
+  if(sectionAccess(sectionId)!=='read') return;
+  PERM_READONLY_SECTION = sectionId;
+  PERM_RO_EL = el;
+  el.classList.add('perm-readonly');
+  const ensureBanner = ()=>{
+    if(el.querySelector('.perm-ro-banner')) return;
+    const b = document.createElement('div');
+    b.className = 'perm-ro-banner';
+    b.innerHTML = '👁️ وضع القراءة فقط — يمكنك العرض والبحث والتصدير، لكن لا يمكن التعديل في هذا القسم.';
+    el.insertBefore(b, el.firstChild);
+  };
+  const apply = ()=>{ ensureBanner(); permApplyControls(el); };
+  apply();
+  if(!el.dataset.permGuardBound){
+    el.dataset.permGuardBound = '1';
+    el.addEventListener('click', (e)=>{
+      if(!PERM_READONLY_SECTION) return;
+      const action = e.target && e.target.closest ? e.target.closest('button, a, [role="button"]') : null;
+      if(!action) return;
+      if(permReadOnlyControlAllowed(action)) return;
+      e.preventDefault(); e.stopPropagation();
+      const b = el.querySelector('.perm-ro-banner');
+      if(b){ b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash'); }
+    }, true);
+  }
+  // أي نافذة تُفتح من قسم "قراءة" (سجل الاستلام، تفاصيل SID، تفاصيل النقل...) يجب أن
+  // تُعطَّل فيها أزرار الحفظ/الحذف/التعديل أيضاً، لأنها تُضاف إلى body خارج حاوية التبويب.
+  try{
+    PERM_RO_OBSERVER = new MutationObserver(()=>apply());
+    PERM_RO_OBSERVER.observe(el, {childList:true, subtree:true});
+  }catch(e){}
+  try{
+    PERM_RO_DOC_OBSERVER = new MutationObserver(()=>permApplyToModals());
+    PERM_RO_DOC_OBSERVER.observe(document.body, {childList:true, subtree:true});
+  }catch(e){}
+  if(!PERM_RO_DOC_CLICK_BOUND){
+    PERM_RO_DOC_CLICK_BOUND = true;
+    document.addEventListener('click', (e)=>{
+      if(!PERM_READONLY_SECTION) return;
+      const action = e.target && e.target.closest ? e.target.closest('.modal-box button, .modal-box a, .modal-box [role="button"]') : null;
+      if(!action) return;
+      if(permReadOnlyControlAllowed(action)) return;
+      e.preventDefault(); e.stopPropagation();
+      const box = action.closest('.modal-box');
+      const b = box ? box.querySelector('.perm-ro-banner') : null;
+      if(b){ b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash'); }
+    }, true);
+  }
+  permApplyToModals();
+}
+
 
 function esc(s){
   return String(s===null||s===undefined?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -2585,6 +2909,12 @@ function renderApp(roleFetchError, roleResult){
     return;
   }
   const isAdmin = CURRENT_ROLE === 'admin';
+  const customPerms = hasCustomPermissions();
+  // لا تُترك حماية «قراءة فقط» عالقة إذا تغيّر الدور/الصلاحيات دون تسجيل خروج كامل
+  // (مثلاً مدير يفتح النظام في نفس الصفحة بعد جلسة سابقة، أو منح المستخدم صلاحية تعديل).
+  if(!customPerms || isAdmin){
+    if(typeof disconnectPermReadOnlyObserver==='function') disconnectPermReadOnlyObserver();
+  }
   // عرض أوسع خاص بشاشة رصد التاجات فقط (تصميم/CSS بحت) — يُعاد ضبطه أيضاً عند تبديل التبويبات
   // داخل الوضع الإداري نفسه من renderTabContent، لأن تبديل التبويب لا يمر عبر renderApp.
   app.classList.toggle('tl-wide', isAdmin && APP_MODE==='admin' && ACTIVE_TAB==='tagcapture');
@@ -2594,7 +2924,7 @@ function renderApp(roleFetchError, roleResult){
   // وأخرى طالما بقي نفس المستخدم/الدور — إعادة بنائه وربط أزراره من جديد في كل مرة كانت تُنفَّذ
   // فعلياً ولا داعٍ لها، وهي أحد أسباب البطء المحسوس عند كل عملية. نعيد استخدامه هنا ونكتفي
   // بإعادة رسم منطقة المحتوى (#modeContent) فقط، وهي المكان الذي تتغيّر فيه البيانات فعلاً.
-  const shellSig = `${isAdmin?'admin':'viewer'}|${CURRENT_SESSION?CURRENT_SESSION.user.email:''}`;
+  const shellSig = `${isAdmin?'admin':(customPerms?'custom':'viewer')}|${CURRENT_SESSION?CURRENT_SESSION.user.email:''}|${customPerms?JSON.stringify(CURRENT_SECTIONS):''}`;
   let content = document.getElementById('modeContent');
   if(!content || app.dataset.shellSig !== shellSig){
     app.dataset.shellSig = shellSig;
@@ -2606,7 +2936,7 @@ function renderApp(roleFetchError, roleResult){
           ${isAdmin ? `
             <button id="modeBtnQuick" class="${APP_MODE==='quick'?'active':''}">⚡ ${L('app_quick_mode')}</button>
             <button id="modeBtnAdmin" class="${APP_MODE==='admin'?'active':''}">⚙️ ${L('app_admin_mode')}</button>
-          ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">${L('app_viewer_chip')}</span>`}
+          ` : `<span style="color:#d9d4c6;font-size:13px;font-weight:700;">${customPerms?L('app_custom_chip'):L('app_viewer_chip')}</span>`}
         </div>
         ${CURRENT_SESSION ? `<span style="color:#d9d4c6;font-size:11.5px;margin-inline-end:10px;">${esc(CURRENT_SESSION.user.email)}</span><button id="btnSignOut" class="secondary" style="padding:6px 14px;font-size:12px;">خروج</button>` : ''}
         <span id="saveIndicator" class="modebar-save"></span>
@@ -2635,7 +2965,7 @@ function renderApp(roleFetchError, roleResult){
   }
   updateSaveIndicator();
   outreqUpdateBell();
-  if(!isAdmin){ renderViewerMode(content); return; }
+  if(!isAdmin){ if(customPerms) renderPermittedMode(content); else renderViewerMode(content); return; }
   if(APP_MODE==='quick') renderQuickMode(content); else renderAdminMode(content);
 }
 
@@ -2749,6 +3079,7 @@ function renderAdminMode(root){
       ${(function(){
         let html=''; let lastGroup=null;
         TABS.forEach(t=>{
+          if(t.adminOnly && !SUPABASE_ENABLED) return;
           if(t.group!==lastGroup){ html+=`<span class="tab-group-label">${TAB_GROUP_LABELS[t.group]||''}</span>`; lastGroup=t.group; }
           html+=`<button data-tab="${t.id}" class="${ACTIVE_TAB===t.id?'active':''}">${L(t.lk)}${t.id==='outreq'?`<span class="badge" id="outreqTabBadge" style="${outreqOpenCount()?'':'display:none'}">${outreqOpenCount()}</span>`:''}</button>`;
         });
@@ -2787,6 +3118,7 @@ function renderAdminMode(root){
 }
 
 function renderTabContent(){
+  if(hasCustomPermissions()) return renderPermTabContent();
   const el = document.getElementById('tabContent');
   const appEl = document.getElementById('app');
   if(appEl) appEl.classList.toggle('tl-wide', ACTIVE_TAB==='tagcapture');
@@ -2798,6 +3130,7 @@ function renderTabContent(){
   if(ACTIVE_TAB==='tagcapture') return renderTagCaptureTab(el);
   if(ACTIVE_TAB==='transport') return renderTransportTab(el);
   if(ACTIVE_TAB==='dyn') return renderDynTab(el);
+  if(ACTIVE_TAB==='users') return renderUsersTab(el);
 }
 
 /* ============================================================
@@ -2843,6 +3176,395 @@ function renderViewerTabContent(){
   if(VIEWER_ACTIVE_TAB==='taglog') return renderTagLogViewerTab(el);
   if(VIEWER_ACTIVE_TAB==='outreq') return renderOutreqTab(el);
 }
+
+/* ============================================================
+   🔐 الوضع المخصص — لمستخدم غير مدير لديه خريطة صلاحيات صريحة.
+   يظهر فقط ما سُمح له به، ويُعرض كل قسم إما بواجهة تعديل كاملة أو
+   بواجهة قراءة فقط (مع حارس يمنع أزرار/حقول الكتابة).
+   ============================================================ */
+let PERM_ACTIVE_TAB = null;
+function renderPermittedMode(root){
+  const visible = permVisibleSections();
+  if(!visible.length){
+    root.innerHTML = `
+      <header class="topbar">
+        <div class="title-block">
+          <h1>${L('app_custom_heading')}</h1>
+          <div class="sub">${L('app_custom_sub')}</div>
+        </div>
+      </header>
+      <div class="panel" style="text-align:center;padding:38px 18px;">
+        <div style="font-size:42px;line-height:1;margin-bottom:12px;">🔒</div>
+        <h2 style="margin-bottom:8px;">لا توجد أقسام متاحة لحسابك حالياً</h2>
+        <div class="desc">تواصل مع مدير النظام لمنحك الصلاحية على الأقسام التي تحتاجها.</div>
+      </div>`;
+    return;
+  }
+  if(!PERM_ACTIVE_TAB || !visible.some(s=>s.id===PERM_ACTIVE_TAB)) PERM_ACTIVE_TAB = visible[0].id;
+  let navHtml = ''; let lastGroup = null;
+  visible.forEach(s=>{
+    if(s.group!==lastGroup){ navHtml += `<span class="tab-group-label">${TAB_GROUP_LABELS[s.group]||''}</span>`; lastGroup = s.group; }
+    const access = sectionAccess(s.id);
+    navHtml += `<button data-perm-tab="${s.id}" class="${PERM_ACTIVE_TAB===s.id?'active':''}">${s.label}<span class="perm-chip ${access==='edit'?'edit':'read'}">${access==='edit'?'تعديل':'قراءة'}</span></button>`;
+  });
+  root.innerHTML = `
+    <header class="topbar">
+      <div class="title-block">
+        <h1>${L('app_custom_heading')}</h1>
+        <div class="sub">${L('app_custom_sub')}</div>
+      </div>
+      <div class="status-chip">
+        <span>أقسامك: <b>${visible.length}</b></span>
+        <span>قابلة للتعديل: <b>${visible.filter(s=>sectionAccess(s.id)==='edit').length}</b></span>
+      </div>
+    </header>
+    <nav class="tabs tabs-grouped">${navHtml}</nav>
+    <div id="tabContent"></div>
+    <div class="footer-note">تظهر الأقسام حسب الصلاحيات الممنوحة لحسابك. الأقسام بشارة «قراءة» للعرض والتصدير فقط.</div>
+  `;
+  root.querySelectorAll('nav.tabs button[data-perm-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const next = btn.dataset.permTab;
+      if(PERM_ACTIVE_TAB===next) return;
+      if(PERM_ACTIVE_TAB==='tagcapture' && typeof taglogStopBarcodeScanner==='function') taglogStopBarcodeScanner();
+      PERM_ACTIVE_TAB = next;
+      root.querySelectorAll('nav.tabs button[data-perm-tab]').forEach(b=>b.classList.toggle('active', b.dataset.permTab===PERM_ACTIVE_TAB));
+      renderPermTabContent();
+    });
+  });
+  renderPermTabContent();
+}
+function renderPermTabContent(){
+  // نستخدم نفس حاوية الوضع الإداري (#tabContent) حتى تعمل إعادة الرسم الداخلية
+  // لبعض الأقسام (النقل/الجداول/رصد التاجات) دون أخطاء، ويبقى مراقب القراءة فقط
+  // معلّقاً على نفس العنصر فيُعاد تطبيق الحماية بعد أي تحديث تلقائي.
+  const el = document.getElementById('tabContent');
+  if(!el) return;
+  disconnectPermReadOnlyObserver();
+  const sec = PERM_ACTIVE_TAB;
+  ACTIVE_TAB = sec;
+  const access = sectionAccess(sec);
+  const appEl = document.getElementById('app');
+  if(appEl) appEl.classList.toggle('tl-wide', (sec==='tagcapture' || sec==='taglog') && access==='edit');
+  if(access==='none'){
+    el.innerHTML = '<div class="msg warn">هذا القسم غير متاح لحسابك.</div>';
+    return;
+  }
+  if(access==='read' && sec==='quick'){
+    el.innerHTML = `<div class="panel" style="text-align:center;padding:34px 18px;">
+      <div style="font-size:38px;line-height:1;margin-bottom:10px;">⚡</div>
+      <h2 style="margin-bottom:8px;">الحركة السريعة تحتاج صلاحية تعديل</h2>
+      <div class="desc">هذا القسم لتسجيل حركة مخزون، لذلك لا يعمل بوضع القراءة فقط. اطلب من المدير منحك صلاحية «تعديل» على الحركة السريعة.</div>
+    </div>`;
+    return;
+  }
+  if(access==='edit'){
+    if(sec==='setup') renderSetupTab(el);
+    else if(sec==='sid') renderSidTab(el);
+    else if(sec==='stock') renderStockTab(el);
+    else if(sec==='quick') renderQuickMode(el);
+    else if(sec==='goods') renderGoodsTab(el);
+    else if(sec==='outreq') renderOutreqTab(el);
+    else if(sec==='tagcapture') renderTagCaptureTab(el);
+    else if(sec==='taglog') renderTagLogViewerTab(el);
+    else if(sec==='transport') renderTransportTab(el);
+    else if(sec==='dyn') renderDynTab(el);
+  } else {
+    if(sec==='stock') renderStockTab(el);
+    else if(sec==='goods') renderGoodsViewerTab(el);
+    else if(sec==='taglog' || sec==='tagcapture') renderTagLogViewerTab(el);
+    else if(sec==='outreq') renderOutreqTab(el);
+    else if(sec==='setup') renderSetupTab(el);
+    else if(sec==='sid') renderSidTab(el);
+    else if(sec==='transport') renderTransportTab(el);
+    else if(sec==='dyn') renderDynTab(el);
+  }
+  if(access==='read') applyPermReadOnlyGuard(el, sec);
+}
+
+/* ============================================================
+   👥 إدارة المستخدمين والصلاحيات (Admin فقط)
+   ============================================================ */
+const USERS_STATE = {loaded:false, loading:false, rows:[], q:'', error:null, rpcReady:false};
+const USER_SECTIONS_SQL_URL = 'https://github.com/khaledkittani/warehouse-system/blob/main/supabase/user_sections_migration.sql';
+
+function permSqlHint(){
+  return `ميزة الصلاحيات غير مفعّلة في قاعدة البيانات بعد. نفّذ ملف <b>supabase/user_sections_migration.sql</b> مرة واحدة من Supabase SQL Editor ثم أعد تحميل الصفحة.`;
+}
+function permRpcError(raw, status){
+  const m = String(raw||'');
+  if(status===404 || /Could not find the function|does not exist|PGRST202/i.test(m)){
+    return 'ميزة الصلاحيات غير مفعّلة بعد في قاعدة البيانات — نفّذ ملف supabase/user_sections_migration.sql من Supabase أولاً.';
+  }
+  if(/no edit permission|not allowed/i.test(m)) return 'لا تملك صلاحية تعديل هذا القسم.';
+  if(/forbidden|admin only/i.test(m)) return 'هذا الإجراء للمدير فقط.';
+  if(/user not found/i.test(m)) return 'المستخدم غير موجود.';
+  if(/not authenticated|JWT/i.test(m)) return 'انتهت الجلسة — سجّل الدخول من جديد.';
+  return m || ('خطأ غير متوقع (HTTP '+status+')');
+}
+function usersNormalizeRow(r){
+  let sections = null;
+  if(r && r.sections !== undefined && r.sections !== null){
+    if(typeof r.sections === 'string'){
+      try{ sections = permNormalizeSections(JSON.parse(r.sections)); }catch(e){ sections = null; }
+    } else {
+      sections = permNormalizeSections(r.sections);
+    }
+  }
+  return {
+    id: r && r.id,
+    email: (r && (r.email || r.user_email)) || '(بدون بريد)',
+    role: (r && r.role) || 'viewer',
+    sections,
+    updated_at: r && r.updated_at
+  };
+}
+async function usersLoad(force){
+  if(USERS_STATE.loading) return;
+  USERS_STATE.loading = true;
+  USERS_STATE.error = null;
+  try{
+    let rows = null;
+    // 1) الأفضل: RPC إداري يُرجع كل المستخدمين مع sections (حتى لو كانت RLS على profiles مقيّدة)
+    try{
+      const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/rpc/wms_admin_list_users`, {
+        method:'POST', headers: supabaseAuthedHeadersJson(), body:'{}'
+      });
+      if(res.ok){
+        const data = await res.json();
+        rows = Array.isArray(data) ? data : [];
+        USERS_STATE.rpcReady = true;
+        // نجاح RPC يعني أن عمود sections والدوال موجودة فعلاً، حتى لو تعذّر
+        // على fetchMyRole قراءته في لحظة سابقة لأي سبب مؤقت.
+        SECTIONS_DB_READY = true;
+      } else if(res.status !== 404){
+        const txt = await res.text().catch(()=> '');
+        throw new Error(permRpcError(txt, res.status));
+      } else {
+        USERS_STATE.rpcReady = false;
+      }
+    }catch(e){
+      if(e && e.message && !/Could not find|does not exist|PGRST202/i.test(e.message)) throw e;
+      USERS_STATE.rpcReady = false;
+    }
+    // 2) بديل: قراءة profiles مباشرة (تعمل حالياً للقراءة). تُستخدم فقط قبل تنفيذ SQL.
+    if(!rows){
+      const cols = 'id,email,role,updated_at' + (SECTIONS_DB_READY ? ',sections' : '');
+      const res2 = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/profiles?select=${cols}&order=email.asc`, {
+        headers: supabaseAuthHeaders()
+      });
+      if(!res2.ok){
+        const txt = await res2.text().catch(()=> '');
+        throw new Error(permRpcError(txt, res2.status));
+      }
+      rows = await res2.json();
+    }
+    USERS_STATE.rows = (rows||[]).map(usersNormalizeRow).sort((a,b)=>String(a.email).localeCompare(String(b.email)));
+    USERS_STATE.loaded = true;
+  }catch(e){
+    USERS_STATE.error = e.message || String(e);
+    USERS_STATE.loaded = true;
+  }finally{
+    USERS_STATE.loading = false;
+  }
+}
+function userSectionsSummary(row){
+  if(row.role==='admin') return '<span class="pill ok">مدير — كل الأقسام</span>';
+  if(row.sections===null){
+    return '<span class="pill info">الافتراضي القديم</span><div class="perm-user-summary">عرض: مخزون 4G، مخزون المستودع، سجل التاجات</div>';
+  }
+  const entries = PERM_SECTIONS.map(s=>({s, v:row.sections[s.id]})).filter(x=>x.v==='read' || x.v==='edit');
+  if(!entries.length) return '<span class="pill warn">لا توجد أقسام</span>';
+  const edit = entries.filter(x=>x.v==='edit');
+  const read = entries.filter(x=>x.v==='read');
+  const editNames = edit.map(x=>x.s.label).join('، ');
+  const readNames = read.map(x=>x.s.label).join('، ');
+  return `
+    <div class="perm-user-summary">
+      <b>${entries.length}</b> قسم${edit.length?` · <b>${edit.length}</b> تعديل`:''}${read.length?` · ${read.length} قراءة`:''}
+      ${edit.length?`<div style="margin-top:3px;">✏️ ${esc(editNames)}</div>`:''}
+      ${read.length?`<div style="margin-top:3px;">👁️ ${esc(readNames)}</div>`:''}
+    </div>`;
+}
+function renderUsersTab(el){
+  if(CURRENT_ROLE!=='admin'){
+    el.innerHTML = '<div class="msg bad">هذا القسم للمدير فقط.</div>';
+    return;
+  }
+  // قد ينتهي تحميل/حفظ بطيء بعد أن يكون المدير قد انتقل لتبويب آخر؛
+  // لا نكتب فوق محتوى تبويب غير تبويب المستخدمين.
+  if(ACTIVE_TAB!=='users') return;
+  if(!USERS_STATE.loaded && !USERS_STATE.loading){
+    usersLoad().then(()=>{ if(el.isConnected) renderUsersTab(el); });
+  }
+  const q = USERS_STATE.q.trim().toLowerCase();
+  const rows = USERS_STATE.rows.filter(r=>!q || String(r.email).toLowerCase().includes(q) || String(r.role).toLowerCase().includes(q));
+  const admins = USERS_STATE.rows.filter(r=>r.role==='admin').length;
+  const configured = USERS_STATE.rows.filter(r=>r.role!=='admin' && r.sections!==null).length;
+  const migrationBanner = !SECTIONS_DB_READY ? `
+    <div class="msg warn" style="margin-bottom:12px;">
+      ⚠️ ${permSqlHint()}
+      <div style="margin-top:8px;"><a href="${USER_SECTIONS_SQL_URL}" target="_blank" rel="noopener" style="font-weight:800;">📄 فتح ملف SQL على GitHub</a></div>
+    </div>` : '';
+  const rpcBanner = (SECTIONS_DB_READY && !USERS_STATE.rpcReady && USERS_STATE.loaded && !USERS_STATE.error) ? `
+    <div class="msg warn" style="margin-bottom:12px;">⚠️ دوال إدارة الصلاحيات غير مكتملة في قاعدة البيانات — نفّذ ملف SQL كاملاً. عرض المستخدمين يعمل، لكن الحفظ قد لا يعمل.</div>` : '';
+  el.innerHTML = `
+    <div class="panel">
+      <h2>${L('tab_users')}</h2>
+      <div class="desc">اختر لكل مستخدم الأقسام التي تظهر له، وحدد هل يراها فقط أم يستطيع التعديل فيها. المدير يملك كل الأقسام دائماً.</div>
+      ${migrationBanner}
+      ${rpcBanner}
+      ${USERS_STATE.error ? `<div class="msg bad" style="margin-bottom:12px;">تعذّر تحميل المستخدمين: ${esc(USERS_STATE.error)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <input type="text" id="usersSearchInput" placeholder="بحث بالبريد الإلكتروني أو الدور..." value="${esc(USERS_STATE.q)}" style="max-width:380px;flex:1;min-width:220px;">
+        <button class="secondary" id="btnUsersRefresh" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;">🔄 تحديث</button>
+      </div>
+      <div class="status-chip" style="margin-bottom:12px;">
+        <span>كل المستخدمين: <b>${USERS_STATE.rows.length}</b></span>
+        <span>مدير: <b>${admins}</b></span>
+        <span>صلاحيات مخصصة: <b>${configured}</b></span>
+      </div>
+      ${USERS_STATE.loading && !USERS_STATE.rows.length ? '<div class="msg info">⏳ جارِ تحميل المستخدمين…</div>' : ''}
+      <div class="tablewrap"><table class="data">
+        <thead><tr><th>المستخدم</th><th>الدور</th><th>الأقسام والصلاحيات</th><th>إجراء</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr>
+            <td><b>${esc(r.email)}</b></td>
+            <td>${r.role==='admin'?'<span class="pill ok">مدير</span>':'<span class="pill info">مستخدم</span>'}</td>
+            <td>${userSectionsSummary(r)}</td>
+            <td>${r.role==='admin'
+              ? '<span style="font-size:12px;color:var(--muted);">كل الصلاحيات</span>'
+              : `<button class="secondary" data-userperms="${esc(r.id)}" ${(!SECTIONS_DB_READY || !USERS_STATE.rpcReady)?'disabled title="نفّذ ملف SQL كاملاً أولاً"':''} style="padding:6px 12px;font-size:12px;">✏️ تعديل الصلاحيات</button>`}</td>
+          </tr>`).join('') || `<tr><td colspan="4" class="empty">${USERS_STATE.loading?'جارِ التحميل…':'لا يوجد مستخدمون مطابقون'}</td></tr>`}
+        </tbody>
+      </table></div>
+      <div class="footer-note">الحسابات الجديدة تُنشأ من شاشة «إنشاء حساب» في صفحة الدخول، ثم تظهر هنا تلقائياً. تغيير دور المستخدم إلى مدير يتم من لوحة Supabase حالياً.</div>
+    </div>
+  `;
+  const search = document.getElementById('usersSearchInput');
+  if(search){
+    search.addEventListener('input', debounce(()=>{
+      const pos = search.selectionStart;
+      USERS_STATE.q = search.value;
+      renderUsersTab(el);
+      const s2 = document.getElementById('usersSearchInput');
+      if(s2){ s2.focus(); try{ s2.setSelectionRange(pos,pos); }catch(e){} }
+    }));
+  }
+  const refresh = document.getElementById('btnUsersRefresh');
+  if(refresh) refresh.addEventListener('click', async ()=>{
+    refresh.disabled = true; refresh.textContent = '⏳ جارِ التحديث…';
+    USERS_STATE.loaded = false;
+    await usersLoad(true);
+    renderUsersTab(el);
+  });
+  el.querySelectorAll('[data-userperms]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const u = USERS_STATE.rows.find(x=>String(x.id)===String(btn.dataset.userperms));
+      if(u) openUserPermsModal(u);
+    });
+  });
+}
+function openUserPermsModal(user){
+  if(CURRENT_ROLE!=='admin') return;
+  if(user.role==='admin'){ alert('المدير يملك كل الأقسام دائماً.'); return; }
+  if(!SECTIONS_DB_READY || !USERS_STATE.rpcReady){ alert('نفّذ ملف supabase/user_sections_migration.sql كاملاً أولاً لتفعيل حفظ الصلاحيات.'); return; }
+  const current = user.sections===null ? Object.assign({}, LEGACY_VIEWER_SECTIONS) : Object.assign({}, user.sections);
+  let rowsHtml = ''; let lastGroup = null;
+  PERM_SECTIONS.forEach(s=>{
+    if(s.group!==lastGroup){ rowsHtml += `<tr><td colspan="4" style="background:#fbfaf6;font-weight:800;color:#6b6555;font-size:12px;">${TAB_GROUP_LABELS[s.group]||''}</td></tr>`; lastGroup = s.group; }
+    let val = current[s.id];
+    if(val!=='read' && val!=='edit' && val!=='none') val = 'none';
+    if(!s.canEdit && val==='edit') val = 'read';
+    rowsHtml += `<tr>
+      <td><span class="perm-sec-name">${esc(s.label)}</span>${s.hint?`<span class="perm-sec-hint">${esc(s.hint)}</span>`:''}</td>
+      <td><label><input type="radio" name="perm_${s.id}" value="none" ${val==='none'?'checked':''}> مخفي</label></td>
+      <td><label><input type="radio" name="perm_${s.id}" value="read" ${val==='read'?'checked':''}> قراءة</label></td>
+      <td><label style="${s.canEdit?'':'opacity:.45;'}"><input type="radio" name="perm_${s.id}" value="edit" ${val==='edit'?'checked':''} ${s.canEdit?'':'disabled'}> تعديل</label></td>
+    </tr>`;
+  });
+  openModal('🔐 صلاحيات — '+esc(user.email), (bodyEl)=>{
+    bodyEl.innerHTML = `
+      <div class="msg info" style="margin-bottom:12px;">
+        ${user.sections===null ? 'هذا المستخدم حالياً على الوضع الافتراضي القديم (عرض 3 أقسام). أي حفظ هنا يثبّت الصلاحيات بشكل صريح.' : 'حدد لكل قسم: مخفي / قراءة / تعديل. القسم غير المذكور يُعتبر مخفياً.'}
+      </div>
+      <div class="perm-modal-tools">
+        <button type="button" class="secondary" data-perm-set="none">🚫 إخفاء الكل</button>
+        <button type="button" class="secondary" data-perm-set="read">👁️ قراءة الكل</button>
+        <button type="button" class="secondary" data-perm-set="edit">✏️ تعديل الكل</button>
+      </div>
+      <div id="permModalMsg"></div>
+      <div class="tablewrap"><table class="perm-matrix">
+        <thead><tr><th>القسم</th><th>مخفي</th><th>قراءة</th><th>تعديل</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table></div>
+      <div class="btnrow" style="margin-top:16px;">
+        <button class="primary" id="btnPermSave">💾 حفظ الصلاحيات</button>
+        <button class="secondary" id="btnPermReset">🔄 إرجاع للافتراضي</button>
+        <button class="secondary" id="btnPermCancel">إلغاء</button>
+      </div>
+      <div class="footer-note" style="margin-top:10px;">ملاحظة: «تعديل» تعني التحكم الكامل بالقسم. إدارة المستخدمين والنسخ الاحتياطي والتقرير الشامل تبقى للمدير فقط.</div>
+    `;
+    bodyEl.querySelectorAll('[data-perm-set]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const mode = btn.dataset.permSet;
+        PERM_SECTIONS.forEach(s=>{
+          let v = mode;
+          if(mode==='edit' && !s.canEdit) v = 'read';
+          const radio = bodyEl.querySelector(`input[name="perm_${s.id}"][value="${v}"]`);
+          if(radio) radio.checked = true;
+        });
+      });
+    });
+    document.getElementById('btnPermCancel').addEventListener('click', closeModal);
+    document.getElementById('btnPermReset').addEventListener('click', async ()=>{
+      if(!confirm('إرجاع هذا المستخدم إلى الصلاحيات الافتراضية القديمة (عرض 3 أقسام)؟')) return;
+      const btn = document.getElementById('btnPermReset');
+      btn.disabled = true;
+      try{
+        await usersSaveSections(user, null, true);
+        closeModal();
+        const tc1 = document.getElementById('tabContent'); if(tc1) renderUsersTab(tc1);
+      }catch(e){
+        document.getElementById('permModalMsg').innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('btnPermSave').addEventListener('click', async ()=>{
+      const sections = {};
+      PERM_SECTIONS.forEach(s=>{
+        let v = (bodyEl.querySelector(`input[name="perm_${s.id}"]:checked`)||{}).value || 'none';
+        if(!s.canEdit && v==='edit') v = 'read';
+        sections[s.id] = v;
+      });
+      const btn = document.getElementById('btnPermSave');
+      btn.disabled = true; btn.textContent = '⏳ جارِ الحفظ…';
+      try{
+        await usersSaveSections(user, sections, false);
+        closeModal();
+        const tc2 = document.getElementById('tabContent'); if(tc2) renderUsersTab(tc2);
+      }catch(e){
+        document.getElementById('permModalMsg').innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
+        btn.disabled = false; btn.textContent = '💾 حفظ الصلاحيات';
+      }
+    });
+  }, {maxWidth:'780px'});
+}
+async function usersSaveSections(user, sections, reset){
+  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/rpc/wms_admin_set_user_sections`, {
+    method:'POST', headers: supabaseAuthedHeadersJson(),
+    body: JSON.stringify({p_user:user.id, p_sections: reset ? null : sections})
+  });
+  if(!res.ok){
+    const txt = await res.text().catch(()=> '');
+    throw new Error(permRpcError(txt, res.status));
+  }
+  user.sections = reset ? null : sections;
+  const row = USERS_STATE.rows.find(x=>String(x.id)===String(user.id));
+  if(row) row.sections = user.sections;
+}
+
+
 /* نسخة قراءة فقط من "مخزون المستودع" — بحث موحّد على كل الأعمدة + جدول الملخص + تصدير فقط،
    بدون نموذج استلام/إخراج/رفع دفعة أو سجل حركات (تلك خاصة بالوضع الإداري وحده، renderGoodsTab). */
 let GOODS_VIEWER_SEARCH_Q = '';
@@ -5264,12 +5986,12 @@ function renderMovementsTab(el){
   if(MOV_TYPE_FILTER!=='all') rows = rows.filter(e=>e.type===MOV_TYPE_FILTER);
   rows = rows.filter(e=>receiptDateInRange(e.date, MOV_DATE_FILTER, MOV_DATE_FROM, MOV_DATE_TO));
   rows = rows.slice().reverse(); // الأحدث أولاً
-  const isAdmin = CURRENT_ROLE === 'admin';
+  const canEditMov = canEditSection('quick');
 
   el.innerHTML = `
     <div class="panel">
       <h2>${L('movements_heading')}</h2>
-      <div class="desc">كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.${isAdmin?' <b>💡 يمكنك تعديل أي قيمة مباشرة بالضغط على الخانة.</b>':''}</div>
+      <div class="desc">كل حركة استلام أو إخراج أو تعديل لأي صنف من مواد 4G — بالترتيب الزمني، مع رصيد كل حركة.${canEditMov?' <b>💡 يمكنك تعديل أي قيمة مباشرة بالضغط على الخانة.</b>':''}</div>
       <div class="grid2" style="margin-bottom:12px;">
         <input type="text" id="movSearchInput" placeholder="ابحث باسم المادة / الكود / رقم الاستلام / SID / الموقع..." value="${esc(MOV_SEARCH_Q)}">
         <select id="movTypeFilter">
@@ -5296,13 +6018,13 @@ function renderMovementsTab(el){
       </div>` : ''}
       <div class="btnrow"><button class="secondary" id="btnExportMovements">📥 تصدير إلى Excel</button></div>
       <div class="tablewrap"><table class="data movements-table">
-        <thead><tr><th>${L('movements_th_date')}</th><th>${L('movements_th_type')}</th><th>${L('movements_th_name')}</th><th>${L('movements_th_code')}</th><th>${L('movements_th_qty')}</th><th>${L('movements_th_balance')}</th><th>${L('movements_th_source')}</th><th>${L('movements_th_receipt')}</th><th>${L('movements_th_notes')}</th>${isAdmin?'<th></th>':''}</tr></thead>
+        <thead><tr><th>${L('movements_th_date')}</th><th>${L('movements_th_type')}</th><th>${L('movements_th_name')}</th><th>${L('movements_th_code')}</th><th>${L('movements_th_qty')}</th><th>${L('movements_th_balance')}</th><th>${L('movements_th_source')}</th><th>${L('movements_th_receipt')}</th><th>${L('movements_th_notes')}</th>${canEditMov?'<th></th>':''}</tr></thead>
         <tbody>
           ${rows.map(e=>{
             const stockEntry = STATE.stock[e.code];
             const balanceNow = stockEntry ? (stockEntry.total_quantity - stockEntry.issued_quantity) : '—';
             const recLabel = receiptLabelForSig(e.fileSig);
-            if(isAdmin){
+            if(canEditMov){
               return `<tr data-ledger-id="${e.id}">
                 <td><input type="date" class="mov-edit" data-field="date" data-id="${e.id}" value="${esc(e.date)}"></td>
                 <td><select class="mov-edit" data-field="type" data-id="${e.id}">
@@ -5331,7 +6053,7 @@ function renderMovementsTab(el){
               <td class="code-cell">${esc(recLabel)}</td>
               <td>${esc(e.notes||'')}</td>
             </tr>`;
-          }).join('') || `<tr><td colspan="${isAdmin?10:9}" class="empty">${q||MOV_TYPE_FILTER!=='all'||MOV_DATE_FILTER!=='all'?'لا توجد حركات مطابقة':'لا توجد حركات بعد'}</td></tr>`}
+          }).join('') || `<tr><td colspan="${canEditMov?10:9}" class="empty">${q||MOV_TYPE_FILTER!=='all'||MOV_DATE_FILTER!=='all'?'لا توجد حركات مطابقة':'لا توجد حركات بعد'}</td></tr>`}
         </tbody>
       </table></div>
     </div>
@@ -5362,7 +6084,7 @@ function renderMovementsTab(el){
     });
 exportSectionToExcel(headers, exportRows, 'سجل حركات مواد 4G', [12,12,26,16,14,10,14,18,26]);
   });
-  if(isAdmin) bindMovementsEditListeners(el);
+  if(canEditMov) bindMovementsEditListeners(el);
 }
 
 /* ---- تعديل الحركات مباشرة (Admin فقط) ---- */
@@ -5475,6 +6197,8 @@ function openModal(title, bodyContent, opts){
   box.querySelector('#modalCloseBtn').addEventListener('click', closeModal);
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
   document.addEventListener('keydown', modalEscHandler);
+  // إن كانت النافذة مفتوحة من قسم «قراءة فقط»، طبّق الحماية فوراً بدل انتظار مراقب DOM.
+  if(typeof permApplyToModals==='function') permApplyToModals();
 }
 function closeModal(){
   const ov = document.getElementById('activeModalOverlay');
@@ -6054,7 +6778,7 @@ function renderSidrSiteDetail(){
   const q = trim(SIDR_SITE_SEARCH).toLowerCase();
   if(q) rows = rows.filter(r=> (r.productCode+' '+r.productDescription+' '+r.description).toLowerCase().includes(q));
   if(SIDR_SITE_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
-  const canEditRecv = CURRENT_ROLE==='admin';
+  const canEditRecv = canEditSection('sid');
   const hlSet = sidrHlSet();
   const editedCount = imp.rows.filter(r=>r.origReceived!==undefined).length;
   const totals = rows.reduce((s,r)=>({requested:s.requested+r.requested, received:s.received+r.received, shortage:s.shortage+r.shortage}), {requested:0,received:0,shortage:0});
@@ -7938,9 +8662,23 @@ function outreqReset(){
 
 /* ---------- صلاحيات الواجهة (للراحة فقط — الحماية الحقيقية RLS) ---------- */
 function outreqIsAdmin(){ return CURRENT_ROLE==='admin'; }
-function outreqCanRequest(){ return SUPABASE_ENABLED && (outreqIsAdmin() || OUTREQ.perms.can_request); }
-function outreqCanFulfill(){ return SUPABASE_ENABLED && (outreqIsAdmin() || OUTREQ.perms.can_fulfill); }
-function outreqHasAccess(){ return outreqCanRequest() || outreqCanFulfill(); }
+function outreqCanRequest(){
+  if(!SUPABASE_ENABLED) return false;
+  if(outreqIsAdmin()) return true;
+  // المستخدم ذو الصلاحيات الصريحة: قسم «طلبات الإخراج» بتعديل هو المصدر الوحيد.
+  if(hasCustomPermissions()) return canEditSection('outreq');
+  return !!OUTREQ.perms.can_request;
+}
+function outreqCanFulfill(){
+  if(!SUPABASE_ENABLED) return false;
+  if(outreqIsAdmin()) return true;
+  if(hasCustomPermissions()) return canEditSection('outreq');
+  return !!OUTREQ.perms.can_fulfill;
+}
+function outreqHasAccess(){
+  if(hasCustomPermissions()) return canReadSection('outreq');
+  return outreqCanRequest() || outreqCanFulfill();
+}
 function outreqViewerTabs(){
   return VIEWER_TABS.concat(outreqHasAccess() ? [{id:'outreq', lk:'tab_outreq'}] : []);
 }
@@ -8307,7 +9045,8 @@ function outreqFiltered(){
   });
 }
 function outreqPaintList(root){
-  const mineOnly = !outreqCanFulfill();
+  const readOnlyOutreq = hasCustomPermissions() && sectionAccess('outreq')==='read';
+  const mineOnly = !outreqCanFulfill() && !readOnlyOutreq;
   const rows = outreqFiltered();
   const f = OUTREQ.filters;
   const open = OUTREQ.reqs.filter(r=>r.status==='pending'||r.status==='in_progress'||r.status==='split'||r.status==='partial').length;
@@ -10656,7 +11395,7 @@ function adminLastTabSave(tab){ try{ localStorage.setItem('wms_last_admin_tab', 
 function adminLastTabLoad(){
   try{
     const t = localStorage.getItem('wms_last_admin_tab');
-    return (t && Array.isArray(TABS) && TABS.some(x=>x.id===t)) ? t : null;
+    return (t && Array.isArray(TABS) && TABS.some(x=>x.id===t && (!x.adminOnly || SUPABASE_ENABLED))) ? t : null;
   }catch(e){ return null; }
 }
 async function boot(){
@@ -10700,9 +11439,11 @@ async function boot(){
     return;
   }
   CURRENT_ROLE = roleResult.role;
+  CURRENT_SECTIONS = roleResult.sections === undefined ? null : roleResult.sections;
+  PERM_ACTIVE_TAB = null;
   await loadAllState();
   await applySeedDataIfPresent();
-  if(migrateReceiptNumbers()) await saveState(['processedFiles','meta']);
+  if(CURRENT_ROLE==='admin' && migrateReceiptNumbers()) await saveState(['processedFiles','meta']);
   ACTIVE_TAB = Object.keys(STATE.stock).length ? 'stock' : 'setup';
   if(CURRENT_ROLE==='admin'){
     APP_MODE = 'admin';   // الوضع الإداري أول صفحة بعد الدخول، على آخر قسم استُخدم
