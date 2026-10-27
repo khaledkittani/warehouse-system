@@ -2775,13 +2775,16 @@ function permReadOnlyControlAllowed(node){
   const cls = String(node.className||'').toLowerCase();
   const txt = String(node.textContent||'').trim();
   const tag = node.tagName.toUpperCase();
+  const ph = String(node.getAttribute ? (node.getAttribute('placeholder')||'') : (node.placeholder||'')).toLowerCase();
+  const aria = String(node.getAttribute ? (node.getAttribute('aria-label')||'') : '').toLowerCase();
+  if(ph.includes('بحث') || ph.includes('search') || aria.includes('بحث') || aria.includes('search')) return true;
   if(/(export|print|search|filter|sort|view|close|cancel|back|return|home|first|last|prev|next|page|refresh|sync|retry|reload|download|copy|tab|nav|details|expand|xlsx|csv|excel)/.test(id+' '+cls)) return true;
   if(/(تصدير|طباعة|بحث|فلتر|إغلاق|إلغاء|رجوع|عودة|للطلبات|للقائمة|إلى القائمة|السابق|التالي|عرض|تفاصيل|فتح|استعراض|معاينة|تنزيل|نسخ|تحديث|مزامنة|تقرير|السجل|سجل الاستلام|سجل الحركات|سجل الطلبات|سجل التاجات|السجل الكامل)/.test(txt)) return true;
   if(node.hasAttribute && (node.hasAttribute('data-tab') || node.hasAttribute('data-sort') || node.hasAttribute('data-view') || node.hasAttribute('data-open') || node.hasAttribute('data-trview') || node.hasAttribute('data-dtab')
      || node.hasAttribute('data-secopen') || node.hasAttribute('data-tblopen') || node.hasAttribute('data-dynnav')
      || node.hasAttribute('data-sechist') || node.hasAttribute('data-tblhist') || node.hasAttribute('data-chist') || node.hasAttribute('data-rhist')
      || node.hasAttribute('data-sidrview') || node.hasAttribute('data-sidsec'))) return true;
-  if((tag==='INPUT' || tag==='SELECT') && node.closest && node.closest('.or-filters, .filters, .filterbar, .filters-row, .table-toolbar, .searchbar')) return true;
+  if((tag==='INPUT' || tag==='SELECT') && node.closest && node.closest('.or-filters, .filters, .filterbar, .filters-row, .table-toolbar, .searchbar, .qm-search-wrap')) return true;
   // عناصر تصفية/عرض سجل النقل (أسماء ثابتة في هذا الملف) — مع استثناء أزرار الحفظ/المسودة.
   if(/^(trq|trfrom|trto|trdriversel|trcanc|trsort|trclear|trrefresh|trprint|trxlsx)$/.test(id)) return true;
   // عناصر تصفية جداول «ديناميكي» (ليست ضمن حاوية .filters في هذا الملف).
