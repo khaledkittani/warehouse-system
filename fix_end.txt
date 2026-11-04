@@ -1,0 +1,61 @@
+
+/* O�OrO� O�O"U^USO" O�O_OO�US U.O3O�OrO_U.: USU?U?O�O- OU,U^OO1 OU,O�O_OO�US O1U,USU� U.O"OO'O�Oc O"O1O_ O�O3O�USU, OU,O_OrU^U, (O�U?OUSU, U.O-U,US O1U,U% U�O�O OU,O�U�OO� U?U,O�) */
+function adminLastTabSave(tab){ try{ localStorage.setItem('wms_last_admin_tab', tab); }catch(e){} }
+function adminLastTabLoad(){
+  try{
+    const t = localStorage.getItem('wms_last_admin_tab');
+    return (t && Array.isArray(TABS) && TABS.some(x=>x.id===t && (!x.adminOnly || SUPABASE_ENABLED))) ? t : null;
+  }catch(e){ return null; }
+}
+async function boot(){
+  if(!SUPABASE_ENABLED){
+    CURRENT_ROLE = 'admin';
+    await loadAllState();
+    await applySeedDataIfPresent();
+    if(migrateReceiptNumbers()) await saveState(['processedFiles','meta']);
+    ACTIVE_TAB = Object.keys(STATE.stock).length ? 'stock' : 'setup';
+    renderApp();
+    return;
+  }
+  CURRENT_SESSION = loadSessionLocally();
+  if(CURRENT_SESSION){
+    const freshResult = await ensureFreshSession();
+    if(!freshResult.ok && freshResult.invalid){
+      CURRENT_SESSION = null;
+      clearSessionLocally();
+    }
+  }
+  if(!CURRENT_SESSION){
+    CURRENT_ROLE = null;
+    renderApp();
+    return;
+  }
+  const roleResult = await fetchMyRole();
+  if(roleResult.reason === 'unauthorized'){
+    authSignOut();
+    renderApp();
+    return;
+  }
+  if(roleResult.reason === 'error'){
+    renderApp(true, roleResult);
+    return;
+  }
+  CURRENT_ROLE = roleResult.role;
+  CURRENT_SECTIONS = roleResult.sections === undefined ? null : roleResult.sections;
+  PERM_ACTIVE_TAB = null;
+  await loadAllState();
+  await applySeedDataIfPresent();
+  if(CURRENT_ROLE==='admin' && migrateReceiptNumbers()) await saveState(['processedFiles','meta']);
+  ACTIVE_TAB = Object.keys(STATE.stock).length ? 'stock' : 'setup';
+  if(CURRENT_ROLE==='admin'){
+    APP_MODE = 'admin';
+    ACTIVE_TAB = adminLastTabLoad() || ACTIVE_TAB;
+  } else APP_MODE = 'viewer';
+  try{ await outreqInit(); }catch(e){ console.error('outreqInit failed (ignored):', e); }
+  renderApp();
+  startSupabasePolling();
+}
+boot();
+</script>
+</body>
+</html>

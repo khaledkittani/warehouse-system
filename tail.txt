@@ -1,0 +1,15 @@
+te.toLowerCase()] = x;
+  });
+  const out = Object.values(bySite);
+  STATE.dcCables.consumption = out;
+  const seen = new Set();
+  const merged = [];
+  allAlerts.slice().reverse().forEach(a=>{
+    const key = (a.site||'')+'|'+(a.detail||'')+'|'+(a.reason||'');
+    if(seen.has(key)) return;
+    seen.add(key);
+    merged.push(a);
+  });
+  STATE.dcCables.alerts = merged.slice(0,300);
+}
+
