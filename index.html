@@ -11483,9 +11483,23 @@ function dcNormalizeCode(code){
 function dcCodeKey(code){
   return dcNormalizeCode(code).replace(/\s+/g,'');
 }
+function dcBuiltInCableSize(code, description, extraDescription){
+  const key=dcCodeKey(code);
+  const byCode={
+    'TFL492524/500M':'6',
+    'TFL492525/500M':'10',
+    'TFL492526/500M':'16'
+  };
+  if(byCode[key]) return byCode[key];
+  // Fallback to the SID product description in case its Product Code column is imported differently.
+  const desc=dcCodeKey([description,extraDescription].filter(Boolean).join(' ')).replace(/×/g,'X').replace(/²/g,'2');
+  if(/2X6MM2/.test(desc)) return '6';
+  if(/2X10MM2/.test(desc)) return '10';
+  if(/2X16MM2/.test(desc)) return '16';
+  return null;
+}
 function dcCodeMap(){
   dcEnsure();
-  // Built-in SID Product Codes: automatic DC classification, no manual selection.
   const m=Object.create(null);
   const automatic={
     'TFL492524/500M':'6',
@@ -11493,7 +11507,6 @@ function dcCodeMap(){
     'TFL492526/500M':'16'
   };
   Object.keys(automatic).forEach(code=>{m[code]=automatic[code];});
-  // Keep manual mappings for other Product Codes; built-in mappings always take priority.
   ['6','10','16'].forEach(sz=>(STATE.dcCables.mappings[sz]||[]).forEach(c=>{
     const k=dcCodeKey(c);
     if(k&&!m[k])m[k]=sz;
@@ -11519,7 +11532,7 @@ function dcCalcFromImport(imp){
     const rawCode=String(r.productCode||'').trim();
     if(!rawCode) return;
     const normalizedCode=dcNormalizeCode(rawCode);
-    const sz=cmap[dcCodeKey(rawCode)]||null;
+    const sz=dcBuiltInCableSize(rawCode,r.productDescription,r.description)||cmap[dcCodeKey(rawCode)]||null;
     // DC consumption is based ONLY on SID Requested, never Received.
     const req=Number(String(r.requested==null?'':r.requested).replace(/,/g,''));
     if(!Number.isFinite(req)||req<=0) return;
