@@ -11480,10 +11480,24 @@ function dcEnsure(){
 function dcNormalizeCode(code){
   return String(code==null?'':code).trim().replace(/\s+/g,' ').toUpperCase();
 }
+function dcCodeKey(code){
+  return dcNormalizeCode(code).replace(/\\s+/g,'');
+}
 function dcCodeMap(){
   dcEnsure();
+  // Built-in SID Product Codes: automatic DC classification, no manual selection.
   const m=Object.create(null);
-  ['6','10','16'].forEach(sz=>(STATE.dcCables.mappings[sz]||[]).forEach(c=>{const k=dcNormalizeCode(c);if(k&&!m[k])m[k]=sz;}));
+  const automatic={
+    'TFL492524/500M':'6',
+    'TFL492525/500M':'10',
+    'TFL492526/500M':'16'
+  };
+  Object.keys(automatic).forEach(code=>{m[code]=automatic[code];});
+  // Keep manual mappings for other Product Codes; built-in mappings always take priority.
+  ['6','10','16'].forEach(sz=>(STATE.dcCables.mappings[sz]||[]).forEach(c=>{
+    const k=dcCodeKey(c);
+    if(k&&!m[k])m[k]=sz;
+  }));
   return m;
 }
 function dcDetectRep(note){
@@ -11505,7 +11519,7 @@ function dcCalcFromImport(imp){
     const rawCode=String(r.productCode||'').trim();
     if(!rawCode) return;
     const normalizedCode=dcNormalizeCode(rawCode);
-    const sz=cmap[normalizedCode]||null;
+    const sz=cmap[dcCodeKey(rawCode)]||null;
     // DC consumption is based ONLY on SID Requested, never Received.
     const req=Number(String(r.requested==null?'':r.requested).replace(/,/g,''));
     if(!Number.isFinite(req)||req<=0) return;
@@ -11549,7 +11563,7 @@ function renderSidDcCableManager(el){
   const alerts=(STATE.dcCables.alerts||[]).filter(a=>!a.resolved);
   const m=STATE.dcCables.mappings;
   el.innerHTML=`
-    <div class="panel"><h2>ربط أكواد مواد DC بالأنواع</h2><div class="desc">اختر الأكواد يدوياً لكل نوع. الكود الواحد يرتبط بنوع واحد فقط، وعند اختياره لنوع آخر ينتقل إليه تلقائياً. الاحتساب من Requested فقط.</div>
+    <div class="panel"><h2>ربط أكواد مواد DC بالأنواع</h2><div class="desc">الأكواد TFL 492 524/500M وTFL 492 525/500M وTFL 492 526/500M تُصنّف تلقائياً كـ DC 6 وDC 10 وDC 16 على الترتيب. باقي الأكواد يمكن ربطها يدوياً. الاحتساب من Requested فقط.</div>
     <div class="grid3">
       <div class="panel" style="margin:0"><h3>DC 6 mm² (2×6)</h3><div class="btnrow"><button class="secondary" data-dcp="6">اختيار المواد</button></div><div style="margin-top:8px;">${(m['6']||[]).length?(m['6']||[]).map(x=>`<span class="pill" style="margin:2px;">${esc(x)}</span>`).join(''):'<span class="pill warn">لم يربط بعد</span>'}</div></div>
       <div class="panel" style="margin:0"><h3>DC 10 mm² (2×10)</h3><div class="btnrow"><button class="secondary" data-dcp="10">اختيار المواد</button></div><div style="margin-top:8px;">${(m['10']||[]).length?(m['10']||[]).map(x=>`<span class="pill" style="margin:2px;">${esc(x)}</span>`).join(''):'<span class="pill warn">لم يربط بعد</span>'}</div></div>
