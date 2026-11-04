@@ -11477,15 +11477,13 @@ function dcEnsure(){
   if(!STATE.dcCables.mappings) STATE.dcCables.mappings={'6':[],'10':[],'16':[]};
   ['6','10','16'].forEach(k=>{ if(!Array.isArray(STATE.dcCables.mappings[k])) STATE.dcCables.mappings[k]=[]; });
 }
+function dcNormalizeCode(code){
+  return String(code==null?'':code).trim().replace(/\s+/g,' ').toUpperCase();
+}
 function dcCodeMap(){
   dcEnsure();
-  const m={};
-  ['6','10','16'].forEach(sz=>{
-    (STATE.dcCables.mappings[sz]||[]).forEach(c=>{
-      const cl=String(c).trim().toLowerCase();
-      if(cl) m[cl]=sz;
-    });
-  });
+  const m=Object.create(null);
+  ['6','10','16'].forEach(sz=>(STATE.dcCables.mappings[sz]||[]).forEach(c=>{const k=dcNormalizeCode(c);if(k&&!m[k])m[k]=sz;}));
   return m;
 }
 function dcDetectRep(note){
@@ -11504,28 +11502,19 @@ function dcCalcFromImport(imp){
   const site=trim(imp.site||'');
   const items=[], alerts=[];
   (imp.rows||[]).forEach(r=>{
-    const code=String(r.productCode||'').trim().toLowerCase();
-    if(!code) return;
-    const sz=cmap[code];
-    if(!sz) return;
-    const req=Number(r.requested||0);
-    if(req<=0) return;
-    const desc=r.productDescription||r.description||r.productCode||'';
+    const rawCode=String(r.productCode||'').trim();
+    if(!rawCode) return;
+    const normalizedCode=dcNormalizeCode(rawCode);
+    const sz=cmap[normalizedCode]||null;
+    // DC consumption is based ONLY on SID Requested, never Received.
+    const req=Number(String(r.requested==null?'':r.requested).replace(/,/g,''));
+    if(!Number.isFinite(req)||req<=0) return;
+    const desc=r.productDescription||r.description||rawCode;
     const note=r.notes||r.note||'';
-    const rep=dcDetectRep(note);
-    if(rep.replaced&&rep.used&&rep.clear&&(rep.used==='6'||rep.used==='10'||rep.used==='16')){
-      items.push({productCode:r.productCode||'',productDescription:desc,origSize:sz,usedSize:rep.used,qty:req,requestedQty:req,replaced:true,replacementNote:rep.reason||note,reviewNeeded:false});
-      return;
-    }
-    if(rep.review){
-      alerts.push({id:nextId(),site,reason:'ملاحظة استبدال غير واضحة',detail:`كود ${r.productCode||''} ${desc} ${req}م ${note}`,createdAt:new Date().toISOString(),resolved:false});
-      items.push({productCode:r.productCode||'',productDescription:desc,origSize:sz,usedSize:sz,qty:req,requestedQty:req,replaced:false,replacementNote:note,reviewNeeded:true});
-      return;
-    }
-    items.push({productCode:r.productCode||'',productDescription:desc,origSize:sz,usedSize:sz,qty:req,requestedQty:req,replaced:false,replacementNote:note,reviewNeeded:false});
+    items.push({productCode:rawCode,normalizedCode,productDescription:desc,origSize:sz,usedSize:sz,qty:req,requestedQty:req,receivedQty:Number(String(r.received==null?'':r.received).replace(/,/g,''))||0,mapped:!!sz,replaced:false,replacementNote:note,reviewNeeded:false});
   });
   const totals={qty6:0,qty10:0,qty16:0};
-  items.forEach(it=>{if(it.reviewNeeded)return;if(it.usedSize==='6')totals.qty6+=Number(it.qty||0);if(it.usedSize==='10')totals.qty10+=Number(it.qty||0);if(it.usedSize==='16')totals.qty16+=Number(it.qty||0);});
+  items.forEach(it=>{if(!it.mapped)return;if(it.usedSize==='6')totals.qty6+=it.requestedQty;if(it.usedSize==='10')totals.qty10+=it.requestedQty;if(it.usedSize==='16')totals.qty16+=it.requestedQty;});
   return {site,fileName:imp.fileName,sheetName:imp.sheetName,importedAt:imp.importedAt||new Date().toISOString(),signature:imp.signature,items,totals,alerts};
 }
 function dcRebuildAll(){
@@ -11545,12 +11534,12 @@ function dcRebuildAll(){
 }
 function dcAllCodes(){
   const set=new Map();
-  (STATE.sidReview.imports||[]).forEach(imp=>{
-    (imp.rows||[]).forEach(r=>{
-      const code=String(r.productCode||'').trim();
-      if(code && !set.has(code.toLowerCase())) set.set(code.toLowerCase(),{code,desc:r.productDescription||r.description||''});
-    });
-  });
+  (STATE.sidReview.imports||[]).forEach(imp=>(imp.rows||[]).forEach(r=>{
+    const code=String(r.productCode||'').trim(),key=dcNormalizeCode(code),desc=r.productDescription||r.description||'';
+    if(!code||!key)return;
+    const old=set.get(key);
+    if(!old)set.set(key,{code,desc});else if(!old.desc&&desc)old.desc=desc;
+  }));
   return Array.from(set.values()).sort((a,b)=>a.code.localeCompare(b.code));
 }
 function renderSidDcCableManager(el){
@@ -11560,7 +11549,7 @@ function renderSidDcCableManager(el){
   const alerts=(STATE.dcCables.alerts||[]).filter(a=>!a.resolved);
   const m=STATE.dcCables.mappings;
   el.innerHTML=`
-    <div class="panel"><h2>ربط أكواد مواد DC بالأنواع</h2><div class="desc">يتم الحساب بناءً على أكواد المواد المرتبطة فقط. منع ربط نفس الكود لأكثر من نوع.</div>
+    <div class="panel"><h2>ربط أكواد مواد DC بالأنواع</h2><div class="desc">اختر الأكواد يدوياً لكل نوع. الكود الواحد يرتبط بنوع واحد فقط، وعند اختياره لنوع آخر ينتقل إليه تلقائياً. الاحتساب من Requested فقط.</div>
     <div class="grid3">
       <div class="panel" style="margin:0"><h3>DC 6 mm² (2×6)</h3><div class="btnrow"><button class="secondary" data-dcp="6">اختيار المواد</button></div><div style="margin-top:8px;">${(m['6']||[]).length?(m['6']||[]).map(x=>`<span class="pill" style="margin:2px;">${esc(x)}</span>`).join(''):'<span class="pill warn">لم يربط بعد</span>'}</div></div>
       <div class="panel" style="margin:0"><h3>DC 10 mm² (2×10)</h3><div class="btnrow"><button class="secondary" data-dcp="10">اختيار المواد</button></div><div style="margin-top:8px;">${(m['10']||[]).length?(m['10']||[]).map(x=>`<span class="pill" style="margin:2px;">${esc(x)}</span>`).join(''):'<span class="pill warn">لم يربط بعد</span>'}</div></div>
@@ -11595,17 +11584,20 @@ function renderSidDcCableManager(el){
 }
 function dcPick(sz){
   dcEnsure();
-  const codes=dcAllCodes();
-  const cur=new Set((STATE.dcCables.mappings[sz]||[]).map(c=>String(c).toLowerCase()));
-  openModal(`اختيار أكواد DC ${sz} mm²`,(body)=>{
-    body.innerHTML=`<input type="text" id="dcpq" placeholder="بحث..."><div class="tablewrap" style="max-height:50vh"><table class="data"><thead><tr><th></th><th>الكود</th><th>الوصف</th></tr></thead><tbody>${codes.map(c=>`<tr><td><input type="checkbox" class="dcpck" data-c="${esc(c.code)}" ${cur.has(c.code.toLowerCase())?'checked':''}></td><td>${esc(c.code)}</td><td>${esc(c.desc)}</td></tr>`).join('')}</tbody></table></div><div class="btnrow"><button class="primary" id="dcps">حفظ</button><button class="secondary" id="dcpc">إلغاء</button></div>`;
-    document.getElementById('dcpc').addEventListener('click',closeModal);
-    document.getElementById('dcps').addEventListener('click',async()=>{
-      const sel=[];document.querySelectorAll('.dcpck:checked').forEach(ch=>sel.push(ch.dataset.c));
-      for(const s2 of ['6','10','16']){if(s2===sz)continue;for(const sc of sel){if((STATE.dcCables.mappings[s2]||[]).some(x=>String(x).toLowerCase()===sc.toLowerCase())){alert('لا يمكن ربط نفس الكود لأكثر من نوع');return;}}}
-      STATE.dcCables.mappings[sz]=sel;
-      ['6','10','16'].forEach(s2=>{if(s2===sz)return;STATE.dcCables.mappings[s2]=(STATE.dcCables.mappings[s2]||[]).filter(x=>!sel.some(sc=>sc.toLowerCase()===String(x).toLowerCase()));});
-      await saveState(['dcCables']); closeModal(); const el=document.getElementById('tabContent'); if(el&&ACTIVE_TAB==='sid'){ renderSidTab(el); setTimeout(()=>{const b=document.querySelector('[data-sidsec="dccables"]'); if(b&&b.classList.contains('sid-sec-head')) b.click(); setTimeout(()=>{if(el) renderSidDcCableManager(document.getElementById('sidrSec_dccables'));},50);},50);}
+  const codes=dcAllCodes(),cur=new Set((STATE.dcCables.mappings[sz]||[]).map(dcNormalizeCode));
+  openModal(`اختيار أكواد DC ${sz} mm²`,body=>{
+    body.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><input type="search" id="dcpq" placeholder="ابحث بالكود أو الوصف..." style="flex:1;min-width:220px"><span class="pill" id="dcpCount"></span></div><div class="desc" style="margin-bottom:8px">يمكنك اختيار كود مرتبط بنوع آخر؛ عند الحفظ سينتقل تلقائياً إلى DC ${sz}.</div><div class="tablewrap" style="max-height:55vh"><table class="data"><thead><tr><th></th><th>الكود</th><th>الوصف</th></tr></thead><tbody>${codes.map(c=>`<tr data-dcp-row data-search="${esc((c.code+' '+c.desc).toLowerCase())}"><td><input type="checkbox" class="dcpck" data-c="${esc(c.code)}" ${cur.has(dcNormalizeCode(c.code))?'checked':''}></td><td>${esc(c.code)}</td><td>${esc(c.desc)}</td></tr>`).join('')}</tbody></table></div><div class="btnrow"><button class="primary" id="dcps">حفظ وإعادة الاحتساب</button><button class="secondary" id="dcpc">إلغاء</button></div>`;
+    const q=body.querySelector('#dcpq'),rows=Array.from(body.querySelectorAll('[data-dcp-row]'));
+    const refresh=()=>{const term=String(q.value||'').trim().toLowerCase();rows.forEach(row=>row.hidden=!!term&&!row.dataset.search.includes(term));body.querySelector('#dcpCount').textContent='المحدد: '+body.querySelectorAll('.dcpck:checked').length;};
+    q.addEventListener('input',refresh);body.querySelectorAll('.dcpck').forEach(ch=>ch.addEventListener('change',refresh));refresh();
+    body.querySelector('#dcpc').addEventListener('click',closeModal);
+    body.querySelector('#dcps').addEventListener('click',async()=>{
+      const selected=[];body.querySelectorAll('.dcpck:checked').forEach(ch=>selected.push(ch.dataset.c));
+      ['6','10','16'].forEach(k=>STATE.dcCables.mappings[k]=(STATE.dcCables.mappings[k]||[]).filter(old=>!selected.some(code=>dcNormalizeCode(code)===dcNormalizeCode(old))));
+      STATE.dcCables.mappings[sz]=selected;
+      dcRebuildAll();await saveState(['dcCables']);closeModal();
+      const host=document.getElementById('tabContent');
+      if(host&&ACTIVE_TAB==='sid'){renderSidTab(host);setTimeout(()=>{const h=document.querySelector('[data-sidsec="dccables"]');if(h&&h.classList.contains('sid-sec-head'))h.click();setTimeout(()=>{const target=document.getElementById('sidrSec_dccables');if(target)renderSidDcCableManager(target);},50);},50);}
     });
   },{maxWidth:'700px'});
 }
@@ -11624,12 +11616,12 @@ function dcRec(rc){
   },{maxWidth:'620px'});
 }
 function dcDet(site){
-  dcEnsure(); try{dcRebuildAll();}catch(e){}
+  dcEnsure();try{dcRebuildAll();}catch(e){}
   const cs=(STATE.dcCables.consumption||[]).find(x=>x.site===site);
-  openModal('تفاصيل '+site,(body)=>{
+  openModal('تفاصيل '+site,body=>{
     if(!cs){body.innerHTML='<div>لا يوجد</div>';return;}
-    body.innerHTML=`<table class="data"><thead><tr><th>كود</th><th>الوصف</th><th>أصلي</th><th>مستخدم</th><th>كمية</th><th>استبدال</th><th>ملاحظة</th><th>حالة</th></tr></thead><tbody>${(cs.items||[]).map(it=>`<tr><td>${esc(it.productCode||'')}</td><td>${esc(it.productDescription||'')}</td><td>${it.origSize?'DC '+it.origSize:''}</td><td>${it.usedSize?'DC '+it.usedSize:''}</td><td>${it.qty||0}</td><td>${it.replaced?'نعم':'لا'}</td><td>${esc(it.replacementNote||'')}</td><td>${it.reviewNeeded?'<span class="pill warn">مراجعة</span>':'<span class="pill ok">مُعتمد</span>'}</td></tr>`).join('')}</tbody></table><div class="btnrow"><button class="secondary" id="dcdc">إغلاق</button></div>`;
-    document.getElementById('dcdc').addEventListener('click',closeModal);
+    body.innerHTML=`<div class="desc">الاحتساب يعتمد على Requested فقط. المواد غير المرتبطة ظاهرة للمراجعة ولا تدخل في الإجمالي.</div><div class="tablewrap"><table class="data"><thead><tr><th>Product Code</th><th>Product Description</th><th>نوع DC المعتمد</th><th>Requested</th><th>الكمية المحتسبة</th><th>ملاحظات SID</th><th>الحالة</th></tr></thead><tbody>${(cs.items||[]).map(it=>`<tr><td>${esc(it.productCode||'')}</td><td>${esc(it.productDescription||'')}</td><td>${it.mapped?'DC '+it.usedSize:'—'}</td><td>${Number(it.requestedQty||0)}</td><td>${it.mapped?Number(it.requestedQty||0):0}</td><td>${esc(it.replacementNote||'')}</td><td>${it.mapped?'<span class="pill ok">داخل الاحتساب</span>':'<span class="pill warn">غير مرتبط — مستبعد</span>'}</td></tr>`).join('')}</tbody></table></div><div class="btnrow"><button class="secondary" id="dcdc">إغلاق</button></div>`;
+    body.querySelector('#dcdc').addEventListener('click',closeModal);
   },{maxWidth:'1100px'});
 }
 function dcExp(){
@@ -11641,6 +11633,9 @@ function dcExp(){
   const s2=[['الموقع','DC 6','DC 10','DC 16','الإجمالي']];
   (STATE.dcCables.consumption||[]).slice().sort((a,b)=>String(a.site).localeCompare(String(b.site))).forEach(cs=>{const tt=cs.totals||{};s2.push([cs.site,tt.qty6||0,tt.qty10||0,tt.qty16||0,(tt.qty6||0)+(tt.qty10||0)+(tt.qty16||0)]);});
   sh.push({name:'استهلاك المواقع',ws:aoaSheet(s2,[28,10,10,10,12])});
+  const sd=[['الموقع','Product Code','Product Description','نوع DC المعتمد','Requested','الكمية المحتسبة','ملاحظات SID','الحالة']];
+  (STATE.dcCables.consumption||[]).forEach(cs=>(cs.items||[]).forEach(it=>sd.push([cs.site,it.productCode||'',it.productDescription||'',it.mapped?'DC '+it.usedSize:'غير مرتبط',Number(it.requestedQty||0),it.mapped?Number(it.requestedQty||0):0,it.replacementNote||'',it.mapped?'داخل الاحتساب':'مستبعد'])));
+  sh.push({name:'تفاصيل المواد',ws:aoaSheet(sd,[24,18,36,18,12,14,36,16])});
   const s3=[['نوع','كود']];
   (STATE.dcCables.mappings['6']||[]).forEach(x=>s3.push(['DC 6',x]));
   (STATE.dcCables.mappings['10']||[]).forEach(x=>s3.push(['DC 10',x]));
