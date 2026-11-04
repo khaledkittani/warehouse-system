@@ -11515,12 +11515,12 @@ function dcCodeMap(){
 }
 function dcDetectRep(note){
   if(!note) return {replaced:false,used:null,orig:null,clear:false,review:false,reason:''};
-  const s=String(note);
-  const mm=s.match(/(?:DC\s*)?(1[06]|6)\s*(?:mm[²2]?)\s*(?:بدل|عوض\s*عن|بدلا\s*من|instead\s*of|replaced.*with|with.*instead)\s*(?:DC\s*)?(1[06]|6)/i);
-  if(mm && mm[1]!==mm[2]){
-    return {replaced:true,used:mm[1],orig:mm[2],clear:true,review:false,reason:`استبدال DC ${mm[2]} mm² بـ DC ${mm[1]} mm²`};
-  }
-  if(/بدل|استبدال|replac/i.test(s)&&/(1[06]|6)/.test(s)) return {replaced:false,used:null,orig:null,clear:false,review:true,reason:'ملاحظة استبدال غير واضحة'};
+  const raw=String(note).toUpperCase().replace(/[ًٌٍَُِّْـ]/g,'').replace(/أ|إ|آ/g,'ا').replace(/ؤ/g,'و').replace(/ئ/g,'ي');
+  const compact=raw.replace(/[^A-Z0-9\u0600-\u06FF]/g,'');
+  const sixToTen=/6(?:MM2?|ملم|مليمتر)?(?:ب(?:ـ)?|الى|استبدلب|تحويلالى|REPLACEDBY|REPLACEDWITH)10/.test(compact)||/10(?:MM2?|ملم|مليمتر)?(?:بدلمن|عوضعن|INSTEADOF)6/.test(compact);
+  if(sixToTen)return {replaced:true,used:'10',orig:'6',clear:true,review:false,reason:'استبدال DC 6 mm² بـ DC 10 mm² حسب ملاحظة SID'};
+  const both=/(?:6.*10|10.*6)/.test(compact);
+  if(both&&/(بدل|استبدال|استبدل|عوض|تحويل|REPLAC|INSTEAD)/.test(raw))return {replaced:false,used:null,orig:null,clear:false,review:true,reason:'ملاحظة استبدال DC 6/10 غير واضحة — تحتاج مراجعة'};
   return {replaced:false,used:null,orig:null,clear:false,review:false,reason:''};
 }
 function dcCalcFromImport(imp){
@@ -11538,7 +11538,9 @@ function dcCalcFromImport(imp){
     if(!Number.isFinite(req)||req<=0) return;
     const desc=r.productDescription||r.description||rawCode;
     const note=r.notes||r.note||'';
-    items.push({productCode:rawCode,normalizedCode,productDescription:desc,origSize:sz,usedSize:sz,qty:req,requestedQty:req,receivedQty:Number(String(r.received==null?'':r.received).replace(/,/g,''))||0,mapped:!!sz,replaced:false,replacementNote:note,reviewNeeded:false});
+    const rep=(sz==='6')?dcDetectRep(note):{replaced:false,used:null,orig:null,clear:false,review:false,reason:''};
+    const usedSize=(rep.replaced&&rep.orig==='6'&&rep.used==='10')?'10':sz;
+    items.push({productCode:rawCode,normalizedCode,productDescription:desc,origSize:sz,usedSize,qty:req,requestedQty:req,receivedQty:Number(String(r.received==null?'':r.received).replace(/,/g,''))||0,mapped:!!sz,replaced:!!rep.replaced,replacementFrom:rep.replaced?rep.orig:null,replacementTo:rep.replaced?rep.used:null,replacementReason:rep.reason||'',replacementNote:note,reviewNeeded:!!rep.review,reviewReason:rep.review?rep.reason:''});
   });
   const totals={qty6:0,qty10:0,qty16:0};
   items.forEach(it=>{if(!it.mapped)return;if(it.usedSize==='6')totals.qty6+=it.requestedQty;if(it.usedSize==='10')totals.qty10+=it.requestedQty;if(it.usedSize==='16')totals.qty16+=it.requestedQty;});
@@ -11647,7 +11649,7 @@ function dcDet(site){
   const cs=(STATE.dcCables.consumption||[]).find(x=>x.site===site);
   openModal('تفاصيل '+site,body=>{
     if(!cs){body.innerHTML='<div>لا يوجد</div>';return;}
-    body.innerHTML=`<div class="desc">الاحتساب يعتمد على Requested فقط. المواد غير المرتبطة ظاهرة للمراجعة ولا تدخل في الإجمالي.</div><div class="tablewrap"><table class="data"><thead><tr><th>Product Code</th><th>Product Description</th><th>نوع DC المعتمد</th><th>Requested</th><th>الكمية المحتسبة</th><th>ملاحظات SID</th><th>الحالة</th></tr></thead><tbody>${(cs.items||[]).map(it=>`<tr><td>${esc(it.productCode||'')}</td><td>${esc(it.productDescription||'')}</td><td>${it.mapped?'DC '+it.usedSize:'—'}</td><td>${Number(it.requestedQty||0)}</td><td>${it.mapped?Number(it.requestedQty||0):0}</td><td>${esc(it.replacementNote||'')}</td><td>${it.mapped?'<span class="pill ok">داخل الاحتساب</span>':'<span class="pill warn">غير مرتبط — مستبعد</span>'}</td></tr>`).join('')}</tbody></table></div><div class="btnrow"><button class="secondary" id="dcdc">إغلاق</button></div>`;
+    body.innerHTML=`<div class="desc">الاحتساب يعتمد على Requested فقط. عند استبدال DC 6 بـ DC 10 حسب ملاحظة SID، تُحوّل الكمية إلى استهلاك DC 10 ويظهر ذلك في التفاصيل.</div><div class="tablewrap"><table class="data"><thead><tr><th>Product Code</th><th>Product Description</th><th>DC الأصلي</th><th>DC المحتسب</th><th>Requested</th><th>الكمية المحتسبة</th><th>توضيح الاستبدال</th><th>ملاحظات SID</th><th>الحالة</th></tr></thead><tbody>${(cs.items||[]).map(it=>`<tr><td>${esc(it.productCode||'')}</td><td>${esc(it.productDescription||'')}</td><td>${it.mapped?'DC '+(it.origSize||it.usedSize):'—'}</td><td>${it.mapped?'DC '+it.usedSize:'—'}</td><td>${Number(it.requestedQty||0)}</td><td>${it.mapped?Number(it.requestedQty||0):0}</td><td>${it.replaced?esc(it.replacementReason):it.reviewNeeded?esc(it.reviewReason):'—'}</td><td>${esc(it.replacementNote||'')}</td><td>${it.reviewNeeded?'<span class="pill warn">مراجعة الملاحظة</span>':it.replaced?'<span class="pill warn">حوّل من DC 6 إلى DC 10</span>':it.mapped?'<span class="pill ok">داخل الاحتساب</span>':'<span class="pill warn">غير مرتبط — مستبعد</span>'}</td></tr>`).join('')}</tbody></table></div><div class="btnrow"><button class="secondary" id="dcdc">إغلاق</button></div>`;
     body.querySelector('#dcdc').addEventListener('click',closeModal);
   },{maxWidth:'1100px'});
 }
@@ -11660,9 +11662,9 @@ function dcExp(){
   const s2=[['الموقع','DC 6','DC 10','DC 16','الإجمالي']];
   (STATE.dcCables.consumption||[]).slice().sort((a,b)=>String(a.site).localeCompare(String(b.site))).forEach(cs=>{const tt=cs.totals||{};s2.push([cs.site,tt.qty6||0,tt.qty10||0,tt.qty16||0,(tt.qty6||0)+(tt.qty10||0)+(tt.qty16||0)]);});
   sh.push({name:'استهلاك المواقع',ws:aoaSheet(s2,[28,10,10,10,12])});
-  const sd=[['الموقع','Product Code','Product Description','نوع DC المعتمد','Requested','الكمية المحتسبة','ملاحظات SID','الحالة']];
-  (STATE.dcCables.consumption||[]).forEach(cs=>(cs.items||[]).forEach(it=>sd.push([cs.site,it.productCode||'',it.productDescription||'',it.mapped?'DC '+it.usedSize:'غير مرتبط',Number(it.requestedQty||0),it.mapped?Number(it.requestedQty||0):0,it.replacementNote||'',it.mapped?'داخل الاحتساب':'مستبعد'])));
-  sh.push({name:'تفاصيل المواد',ws:aoaSheet(sd,[24,18,36,18,12,14,36,16])});
+  const sd=[['الموقع','Product Code','Product Description','DC الأصلي','DC المحتسب','Requested','الكمية المحتسبة','توضيح الاستبدال','ملاحظات SID','الحالة']];
+  (STATE.dcCables.consumption||[]).forEach(cs=>(cs.items||[]).forEach(it=>sd.push([cs.site,it.productCode||'',it.productDescription||'',it.mapped?'DC '+(it.origSize||it.usedSize):'غير مرتبط',it.mapped?'DC '+it.usedSize:'غير مرتبط',Number(it.requestedQty||0),it.mapped?Number(it.requestedQty||0):0,it.replaced?it.replacementReason:it.reviewNeeded?it.reviewReason:'',it.replacementNote||'',it.reviewNeeded?'مراجعة الملاحظة':it.replaced?'حوّل من DC 6 إلى DC 10':it.mapped?'داخل الاحتساب':'مستبعد'])));
+  sh.push({name:'تفاصيل المواد',ws:aoaSheet(sd,[24,18,36,14,14,12,14,42,36,22])});
   const s3=[['نوع','كود']];
   (STATE.dcCables.mappings['6']||[]).forEach(x=>s3.push(['DC 6',x]));
   (STATE.dcCables.mappings['10']||[]).forEach(x=>s3.push(['DC 10',x]));
