@@ -11481,7 +11481,7 @@ function dcNormalizeCode(code){
   return String(code==null?'':code).trim().replace(/\s+/g,' ').toUpperCase();
 }
 function dcCodeKey(code){
-  return dcNormalizeCode(code).replace(/\\s+/g,'');
+  return dcNormalizeCode(code).replace(/\s+/g,'');
 }
 function dcCodeMap(){
   dcEnsure();
