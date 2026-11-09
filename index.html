@@ -733,6 +733,7 @@ const STORE_KEYS = {
   siteSchedule: 'wms_site_schedule_v1',
   sidHighlights: 'wms_sid_highlights_v1',
   dcCables: 'wms_dc_cables_v1',
+  siteWorkStatus: 'wms_site_work_status_v1',
 };
 
 let STATE = {
@@ -755,6 +756,7 @@ let STATE = {
   siteSchedule: { sites: [], fileName: null, uploadedAt: null },
   sidHighlights: { keys: [] },
   dcCables: { receipts: [], consumption: [], alerts: [], mappings: { '6': [], '10': [], '16': [] } },
+  siteWorkStatus: { fileName:null, uploadedAt:null, sheetName:null, totals:null, sites:[] }, // المواقع التي لم يتم العمل عليها (مستخرجة من ملف Excel يرفعه المستخدم) — تُستبدل بالكامل عند رفع ملف جديد
 };
 
 let ACTIVE_TAB = 'setup';
@@ -778,7 +780,7 @@ const LABELS = {
   tab_setup: 'استلام مواد 4G',
   tab_receipts: 'سجل استلام مواد 4G',
   tab_movements: 'سجل حركات مواد 4G',
-  tab_sid: 'رفع SID',
+  tab_sid: 'مواد 4G مستلمة',
   tab_stock: 'مواد 4G المتوفرة',
   tab_dismantled: 'مواد ارجاع',
   tab_goods: 'مخزون المستودع',
@@ -2664,8 +2666,6 @@ const TABS = [
   {id:'goods', lk:'tab_goods', group:'wh'},
   {id:'outreq', lk:'tab_outreq', group:'wh'},
   {id:'tagcapture', lk:'tab_tagcapture', group:'tools'},
-  {id:'transport', lk:'tab_transport', group:'ops'},
-  {id:'dyn', lk:'tab_dyn', group:'ops'},
   {id:'users', lk:'tab_users', group:'admin', adminOnly:true},
 ];
 const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستودع', 'tools':'🛠️ أدوات', 'ops':'🗂️ السجلات والجداول', 'admin':'🛡️ الإدارة'};
@@ -2680,15 +2680,13 @@ const TAB_GROUP_LABELS = {'4g':'📡 قسم 4G', 'wh':'📦 قسم المستو�
    ============================================================ */
 const PERM_SECTIONS = [
   {id:'setup',      label:'استلام مواد 4G',            group:'4g',   canEdit:true},
-  {id:'sid',        label:'رفع SID ومعالجته',          group:'4g',   canEdit:true},
+  {id:'sid',        label:'مواد 4G مستلمة',            group:'4g',   canEdit:true},
   {id:'stock',      label:'مخزون 4G',                  group:'4g',   canEdit:false, hint:'عرض فقط — تعديل المخزون يتم عبر استلام 4G أو SID أو الحركة السريعة'},
   {id:'goods',      label:'مخزون المستودع',            group:'wh',   canEdit:true},
   {id:'outreq',     label:'طلبات الإخراج',             group:'wh',   canEdit:true,  hint:'التنفيذ يخصم من المخزون؛ «تعديل» تمنح أيضاً كتابة مخزون 4G والمستودع اللازمة للتنفيذ'},
   {id:'quick',      label:'الحركة السريعة',            group:'tools',canEdit:true,  hint:'إدخال/إخراج سريع لمخزون المستودع ومواد 4G'},
   {id:'tagcapture', label:'رصد التاجات',               group:'tools',canEdit:true},
   {id:'taglog',     label:'سجل التاجات',               group:'tools',canEdit:false, hint:'عرض فقط — سجل كل التاجات المرصودة'},
-  {id:'transport',  label:'سجل طلبات النقل',           group:'ops',  canEdit:true},
-  {id:'dyn',        label:'إدارة الجداول والأقسام',     group:'ops',  canEdit:true},
 ];
 const PERM_SECTION_MAP = {};
 PERM_SECTIONS.forEach(s=>{ PERM_SECTION_MAP[s.id] = s; });
@@ -2716,6 +2714,7 @@ const STATE_KEY_SECTIONS = {
   sidReview:        ['sid'],
   siteSchedule:     ['sid'],
   sidHighlights:    ['sid'],
+  siteWorkStatus:   ['stock','sid'],
   cableItems:       [],  // legacy — admin فقط
   cableLedger:      [],  // legacy — admin فقط
 };
@@ -3140,8 +3139,6 @@ function renderTabContent(){
   if(ACTIVE_TAB==='goods') return renderGoodsTab(el);
   if(ACTIVE_TAB==='outreq') return renderOutreqTab(el);
   if(ACTIVE_TAB==='tagcapture') return renderTagCaptureTab(el);
-  if(ACTIVE_TAB==='transport') return renderTransportTab(el);
-  if(ACTIVE_TAB==='dyn') return renderDynTab(el);
   if(ACTIVE_TAB==='users') return renderUsersTab(el);
 }
 
@@ -3279,8 +3276,6 @@ function renderPermTabContent(){
     else if(sec==='outreq') renderOutreqTab(el);
     else if(sec==='tagcapture') renderTagCaptureTab(el);
     else if(sec==='taglog') renderTagLogViewerTab(el);
-    else if(sec==='transport') renderTransportTab(el);
-    else if(sec==='dyn') renderDynTab(el);
   } else {
     if(sec==='stock') renderStockTab(el);
     else if(sec==='goods') renderGoodsViewerTab(el);
@@ -3288,8 +3283,6 @@ function renderPermTabContent(){
     else if(sec==='outreq') renderOutreqTab(el);
     else if(sec==='setup') renderSetupTab(el);
     else if(sec==='sid') renderSidTab(el);
-    else if(sec==='transport') renderTransportTab(el);
-    else if(sec==='dyn') renderDynTab(el);
   }
   if(access==='read') applyPermReadOnlyGuard(el, sec);
 }
@@ -6317,7 +6310,7 @@ document.addEventListener('keydown', function(e){
 }, true);
 
 /* ---- تبويب SID: خانة/آلية "صرف SID" الفعلي القديمة أُزيلت بالكامل من الواجهة بناءً على طلب صريح
-   (الزر، القسم، وكل المنطق المرتبط بها) — تبويب "رفع SID" أصبح يعرض مباشرة قسم مراجعة استلام SID فقط. ---- */
+   (الزر، القسم، وكل المنطق المرتبط بها) — تبويب "مواد 4G مستلمة" أصبح يعرض مباشرة قسم مراجعة استلام SID فقط. ---- */
 function renderSidTab(el){
   renderSidReviewSubview(el);
 }
@@ -6334,10 +6327,9 @@ const SIDR_SECTIONS = [
   {id:'summary',  icon:'📊', title:()=>'النواقص — ملخص كل المواقع',                  render:(el)=>renderSidrSummaryView(el)},
   {id:'sites',    icon:'📍', title:()=>`مراجعة حسب الموقع (${STATE.sidReview.imports.length})`, render:(el)=>renderSidrSitesView(el)},
   {id:'schedule', icon:'🗓️', title:()=>'جدولة المواقع والتقارير الأسبوعية',          render:(el)=>renderSidrScheduleView(el)},
-  {id:'dccables', icon:'🔌', title:()=>'إدارة كوابل DC',                            render:(el)=>renderSidDcCableManager(el)},
 ];
 function sidrSecOpenState(){
-  let st = {upload:true, summary:true, sites:true, schedule:false, dccables:false};
+  let st = {upload:true, summary:true, sites:true, schedule:false};
   try{ const raw = JSON.parse(localStorage.getItem('wms_sid_sections_open')||'null'); if(raw && typeof raw==='object') st = Object.assign(st, raw); }catch(e){}
   return st;
 }
@@ -6374,6 +6366,10 @@ function renderSidReviewSubview(el){
   const st = sidrSecOpenState();
   if(SIDR_VIEW && st.hasOwnProperty(SIDR_VIEW)) st[SIDR_VIEW] = true;   // القسم المطلوب يُفتح دائماً
   el.innerHTML = `
+    <div class="panel">
+      <h2 style="margin-bottom:4px;">📡 مواد 4G مستلمة</h2>
+      <div class="desc">قسم مراجعة استلام مواد 4G من ملفات SID (متعدد الملفات والمواقع) — راجع الكميات المطلوبة والمستلمة والنواقص لكل موقع.</div>
+    </div>
     <div class="msg info">قسم مستقل تماماً لمراجعة ملفات SID متعددة المواقع والملفات (مقارنة الكمية المطلوبة بالكمية الموجودة فعلياً EXIST IN DWH من نفس الملف) — لا يُنفّذ أي صرف فعلي ولا يُغيّر رصيد المخزون أو سجل صرف SID.</div>
     <div class="sid-jump" id="sidJumpBar">
       ${SIDR_SECTIONS.map(sec=>`<button type="button" data-sidrview="${sec.id}">${sec.icon} ${esc(sec.title())}</button>`).join('')}
@@ -7973,6 +7969,7 @@ function renderStockTab(el){
         </tbody>
       </table></div>
     </div>
+    ${siteWorkCanManage() ? '<div id="siteWorkSection"></div>' : ''}
   `;
   const searchInp = document.getElementById('stockSearchInput');
   const debouncedStockRender = debounce(()=>{
@@ -7994,6 +7991,571 @@ function renderStockTab(el){
     const exportRows = rows.map(s=>[s.code, s.description, s.total_quantity, s.issued_quantity, s.total_quantity-s.issued_quantity, s.tags.filter(t=>t.status==='available').length]);
     exportSectionToExcel(headers, exportRows, 'مواد 4G المتوفرة', [18,40,16,12,14,16]);
   });
+  if(siteWorkCanManage()) renderSiteWorkSection();
+}
+
+/* ============================================================
+   مواقع العمل — رفع ملف Excel بالمواقع المنفذة/غير المنفذة
+   ------------------------------------------------------------
+   • لا يُعدَّل أي مخطط أو بيانات في Supabase: البيانات تُحفظ في مفتاح STATE جديد
+     (siteWorkStatus → wms_site_work_status_v1) بنفس آلية wms_state الحالية.
+   • الملف يُفحص ويُعرض في معاينة (الشيت + عمود الموقع + عمود الحالة) قبل الحفظ،
+     لأن صيغة الملف غير معروفة مسبقاً. لا يُفترض ترتيب الأعمدة.
+   • المواقع تُدمج بلا تكرار، وتُستبعد المواقع المنجزة. رفع ملف جديد يستبدل القائمة.
+   • مواد كل موقع تُقرأ من بيانات SID الحالية فقط (sidrImportForSite + sidrRowsWithStatus).
+   ============================================================ */
+let SITE_WORK = { q:'', selectedKey:null, preview:null };
+const SITEW_AL = {
+  site: ['site','site name','sitename','site id','site code','siteid','sitecode','code','number','no','id','اسم الموقع','الموقع','موقع','كود الموقع','رمز الموقع','رقم الموقع','معرف الموقع','رقم','رمز'],
+  status: ['status','state','case','work status','site status','completion status','completed','done','executed','installation status','work done','completion','progress','الحالة','حالة الموقع','حالة العمل','حالة التنفيذ','حالة التركيب','الوضع','حالة المشروع','الانجاز','نسبة الانجاز','تم العمل','التنفيذ']
+};
+const SITEW_NEG = ['لم يتم','لم يعمل','لم تعمل','لم ينفذ','لم تنفذ','لم يبدا','لم تبدا','لم يكتمل','لم تكتمل','لم ينجز','لم تنجز','غير منفذ','غير منفذه','غير منجز','غير منجزه','غير مكتمل','غير مكتمله','غير منتهي','غير منتهيه','غير تام','غير تامه','متبقي','متبقيه','معلق','قيد التنفيذ','قيد العمل','قيد الانجاز','مؤجل','مخطط','تم البدء','not done','not completed','not started','not executed','not installed','not working','not ok','incomplete','uncompleted','pending','in progress','on hold','remaining','open','todo','to do','cancelled','canceled','rejected','failed','delayed','no','n','0','false'];
+const SITEW_POS = ['تم','منجز','منجزه','منتهي','مكتمل','مكتمله','منفذ','منفذه','خلاص','مغلق','done','completed','complete','finished','executed','worked','installed','yes','y','1','true','ok','closed'];
+const SITEW_HINT = ['area','region','note','notes','ref','ref no','reference','no','number','id','name','description','qty','quantity','date','status','state','case','progress','completion','ملاحظة','ملاحظات','المنطقة','منطقة','رقم','الرقم','الاسم','الوصف','الكمية','التاريخ','كود','رمز','حالة','الوضع','التنفيذ','الانجاز'].map(a=>schedNormAr(a));
+
+function siteWorkCanManage(){
+  return CURRENT_ROLE==='admin' && APP_MODE==='admin';
+}
+function siteWorkState(){
+  if(!STATE.siteWorkStatus || typeof STATE.siteWorkStatus!=='object' || Array.isArray(STATE.siteWorkStatus)){
+    STATE.siteWorkStatus = { fileName:null, uploadedAt:null, sheetName:null, totals:null, sites:[] };
+  }
+  const st = STATE.siteWorkStatus;
+  if(!Array.isArray(st.sites)) st.sites = [];
+  return st;
+}
+function siteWorkNorm(v){ return schedNormAr(v); }
+
+/* تصنيف قيمة حالة العمل: الأولوية للنفي (لم يتم/غير منفذ/قيد التنفيذ...) ثم الإنجاز.
+   القيم غير المعروفة تُعتبر «غير منجزة» مع وسم known=false ليظهر تنبيه في المعاينة. */
+function siteWorkClassify(v){
+  const raw = trim(v);
+  const s = schedNormAr(raw);
+  if(!s) return {worked:false, known:true, label:raw};
+  const hit = (list)=>{
+    for(const p of list){
+      if(s===p) return true;
+      // المطابقة الجزئية للعبارات الطويلة فقط — الكلمات القصيرة (no/n/0/1/تم) تُطابَق بدقة
+      if(p.length>=4 && s.includes(p)) return true;
+    }
+    return false;
+  };
+  if(hit(SITEW_NEG)) return {worked:false, known:true, label:raw};
+  // «تم» وحدها أو «تم ...» تعني إنجازاً، بعد التأكد من عدم وجود نفي (لم يتم...)
+  if(s==='تم' || s==='تمت' || s.startsWith('تم ') || s.startsWith('تمت ')) return {worked:true, known:true, label:raw};
+  if(hit(SITEW_POS)) return {worked:true, known:true, label:raw};
+  return {worked:false, known:false, label:raw};
+}
+
+function siteWorkHeaderIndex(hdr, aliases){
+  if(!Array.isArray(hdr)) return -1;
+  const norm = hdr.map(h=>schedNormAr(h));
+  const al = aliases.map(a=>schedNormAr(a));
+  for(const a of al){ if(!a) continue; const i = norm.findIndex(h=>h && h===a); if(i>=0) return i; }
+  for(const a of al){ if(a.length<4) continue; const i = norm.findIndex(h=>h && h.includes(a)); if(i>=0) return i; }
+  return -1;
+}
+function siteWorkRows(aoa){
+  const rows = [];
+  (aoa||[]).forEach((r,i)=>{ if(r && r.some(c=>trim(c)!=='')) rows.push({r, n:i}); });
+  return rows;
+}
+function siteWorkFindHeader(aoa){
+  const rows = siteWorkRows(aoa);
+  const limit = Math.min(rows.length, 20);
+  for(let i=0;i<limit;i++){
+    const hdr = rows[i].r;
+    const siteCol = siteWorkHeaderIndex(hdr, SITEW_AL.site);
+    if(siteCol<0) continue;
+    const statusCol = siteWorkHeaderIndex(hdr, SITEW_AL.status);
+    return {rows, headerRowIdx:rows[i].n, siteCol, statusCol};
+  }
+  return {rows, headerRowIdx:-1, siteCol:-1, statusCol:-1};
+}
+function siteWorkIsDateLike(v){ return /^\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{1,4}$/.test(v); }
+function siteWorkColStats(rows){
+  const maxCols = rows.reduce((m,x)=>Math.max(m, (x.r||[]).length), 0);
+  const out = [];
+  for(let c=0;c<maxCols;c++){
+    const uniq = new Set();
+    let nonEmpty=0, text=0, known=0, codeLike=0;
+    rows.forEach(x=>{
+      const v = trim((x.r||[])[c]);
+      if(v==='') return;
+      nonEmpty++;
+      uniq.add(schedNormAr(v));
+      if(isNaN(Number(v)) && !siteWorkIsDateLike(v)) text++;
+      if(/\d/.test(v) && !siteWorkIsDateLike(v)) codeLike++;
+      if(siteWorkClassify(v).known) known++;
+    });
+    out.push({c, nonEmpty, uniq:uniq.size, textRatio: nonEmpty?text/nonEmpty:0, codeRatio: nonEmpty?codeLike/nonEmpty:0, knownRatio: nonEmpty?known/nonEmpty:0});
+  }
+  return out;
+}
+function siteWorkGuessSiteCol(rows){
+  const stats = siteWorkColStats(rows.slice(0,200));
+  let best=-1, bestScore=-1e9;
+  stats.forEach(s=>{
+    if(s.nonEmpty<2) return;
+    const score = (s.uniq*3) + (s.textRatio*20) + (s.codeRatio*12) - (s.knownRatio*25);
+    if(score>bestScore){ bestScore=score; best=s.c; }
+  });
+  return best>=0 ? best : 0;
+}
+function siteWorkGuessStatusCol(rows, siteCol){
+  const stats = siteWorkColStats(rows.slice(0,200));
+  let best=-1, bestRatio=-1;
+  stats.forEach(s=>{
+    if(s.c===siteCol || s.nonEmpty<2) return;
+    if(s.uniq>15) return;
+    if(s.knownRatio<0.6) return;
+    if(s.knownRatio>bestRatio){ bestRatio=s.knownRatio; best=s.c; }
+  });
+  return best;
+}
+
+function siteWorkLooksLikeHeader(row){
+  if(!Array.isArray(row)) return false;
+  const cells = row.map(c=>schedNormAr(c)).filter(Boolean);
+  if(cells.length<2) return false;
+  // إذا احتوى الصف قيمة حالة معروفة (تم/لم يتم/قيد التنفيذ...) فهو صف بيانات وليس عناوين
+  if(cells.some(c=>siteWorkClassify(c).known)) return false;
+  let hits = 0;
+  cells.forEach(c=>{ if(SITEW_HINT.some(h=>h && (c===h || (h.length>=4 && c.includes(h))))) hits++; });
+  return hits>=2;   // خليتان دالّتان على الأقل لتفادي اعتبار صف بيانات عادي صف عناوين
+}
+
+/* تحليل شيت واحد: يحدد صف العناوين والأعمدة، يصنّف الحالة، يدمج المواقع بلا تكرار.
+   إذا وُجد للموقع أكثر من صف: يبقى «غير منجز» ما لم تكن كل صفوفه منجزة. */
+function siteWorkAnalyze(aoa, opts){
+  opts = opts || {};
+  const det = siteWorkFindHeader(aoa);
+  const rows = det.rows;
+  const manualHeader = (opts.headerRowIdx!==undefined);
+  let headerRowIdx = manualHeader ? opts.headerRowIdx : det.headerRowIdx;
+  // إذا لم يتعرّف على صف عناوين بالكلمات المعروفة، نفحص أول 5 صفوف بحثاً عن صف عناوين بكلمات دالة شائعة
+  // (Area/Ref/Note/المنطقة/رقم...). الفحص لأكثر من صف يتيح تجاوز صفوف عنوان/تقرير فوق العناوين.
+  if(!manualHeader && headerRowIdx<0 && rows.length){
+    const probe = rows.slice(0,5).find(x=>siteWorkLooksLikeHeader(x.r));
+    if(probe) headerRowIdx = probe.n;
+  }
+  const hdr = (headerRowIdx>=0 && aoa[headerRowIdx]) ? aoa[headerRowIdx] : null;
+
+  let siteCol, statusCol;
+  if(opts.siteCol!==undefined) siteCol = opts.siteCol;
+  else if(hdr) siteCol = siteWorkHeaderIndex(hdr, SITEW_AL.site);
+  else siteCol = det.siteCol;
+
+  if(opts.statusCol!==undefined) statusCol = opts.statusCol;
+  else if(hdr) statusCol = siteWorkHeaderIndex(hdr, SITEW_AL.status);
+  else statusCol = det.statusCol;
+
+  if(siteCol<0) siteCol = siteWorkGuessSiteCol(rows);
+  if(statusCol<0 && opts.statusCol===undefined) statusCol = siteWorkGuessStatusCol(rows, siteCol);
+
+  let start = 0;
+  if(headerRowIdx>=0){
+    const hi = rows.findIndex(x=>x.n===headerRowIdx);
+    if(hi>=0) start = hi+1;
+  }
+
+  const byKey = new Map();
+  const statusCounts = new Map();
+  let totalRows=0, duplicates=0, skipped=0;
+
+  for(let i=start;i<rows.length;i++){
+    const r = rows[i].r || [];
+    const site = trim(r[siteCol]).replace(/\s+/g,' ');
+    if(!site){ skipped++; continue; }
+    const key = siteWorkNorm(site);
+    if(!key){ skipped++; continue; }
+    if(SITEW_AL.site.concat(SITEW_AL.status).some(a=>siteWorkNorm(a)===key)){ skipped++; continue; }
+    totalRows++;
+    let cls = {worked:false, known:true, label:''};
+    if(statusCol>=0){
+      const raw = trim(r[statusCol]);
+      cls = siteWorkClassify(raw);
+      const lab = raw || '—';
+      statusCounts.set(lab, (statusCounts.get(lab)||0)+1);
+    }
+    const prev = byKey.get(key);
+    if(prev){
+      duplicates++;
+      prev.worked = prev.worked && cls.worked;
+      prev.known = prev.known && cls.known;
+      if(!cls.worked) prev.status = cls.label || prev.status;
+    } else {
+      byKey.set(key, {key, site, worked:!!cls.worked, known:!!cls.known, status:cls.label||''});
+    }
+  }
+
+  const sites = Array.from(byKey.values());
+  const workedCount = sites.filter(x=>x.worked).length;
+  const notWorked = sites.filter(x=>!x.worked);
+  return {
+    headerRowIdx, siteCol, statusCol, dataStart:start,
+    totalRows, totalSites:sites.length, workedCount, notWorkedCount:notWorked.length,
+    duplicates, skipped, sites, notWorked,
+    statusCounts: Array.from(statusCounts.entries()).sort((a,b)=>b[1]-a[1])
+  };
+}
+
+function siteWorkImportCandidates(site){
+  const imports = (STATE.sidReview && Array.isArray(STATE.sidReview.imports)) ? STATE.sidReview.imports : [];
+  const key = siteWorkNorm(site);
+  if(!key) return [];
+  const exact = imports.filter(i=>siteWorkNorm(i.site)===key);
+  if(exact.length) return exact;
+  const loose = k=>k.replace(/[^a-z0-9\u0600-\u06FF]/g,'');
+  const k2 = loose(key);
+  if(k2){
+    const lm = imports.filter(i=>loose(siteWorkNorm(i.site))===k2);
+    if(lm.length) return lm;
+  }
+  // مطابقة متسامحة: كل كلمات الاسم الأقصر موجودة في الاسم الأطول (مثل HBR118 مقابل HBR118 - اسم الموقع).
+  const toks = s=>siteWorkNorm(s).split(/\s+/).filter(Boolean);
+  const t1 = toks(site);
+  if(!t1.length) return [];
+  return imports.filter(i=>{
+    const t2 = toks(i.site);
+    if(!t2.length) return false;
+    const short = t1.length<=t2.length ? t1 : t2;
+    const long  = t1.length<=t2.length ? t2 : t1;
+    if(short.length===1 && short[0].length<4) return false;
+    return short.every(x=>long.includes(x));
+  });
+}
+function siteWorkFindImport(site){
+  const c = siteWorkImportCandidates(site);
+  return c.length===1 ? c[0] : null;
+}
+
+function renderSiteWorkSection(){
+  const host = document.getElementById('siteWorkSection');
+  if(!host) return;
+  const st = siteWorkState();
+  const saved = Array.isArray(st.sites) ? st.sites : [];
+  const totals = st.totals || null;
+  const hasFile = !!st.fileName;
+  host.innerHTML = `
+    <div class="panel">
+      <h2 style="margin-bottom:4px;">🗺️ المواقع التي لم يتم العمل عليها</h2>
+      <div class="desc">ارفع ملف Excel يحتوي على المواقع وحالة العمل. يستخرج النظام المواقع التي لم تُنجَز فقط (دون تكرار)، ويستبدل القائمة السابقة بالكامل عند رفع ملف جديد. عند اختيار موقع تُعرض مواده وكمياته من بيانات SID المعتمدة في النظام.</div>
+      <div class="filebox">
+        <label class="flabel">ملف مواقع العمل (.xlsx / .xls)</label>
+        <input type="file" id="siteWorkFile" accept=".xlsx,.xls">
+        <div class="hint">يُفحص الملف أولاً مع معاينة الشيت والأعمدة قبل الحفظ — لا تُغيَّر القائمة الحالية إلا بعد تأكيدك.</div>
+      </div>
+      <div id="siteWorkMsg"></div>
+      <div class="btnrow">
+        <button class="primary" id="btnSiteWorkParse" type="button">🔍 فحص الملف</button>
+      </div>
+      <div id="siteWorkPreviewBox"></div>
+    </div>
+    <div class="panel">
+      <h2 style="margin-bottom:4px;">قائمة المواقع المتبقية</h2>
+      ${hasFile ? `
+        <div class="desc">
+          الملف الحالي: <b>${esc(st.fileName||'—')}</b>
+          ${st.sheetName?` — الشيت: <b>${esc(st.sheetName)}</b>`:''}
+          ${st.uploadedAt?` — تاريخ الرفع: <b>${esc(String(st.uploadedAt).slice(0,10))}</b>`:''}
+          ${totals?` — إجمالي المواقع في الملف: <b>${totals.totalSites}</b> — تم العمل عليها: <b>${totals.workedCount}</b> — المتبقي: <b>${saved.length}</b>`:''}
+        </div>
+        ${saved.length ? `
+          <input type="text" id="siteWorkSearch" placeholder="اكتب اسم الموقع للبحث..." value="${esc(SITE_WORK.q)}" style="max-width:340px;margin-bottom:10px;">
+          <div id="siteWorkListBox"></div>
+          <div id="siteWorkDetailBox" style="margin-top:12px;"></div>
+        ` : `<div class="msg ok">كل المواقع في الملف الحالي تم العمل عليها — لا توجد مواقع متبقية.</div>`}
+      ` : `<div class="msg info">لم يتم رفع ملف مواقع بعد. ارفع ملف Excel ثم اضغط «فحص الملف» لمعاينة النتائج قبل الحفظ.</div>`}
+    </div>
+  `;
+
+  const parseBtn = document.getElementById('btnSiteWorkParse');
+  const fileInp = document.getElementById('siteWorkFile');
+  if(parseBtn) parseBtn.addEventListener('click', siteWorkParseSelectedFile);
+  if(fileInp) fileInp.addEventListener('change', siteWorkParseSelectedFile);
+
+  if(saved.length){
+    const searchInp = document.getElementById('siteWorkSearch');
+    if(searchInp){
+      const debouncedList = debounce(()=>{ renderSiteWorkList(); }, 100);
+      searchInp.addEventListener('input', ()=>{ SITE_WORK.q = searchInp.value; debouncedList(); });
+    }
+    renderSiteWorkList();
+    renderSiteWorkDetail();
+  }
+  // إعادة رسم المعاينة إن كانت مفتوحة (مثلاً بعد إعادة رسم تبويب المخزون أثناء المعاينة)
+  if(SITE_WORK.preview) renderSiteWorkPreview();
+}
+
+function siteWorkPreviewHeaderRow(aoa, headerRowIdx){
+  if(headerRowIdx>=0 && aoa[headerRowIdx]) return aoa[headerRowIdx]||[];
+  return (aoa||[]).find(r=>r && r.some(c=>trim(c)!=='')) || [];
+}
+function siteWorkReanalyze(siteCol, statusCol, headerRowIdx){
+  const pv = SITE_WORK.preview;
+  if(!pv) return;
+  const sh = pv.sheets[pv.sheetIndex];
+  if(!sh) return;
+  const cur = sh.result || {};
+  const hIdx = headerRowIdx!==undefined ? headerRowIdx : ((cur.headerRowIdx!==undefined)?cur.headerRowIdx:-1);
+  const opts = { headerRowIdx: hIdx };
+  // تغيير صف العناوين وحده = إعادة اكتشاف الأعمدة من الصف المختار.
+  // تغيير عمود واحد = الإبقاء على العمود الآخر كما هو.
+  if(siteCol!==undefined || statusCol!==undefined){
+    opts.siteCol = siteCol!==undefined ? siteCol : cur.siteCol;
+    opts.statusCol = statusCol!==undefined ? statusCol : cur.statusCol;
+  }
+  sh.result = siteWorkAnalyze(sh.aoa, opts);
+  renderSiteWorkPreview();
+}
+
+function renderSiteWorkPreview(){
+  const box = document.getElementById('siteWorkPreviewBox');
+  if(!box) return;
+  const pv = SITE_WORK.preview;
+  if(!pv){ box.innerHTML=''; return; }
+  const sh = pv.sheets[pv.sheetIndex];
+  if(!sh){ box.innerHTML=''; return; }
+  const res = sh.result;
+  const hdr = siteWorkPreviewHeaderRow(sh.aoa, res.headerRowIdx);
+  const maxCols = (sh.aoa||[]).reduce((m,r)=>Math.max(m, (r||[]).length), 0);
+  const colLabel = i=>{
+    const h = res.headerRowIdx>=0 ? trim(hdr[i]) : '';
+    return (h ? h : ('العمود '+(i+1))) + ' — ' + (i+1);
+  };
+  const siteOpts = [];
+  for(let i=0;i<maxCols;i++) siteOpts.push(`<option value="${i}" ${i===res.siteCol?'selected':''}>${esc(colLabel(i))}</option>`);
+  const statusOpts = [`<option value="-1" ${res.statusCol<0?'selected':''}>— بدون عمود حالة —</option>`];
+  for(let i=0;i<maxCols;i++) statusOpts.push(`<option value="${i}" ${i===res.statusCol?'selected':''}>${esc(colLabel(i))}</option>`);
+  const sheetOpts = pv.sheets.map((s,i)=>`<option value="${i}" ${i===pv.sheetIndex?'selected':''}>${esc(s.name)} (${s.result.totalSites} موقع)</option>`).join('');
+  const headerOpts = [`<option value="-1" ${res.headerRowIdx<0?'selected':''}>— لا يوجد / البيانات من الصف 1 —</option>`]
+    .concat(siteWorkRows(sh.aoa).slice(0,20).map(x=>{
+      const label = (x.r||[]).slice(0,4).map(c=>trim(c)).filter(Boolean).join(' | ');
+      return `<option value="${x.n}" ${x.n===res.headerRowIdx?'selected':''}>الصف ${x.n+1}: ${esc(label||'—')}</option>`;
+    })).join('');
+  const statusChips = (res.statusCounts||[]).slice(0,12).map(([label,n])=>`<span class="pill info" style="margin:2px;">${esc(label)}: ${n}</span>`).join('');
+  const sample = (res.notWorked||[]).slice(0,25);
+
+  box.innerHTML = `
+    <div style="border:1px solid #e3ded3;border-radius:10px;padding:14px;margin-top:14px;background:#fbfaf6;">
+      <h3 style="margin-bottom:8px;">معاينة الملف: ${esc(pv.fileName)}</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+        <div><label class="flabel">الشيت</label><select id="swSheet" style="width:100%;">${sheetOpts}</select></div>
+        <div><label class="flabel">صف العناوين</label><select id="swHeaderRow" style="width:100%;">${headerOpts}</select></div>
+        <div><label class="flabel">عمود اسم الموقع</label><select id="swSiteCol" style="width:100%;">${siteOpts.join('')}</select></div>
+        <div><label class="flabel">عمود حالة العمل</label><select id="swStatusCol" style="width:100%;">${statusOpts.join('')}</select></div>
+      </div>
+      <div class="desc" style="margin-top:10px;">
+        صفوف البيانات: <b>${res.totalRows}</b> — المواقع الفريدة: <b>${res.totalSites}</b> — تم العمل عليها: <b>${res.workedCount}</b> — لم يتم العمل عليها: <b>${res.notWorkedCount}</b>${res.duplicates?` — تكرارات مدموجة: <b>${res.duplicates}</b>`:''}.
+      </div>
+      ${res.headerRowIdx<0?'<div class="msg warn">لم يتم التعرف على صف العناوين تلقائياً؛ تمت القراءة من أول صف. إن كان الملف يحتوي صف عناوين، حدّده من «صف العناوين» أعلاه.</div>':''}
+      ${res.statusCol<0?'<div class="msg warn">لم يتم التعرف على عمود حالة العمل. سيُعتبر كل موقع في الملف غير منجز. حدّد عمود الحالة يدوياً إن كان موجوداً في الملف.</div>':''}
+      ${res.duplicates?'<div class="msg info">تم دمج أسماء المواقع المكررة. إذا وُجد للموقع صف منجز وصف غير منجز، يبقى ضمن المواقع المتبقية.</div>':''}
+      ${statusChips?`<div style="margin:8px 0;"><div class="flabel">قيم عمود الحالة المكتشفة:</div>${statusChips}</div>`:''}
+      ${sample.length?`
+        <div class="flabel" style="margin-top:10px;">أول ${sample.length} موقع غير منجز (من أصل ${res.notWorkedCount}):</div>
+        <div class="tablewrap" style="max-height:260px;"><table class="data"><thead><tr><th>#</th><th>الموقع</th><th>حالة العمل</th></tr></thead><tbody>
+          ${sample.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.site)}</td><td>${esc(x.status||'—')}</td></tr>`).join('')}
+        </tbody></table></div>
+      `:`<div class="msg warn">لا توجد مواقع غير منجزة في هذا الشيت وفقاً للأعمدة المحددة.</div>`}
+      <div class="btnrow">
+        <button class="primary" id="swSave" type="button">✔ حفظ القائمة واستبدال السابق</button>
+        <button class="secondary" id="swCancel" type="button">إلغاء</button>
+      </div>
+    </div>
+  `;
+
+  const sheetSel = document.getElementById('swSheet');
+  if(sheetSel) sheetSel.addEventListener('change', ()=>{ pv.sheetIndex = Number(sheetSel.value)||0; renderSiteWorkPreview(); });
+  const headerSel = document.getElementById('swHeaderRow');
+  if(headerSel) headerSel.addEventListener('change', ()=>siteWorkReanalyze(undefined, undefined, Number(headerSel.value)));
+  const siteSel = document.getElementById('swSiteCol');
+  if(siteSel) siteSel.addEventListener('change', ()=>siteWorkReanalyze(Number(siteSel.value), undefined));
+  const statusSel = document.getElementById('swStatusCol');
+  if(statusSel) statusSel.addEventListener('change', ()=>siteWorkReanalyze(undefined, Number(statusSel.value)));
+  const saveBtn = document.getElementById('swSave');
+  if(saveBtn) saveBtn.addEventListener('click', siteWorkSavePreview);
+  const cancelBtn = document.getElementById('swCancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', ()=>{ SITE_WORK.preview=null; renderSiteWorkPreview(); });
+}
+
+async function siteWorkParseSelectedFile(){
+  const inp = document.getElementById('siteWorkFile');
+  const msg = document.getElementById('siteWorkMsg');
+  const f = inp && inp.files && inp.files[0];
+  if(!f){
+    if(msg) msg.innerHTML = '<div class="msg warn">اختر ملف Excel أولاً.</div>';
+    return;
+  }
+  if(msg) msg.innerHTML = '<div class="msg info">جارٍ فحص الملف وقراءة الشيتات...</div>';
+  const box = document.getElementById('siteWorkPreviewBox');
+  if(box) box.innerHTML = '';
+  try{
+    const wb = await readWorkbook(f);
+    const sheets = [];
+    (wb.SheetNames||[]).forEach(name=>{
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:null, raw:true});
+      const result = siteWorkAnalyze(aoa);
+      sheets.push({name, aoa, result});
+    });
+    if(!sheets.length) throw new Error('الملف لا يحتوي على أي شيت.');
+    let idx = 0, best = -1;
+    sheets.forEach((s,i)=>{
+      const sc = s.result.totalSites*10 + (s.result.statusCol>=0?1000:0);
+      if(sc>best){ best=sc; idx=i; }
+    });
+    SITE_WORK.preview = {fileName:f.name, sheets, sheetIndex:idx};
+    if(msg) msg.innerHTML = '';
+    renderSiteWorkPreview();
+  }catch(e){
+    SITE_WORK.preview = null;
+    if(msg) msg.innerHTML = `<div class="msg bad">تعذّر قراءة الملف: ${esc(e && e.message ? e.message : 'ملف غير صالح')}</div>`;
+  }
+}
+
+async function siteWorkSavePreview(){
+  const pv = SITE_WORK.preview;
+  if(!pv) return;
+  const sh = pv.sheets[pv.sheetIndex];
+  if(!sh) return;
+  const res = sh.result;
+  const sites = (res.notWorked||[]).map(x=>({key:x.key, site:x.site, status:x.status||'', known:!!x.known}));
+  STATE.siteWorkStatus = {
+    fileName: pv.fileName,
+    uploadedAt: new Date().toISOString(),
+    sheetName: sh.name,
+    totals: {
+      totalRows: res.totalRows, totalSites: res.totalSites,
+      workedCount: res.workedCount, notWorkedCount: res.notWorkedCount,
+      duplicates: res.duplicates
+    },
+    sites
+  };
+  const btn = document.getElementById('swSave');
+  if(btn){ btn.disabled = true; btn.textContent = 'جارٍ الحفظ...'; }
+  const r = await saveState(['siteWorkStatus']);
+  if(r && r.denied) return;
+  if(r && r.ok){
+    SITE_WORK.preview = null;
+    SITE_WORK.selectedKey = null;
+    SITE_WORK.q = '';
+    renderSiteWorkSection();
+    const msg = document.getElementById('siteWorkMsg');
+    if(msg) msg.innerHTML = `<div class="msg ok">تم حفظ قائمة المواقع المتبقية (${sites.length} موقع)${r.remote?' ومزامنتها مع قاعدة البيانات':' (محلياً — تعذّر تأكيد المزامنة)'}.</div>`;
+  } else {
+    if(btn){ btn.disabled = false; btn.textContent = '✔ حفظ القائمة واستبدال السابق'; }
+    const msg = document.getElementById('siteWorkMsg');
+    if(msg) msg.innerHTML = '<div class="msg bad">تعذّر حفظ القائمة. تحقق من الاتصال ثم أعد المحاولة.</div>';
+  }
+}
+
+function siteWorkFilteredSites(){
+  const st = siteWorkState();
+  const q = siteWorkNorm(SITE_WORK.q);
+  const list = (st.sites||[]).slice().sort((a,b)=>String(a.site).localeCompare(String(b.site),'ar'));
+  if(!q) return list;
+  return list.filter(x=> siteWorkNorm(x.site).includes(q) || siteWorkNorm(x.status||'').includes(q));
+}
+function renderSiteWorkList(){
+  const box = document.getElementById('siteWorkListBox');
+  if(!box) return;
+  const list = siteWorkFilteredSites();
+  const max = 500;
+  if(!list.length){
+    box.innerHTML = `<div class="msg info">${SITE_WORK.q?'لا توجد مواقع مطابقة للبحث.':'لا توجد مواقع متبقية.'}</div>`;
+    return;
+  }
+  const shown = list.slice(0,max);
+  box.innerHTML = `
+    <div class="desc">عرض ${shown.length} من ${list.length} موقع${SITE_WORK.q?' (نتائج البحث)':''}${list.length>max?' — استخدم البحث لتضييق النتائج':''}.</div>
+    <div class="tablewrap" style="max-height:55vh;"><table class="data">
+      <thead><tr><th>#</th><th>الموقع</th><th>حالة العمل في الملف</th><th>ملف SID</th><th>إجراء</th></tr></thead>
+      <tbody>
+        ${shown.map((x,i)=>{
+          const cands = siteWorkImportCandidates(x.site);
+          const sidPill = cands.length===1
+            ? '<span class="pill ok">موجود</span>'
+            : (cands.length>1 ? `<span class="pill warn">متعدد (${cands.length})</span>` : '<span class="pill warn">لا يوجد</span>');
+          const sel = SITE_WORK.selectedKey===x.key;
+          return `<tr style="${sel?'background:rgba(37,99,235,.10);':''}">
+            <td>${i+1}</td>
+            <td>${esc(x.site)}</td>
+            <td>${esc(x.status||'—')}</td>
+            <td>${sidPill}</td>
+            <td><button class="secondary" type="button" data-swsite="${esc(x.key)}" style="padding:4px 12px;font-size:12px;">${sel?'✔ محدد':'عرض المواد'}</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+  `;
+  box.querySelectorAll('[data-swsite]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      SITE_WORK.selectedKey = b.getAttribute('data-swsite');
+      renderSiteWorkList();
+      renderSiteWorkDetail();
+    });
+  });
+}
+function renderSiteWorkDetail(){
+  const box = document.getElementById('siteWorkDetailBox');
+  if(!box) return;
+  if(!SITE_WORK.selectedKey){ box.innerHTML=''; return; }
+  const st = siteWorkState();
+  const site = (st.sites||[]).find(x=>x.key===SITE_WORK.selectedKey);
+  if(!site){ box.innerHTML=''; return; }
+  const closeBtn = `<div class="btnrow"><button class="secondary" type="button" data-swdclose>إغلاق</button></div>`;
+  const imp = siteWorkFindImport(site.site);
+  if(!imp){
+    const cands = siteWorkImportCandidates(site.site);
+    const warn = cands.length>1
+      ? `يوجد ${cands.length} ملف SID بأسماء قريبة (${cands.map(x=>esc(x.site)).join(' / ')}) — لم تُعرض المواد لتفادي الخلط بين المواقع. وحّد اسم الموقع في ملف SID أو في ملف المواقع ثم أعد المحاولة.`
+      : 'لا يوجد ملف SID مستورد لهذا الموقع في النظام، لذلك لا توجد مواد أو كميات لعرضها من بيانات النظام. ارفع ملف SID الخاص به من صفحة «مواد 4G مستلمة» أولاً.';
+    box.innerHTML = `
+      <div class="panel" style="background:#fbfaf6;border:1px solid #e3ded3;">
+        <h3 style="margin-bottom:6px;">مواد الموقع: ${esc(site.site)}</h3>
+        <div class="msg warn">${warn}</div>
+        ${closeBtn}
+      </div>`;
+  } else {
+    const rows = sidrRowsWithStatus(imp.rows || []);
+    const totReq = rows.reduce((s,r)=>s+(Number(r.requested)||0),0);
+    const totRec = rows.reduce((s,r)=>s+(Number(r.received)||0),0);
+    const totShort = rows.reduce((s,r)=>s+(Number(r.shortage)||0),0);
+    box.innerHTML = `
+      <div class="panel" style="background:#fbfaf6;border:1px solid #e3ded3;">
+        <h3 style="margin-bottom:6px;">مواد الموقع: ${esc(site.site)}</h3>
+        <div class="desc">
+          المصدر: <b>${esc(imp.fileName||'—')}</b>${imp.sheetName?` — الشيت: <b>${esc(imp.sheetName)}</b>`:''}
+          ${imp.importedAt?` — تاريخ الاستيراد: <b>${esc(String(imp.importedAt).slice(0,10))}</b>`:''}
+          — عدد الأصناف: <b>${rows.length}</b>
+          — إجمالي المطلوب: <b>${totReq}</b> — إجمالي المستلم (EXIST IN DWH): <b>${totRec}</b> — النقص: <b>${totShort}</b>.
+        </div>
+        <div class="tablewrap" style="max-height:55vh;"><table class="data">
+          <thead><tr><th>كود المادة</th><th>Product description</th><th>Description</th><th>المطلوب</th><th>المستلم (EXIST IN DWH)</th><th>النقص</th><th>الحالة</th></tr></thead>
+          <tbody>
+            ${rows.map(r=>{
+              const cls = r.status==='ناقص'?'tag-bad':(r.status==='زيادة'?'tag-warn':'');
+              return `<tr>
+                <td class="code-cell">${esc(r.productCode)}</td>
+                <td>${esc(r.productDescription)}</td>
+                <td>${esc(r.description)}</td>
+                <td>${r.requested}</td>
+                <td>${r.received}</td>
+                <td class="${cls}">${r.shortage}</td>
+                <td class="${cls}">${esc(r.status)}</td>
+              </tr>`;
+            }).join('') || '<tr><td colspan="7" class="empty">لا توجد أصناف في ملف SID لهذا الموقع.</td></tr>'}
+          </tbody>
+        </table></div>
+        ${closeBtn}
+      </div>`;
+  }
+  box.querySelectorAll('[data-swdclose]').forEach(b=>b.addEventListener('click', ()=>{
+    SITE_WORK.selectedKey = null;
+    renderSiteWorkList();
+    renderSiteWorkDetail();
+  }));
 }
 
 /* ---- تبويب: مواد ارجاع ---- */
