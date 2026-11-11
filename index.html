@@ -6528,10 +6528,10 @@ function sidrOpenReviewModal(){
       cb.textContent = '⏳ جارِ المعالجة…';
       let res;
       try{ res = await sidrCommitBatch(); }catch(e){ res = {ok:false, msg:'خطأ غير متوقع: '+e.message}; }
-      if(!res.ok){
+      if(!res || !res.ok){
         ['btnSidrModalConfirm','btnSidrModalDetails','btnSidrModalCancel'].forEach(id=>{ const b = document.getElementById(id); if(b) b.disabled = false; });
         cb.textContent = `✅ تأكيد المعالجة (${stt.importable.length})`;
-        showMsg('sidrModalMsg','bad', res.msg); return;
+        showMsg('sidrModalMsg','bad', (res && res.msg) || 'تعذّر إكمال المعالجة — لم يُحفظ أي شيء.'); return;
       }
       body.innerHTML = `
         <div class="msg ${res.savedRemote?'ok':'warn'}"><b>${res.savedRemote?'اكتملت المعالجة بنجاح.':'اكتملت المعالجة محلياً فقط.'}</b>
@@ -12233,9 +12233,6 @@ function dcExp(){
   (STATE.dcCables.mappings['16']||[]).forEach(x=>s3.push(['DC 16',x]));
   sh.push({name:'أكواد مرتبطة',ws:aoaSheet(s3,[12,18])});
   downloadWorkbook(sh,`كوابل_DC_${todayStr()}.xlsx`);
-}
-async function sidrCommitBatch(){
-  // keep existing logic by calling original? easier to just append behavior
 }
 </script>
 </body>
