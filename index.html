@@ -4638,9 +4638,20 @@ function taglogRenderRowsHtml(rows, emptyMsg){
 /* فلترة (بحث حي في كل الأعمدة) وفرز (بالضغط على عنوان أي عمود) لجدول كل التاجات المسجَّلة —
    الترتيب الافتراضي (بدون فرز مُختار) هو نفس ترتيب السابق: الأحدث إدخالاً أولاً. */
 const TAGLOG_SORT_FIELDS = {tag:'tag', material:'materialName', type:'type', site:'siteName', date:'installDate'};
+// أرشفة تلقائية للتاجات الأقدم من 14 يوماً، دون نقل أو حذف أو تعديل السجل الأصلي.
+let TAGLOG_ARCHIVE_VIEW = false;
+function taglogIsArchivedRow(r){
+  const ts = Number(r && r.createdAt) || (r && r.installDate ? Date.parse(r.installDate+'T23:59:59') : 0);
+  return !ts || ts < (Date.now() - 14*24*60*60*1000);
+}
+function taglogArchiveCounts(){
+  let active=0, archived=0;
+  STATE.tagLog.forEach(r=>taglogIsArchivedRow(r)?archived++:active++);
+  return {active, archived};
+}
 function taglogFilteredSortedRows(){
   const q = trim(TAGLOG_FILTER_QUERY).toLowerCase();
-  let rows = STATE.tagLog.slice();
+  let rows = STATE.tagLog.filter(r=>taglogIsArchivedRow(r)===TAGLOG_ARCHIVE_VIEW);
   if(q){
     rows = rows.filter(r=>
       trim(r.tag).toLowerCase().includes(q) ||
@@ -4660,7 +4671,7 @@ function taglogFilteredSortedRows(){
       return 0;
     });
   } else {
-    rows.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); // الأحدث إدخالاً أولاً (نفس الترتيب السابق)
+    rows.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   }
   return rows;
 }
@@ -4756,14 +4767,15 @@ function renderTagLogRecordsPanel(onlyResults){
   const panel = document.getElementById('tlRecordsPanel');
   if(!panel) return;
   const filteredRows = taglogFilteredSortedRows();
-  const total = STATE.tagLog.length;
+  const counts = taglogArchiveCounts();
+  const total = TAGLOG_ARCHIVE_VIEW ? counts.archived : counts.active;
   const sortArrow = col => TAGLOG_SORT_COL===col ? (TAGLOG_SORT_DIR==='asc' ? ' ▲' : ' ▼') : '';
   const emptyMsg = (total && !filteredRows.length) ? 'لا توجد نتائج مطابقة للبحث' : undefined;
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / TAGLOG_RECORDS_PAGE_SIZE));
   TAGLOG_RECORDS_PAGE = Math.max(1, Math.min(TAGLOG_RECORDS_PAGE, pageCount));
   const start = (TAGLOG_RECORDS_PAGE - 1) * TAGLOG_RECORDS_PAGE_SIZE;
   const rows = filteredRows.slice(start, start + TAGLOG_RECORDS_PAGE_SIZE);
-  const headHtml = `📋 كل التاجات المسجَّلة (${filteredRows.length}${filteredRows.length!==total?` من ${total}`:''})`;
+  const headHtml = `${TAGLOG_ARCHIVE_VIEW?'🗄️ أرشيف التاجات (أقدم من 14 يوم)':'📋 التاجات النشطة (آخر 14 يوم)'} — ${filteredRows.length}${filteredRows.length!==total?` من ${total}`:''} سجل`;
   const pagerHtml = filteredRows.length > TAGLOG_RECORDS_PAGE_SIZE
     ? `<div class="btnrow" style="justify-content:center;align-items:center;margin-top:10px;">
         <button type="button" class="secondary" id="tlPrevPage" ${TAGLOG_RECORDS_PAGE<=1?'disabled':''}>◀ السابق</button>
@@ -4803,7 +4815,10 @@ function renderTagLogRecordsPanel(onlyResults){
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 10px;">
       <h2 style="margin:0;" id="tlRecordsHead">${headHtml}</h2>
-      <button type="button" class="secondary" id="btnTlExportAll" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;" title="تنزيل ملف Excel بكل التاجات المسجَّلة (وليس نتائج البحث الحالية فقط)">📥 تصدير كل التاجات إلى Excel</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="secondary" id="btnTlArchiveToggle" style="padding:8px 12px;font-size:12px;">${TAGLOG_ARCHIVE_VIEW?'↩️ التاجات النشطة':'🗄️ الأرشيف ('+counts.archived+')'}</button>
+        <button type="button" class="secondary" id="btnTlExportAll" style="padding:8px 16px;font-size:12.5px;white-space:nowrap;" title="تنزيل ملف Excel بكل التاجات المسجَّلة، النشطة والمؤرشفة">📥 تصدير كل التاجات إلى Excel</button>
+      </div>
     </div>
     <input type="text" id="tlRecordsFilter" placeholder="بحث في كل الأعمدة: التاج، اسم القطعة، النوع، اسم الموقع، التاريخ..." value="${esc(TAGLOG_FILTER_QUERY)}" style="margin-bottom:10px;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div id="tlRecordsTableBox">${tableHtml}</div>
@@ -4816,6 +4831,11 @@ function renderTagLogRecordsPanel(onlyResults){
     debouncedRecordsFilterRender();
   });
   document.getElementById('btnTlExportAll').addEventListener('click', taglogExportAllToExcel);
+  document.getElementById('btnTlArchiveToggle').addEventListener('click', ()=>{
+    TAGLOG_ARCHIVE_VIEW = !TAGLOG_ARCHIVE_VIEW;
+    TAGLOG_RECORDS_PAGE = 1;
+    renderTagLogRecordsPanel();
+  });
   wireResults();
 }
 /* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
