@@ -4457,6 +4457,11 @@ let TAGLOG_SITE = (function(){ try{ return localStorage.getItem('wms_taglog_last
 let TAGLOG_TYPE = 'Installed'; // خيار Installed/Dismantled حُذف من واجهة الرصد اليدوي بناءً على طلب المستخدم (الصفحة تُستخدم لرصد المواد المركبة فقط)؛ القيمة ثابتة الآن، والحقل type نفسه يبقى محفوظاً بنفس الصيغة القديمة لأي سجل تاريخي أو مستورد عبر Excel
 let TAGLOG_SEARCH_RESULTS = [];
 let TAGLOG_HL_INDEX = -1;
+// Performance caches for tag capture search; rebuilt when the capture tab is initialized or materials are added.
+let TAGLOG_MATERIAL_CACHE = null;
+let TAGLOG_SITE_CACHE = null;
+const TAGLOG_RECORDS_PAGE_SIZE = 100;
+let TAGLOG_RECORDS_PAGE = 1;
 let TAGLOG_SELECTED_MATERIAL = null;
 let TAGLOG_FLASH_MSG = null;
 let TAGLOG_REPORT_SITE = '';
@@ -4688,6 +4693,7 @@ function taglogExportAllToExcel(){
 function taglogSetSort(col){
   if(TAGLOG_SORT_COL===col){ TAGLOG_SORT_DIR = TAGLOG_SORT_DIR==='asc' ? 'desc' : 'asc'; }
   else { TAGLOG_SORT_COL = col; TAGLOG_SORT_DIR = 'asc'; }
+  TAGLOG_RECORDS_PAGE = 1;
   renderTagLogRecordsPanel();
 }
 function taglogWireRowActions(container, refreshInPlace, reopenAfterEdit){
@@ -4749,11 +4755,22 @@ function taglogOpenEditModal(id, onChanged){
 function renderTagLogRecordsPanel(onlyResults){
   const panel = document.getElementById('tlRecordsPanel');
   if(!panel) return;
-  const rows = taglogFilteredSortedRows();
+  const filteredRows = taglogFilteredSortedRows();
   const total = STATE.tagLog.length;
   const sortArrow = col => TAGLOG_SORT_COL===col ? (TAGLOG_SORT_DIR==='asc' ? ' ▲' : ' ▼') : '';
-  const emptyMsg = (total && !rows.length) ? 'لا توجد نتائج مطابقة للبحث' : undefined;
-  const headHtml = `📋 كل التاجات المسجَّلة (${rows.length}${rows.length!==total?` من ${total}`:''})`;
+  const emptyMsg = (total && !filteredRows.length) ? 'لا توجد نتائج مطابقة للبحث' : undefined;
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / TAGLOG_RECORDS_PAGE_SIZE));
+  TAGLOG_RECORDS_PAGE = Math.max(1, Math.min(TAGLOG_RECORDS_PAGE, pageCount));
+  const start = (TAGLOG_RECORDS_PAGE - 1) * TAGLOG_RECORDS_PAGE_SIZE;
+  const rows = filteredRows.slice(start, start + TAGLOG_RECORDS_PAGE_SIZE);
+  const headHtml = `📋 كل التاجات المسجَّلة (${filteredRows.length}${filteredRows.length!==total?` من ${total}`:''})`;
+  const pagerHtml = filteredRows.length > TAGLOG_RECORDS_PAGE_SIZE
+    ? `<div class="btnrow" style="justify-content:center;align-items:center;margin-top:10px;">
+        <button type="button" class="secondary" id="tlPrevPage" ${TAGLOG_RECORDS_PAGE<=1?'disabled':''}>◀ السابق</button>
+        <span style="padding:0 8px;font-size:13px;">صفحة ${TAGLOG_RECORDS_PAGE} من ${pageCount} (عرض ${rows.length} من ${filteredRows.length})</span>
+        <button type="button" class="secondary" id="tlNextPage" ${TAGLOG_RECORDS_PAGE>=pageCount?'disabled':''}>التالي ▶</button>
+      </div>`
+    : '';
   const tableHtml = `<div class="tablewrap"><table class="data" id="tlRecentTable">
       <thead><tr>
         <th data-sort="tag" style="cursor:pointer;user-select:none;">التاج${sortArrow('tag')}</th>
@@ -4764,12 +4781,16 @@ function renderTagLogRecordsPanel(onlyResults){
         <th>إجراءات</th>
       </tr></thead>
       <tbody>${taglogRenderRowsHtml(rows, emptyMsg)}</tbody>
-    </table></div>`;
+    </table></div>${pagerHtml}`;
   const wireResults = ()=>{
     panel.querySelectorAll('[data-sort]').forEach(th=>{
       th.addEventListener('click', ()=>taglogSetSort(th.dataset.sort));
     });
     taglogWireRowActions(document.getElementById('tlRecentTable'), renderTagLogRecordsPanel);
+    const prev = panel.querySelector('#tlPrevPage');
+    const next = panel.querySelector('#tlNextPage');
+    if(prev) prev.addEventListener('click', ()=>{ TAGLOG_RECORDS_PAGE=Math.max(1,TAGLOG_RECORDS_PAGE-1); renderTagLogRecordsPanel(true); });
+    if(next) next.addEventListener('click', ()=>{ TAGLOG_RECORDS_PAGE=Math.min(pageCount,TAGLOG_RECORDS_PAGE+1); renderTagLogRecordsPanel(true); });
   };
   const keepInp = document.getElementById('tlRecordsFilter');
   const headEl = document.getElementById('tlRecordsHead'), boxEl = document.getElementById('tlRecordsTableBox');
@@ -4791,31 +4812,46 @@ function renderTagLogRecordsPanel(onlyResults){
   const debouncedRecordsFilterRender = debounce(()=>{ renderTagLogRecordsPanel(true); });
   filterInp.addEventListener('input', ()=>{
     TAGLOG_FILTER_QUERY = filterInp.value;
+    TAGLOG_RECORDS_PAGE = 1;
     debouncedRecordsFilterRender();
   });
   document.getElementById('btnTlExportAll').addEventListener('click', taglogExportAllToExcel);
   wireResults();
 }
-
 /* ---- بحث/اختيار المادة (من مواد 4G المتوفرة + مواد الإرجاع/Dismantled معاً، بلا تكرار) ----
    المصدر مباشرة من بيانات النظام الحالية (STATE.stock + STATE.dismantled) دون أي قائمة ثابتة
    منفصلة، ودون أي تعديل على منطق المخزون أو الكميات. نفس منطق qmRunSearch/qmRenderDropdown أعلاه. ---- */
-function taglogAllMaterialNames(){
-  const seen = new Map(); // مفتاح: الاسم بحروف صغيرة (لمنع التكرار) → القيمة: الاسم كما ظهر أول مرة
+function taglogInvalidateMaterialCache(){
+  TAGLOG_MATERIAL_CACHE = null;
+}
+function taglogMaterialIndex(){
+  if(TAGLOG_MATERIAL_CACHE) return TAGLOG_MATERIAL_CACHE;
+  const seen = new Map();
   Object.values(STATE.stock).forEach(s=>{
     const name = trim(s.description||'');
-    if(name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    const lower = name.toLowerCase();
+    if(name && !seen.has(lower)) seen.set(lower, {name, lower});
   });
   STATE.dismantled.forEach(d=>{
     const name = trim(d.material||'');
-    if(name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    const lower = name.toLowerCase();
+    if(name && !seen.has(lower)) seen.set(lower, {name, lower});
   });
-  return Array.from(seen.values());
+  const entries = Array.from(seen.values());
+  TAGLOG_MATERIAL_CACHE = {
+    entries,
+    names: entries.map(e=>e.name),
+    exact: new Set(entries.map(e=>e.lower))
+  };
+  return TAGLOG_MATERIAL_CACHE;
+}
+function taglogAllMaterialNames(){
+  return taglogMaterialIndex().names;
 }
 function taglogSearchAllMaterials(q){
   const ql = trim(q).toLowerCase();
   if(!ql) return [];
-  return taglogAllMaterialNames().filter(n=>n.toLowerCase().includes(ql)).map(n=>({description:n}));
+  return taglogMaterialIndex().entries.filter(e=>e.lower.includes(ql)).slice(0,8).map(e=>({description:e.name}));
 }
 /* ---- التحقق من أسماء المواقع المعتمدة (STATE.tagApprovedSites) — قائمة يرفعها الأدمن مرة عبر
    Excel وتبقى محفوظة (نفس آلية wms_state)؛ المطابقة تتجاهل المسافات الزائدة واختلاف حالة الأحرف
@@ -4825,18 +4861,20 @@ function taglogNormSite(s){ return trim(s).replace(/\s+/g,' ').toLowerCase(); }
 /* يُعيد قائمة المواقع المعتمدة دائماً بصيغة موحّدة {name, address} — عنصر نصي قديم محفوظ من قبل إضافة
    خانة العنوان يُطبَّع تلقائياً إلى {name: النص, address:''} حتى لا تنكسر القوائم المحفوظة سابقاً. */
 function taglogApprovedSitesList(){
+  if(TAGLOG_SITE_CACHE) return TAGLOG_SITE_CACHE;
   const raw = (STATE.tagApprovedSites && Array.isArray(STATE.tagApprovedSites.list)) ? STATE.tagApprovedSites.list : [];
-  return raw.map(e=> typeof e==='string'
+  TAGLOG_SITE_CACHE = raw.map(e=> typeof e==='string'
     ? {name: trim(e), address: ''}
     : {name: trim(e && e.name || ''), address: trim(e && e.address || '')}
-  ).filter(e=>e.name);
+  ).filter(e=>e.name).map(e=>({...e, normalized:taglogNormSite(e.name)}));
+  return TAGLOG_SITE_CACHE;
 }
 function taglogIsSiteApproved(site){
   const list = taglogApprovedSitesList();
   if(!list.length) return true;
   const n = taglogNormSite(site);
   if(!n) return false;
-  return list.some(s=>taglogNormSite(s.name)===n);
+  return list.some(s=>s.normalized===n);
 }
 /* يعيد بيانات الموقع المعتمد المطابق (الاسم والعنوان) أو null إن لم يكن معتمداً — تُستخدم لعرض العنوان
    مباشرةً أسفل خانة اختيار الموقع فور مطابقة الاسم. */
@@ -4844,13 +4882,13 @@ function taglogFindApprovedSite(site){
   const list = taglogApprovedSitesList();
   const n = taglogNormSite(site);
   if(!n) return null;
-  return list.find(s=>taglogNormSite(s.name)===n) || null;
+  return list.find(s=>s.normalized===n) || null;
 }
 function taglogSiteSuggestions(q){
   const list = taglogApprovedSitesList();
   const ql = taglogNormSite(q);
   if(!ql) return list.slice(0,30);
-  return list.filter(s=>taglogNormSite(s.name).includes(ql)).slice(0,30);
+  return list.filter(s=>s.normalized.includes(ql)).slice(0,30);
 }
 /* يتحقق إن كان نص رأس عمود مطابقاً لأحد الأنماط المتوقعة لعمود Site Name أو Site Address (إنجليزي أو
    عربي، بغض النظر عن حالة الأحرف أو المسافات الزائدة) — لاكتشاف ترتيب الأعمدة تلقائياً من صف العناوين. */
@@ -5038,6 +5076,7 @@ async function taglogAddNewMaterial(name, skipSave){
   if(existing) return {ok:true, name: existing, created:false};
   const code = 'MANUAL-'+nextId();
   STATE.stock[code] = {code, description: clean, total_quantity:0, issued_quantity:0, tags:[], first_seen: todayStr()};
+  taglogInvalidateMaterialCache();
   if(!skipSave) await saveState(['stock']);
   return {ok:true, name: clean, created:true};
 }
@@ -5052,7 +5091,7 @@ function taglogRenderDropdown(){
   if(!dd || !inp) return;
   const q = trim(inp.value);
   if(!q){ dd.innerHTML=''; return; }
-  const exactExists = taglogAllMaterialNames().some(n=>n.toLowerCase()===q.toLowerCase());
+  const exactExists = taglogMaterialIndex().exact.has(q.toLowerCase());
   const addNewHtml = exactExists ? '' : `<div class="qm-dropdown-item" data-addnew="1" style="color:var(--accent);font-weight:600;">➕ إضافة "${esc(q)}" كمادة جديدة</div>`;
   if(!TAGLOG_SEARCH_RESULTS.length){
     dd.innerHTML = `<div class="qm-dropdown"><div class="qm-dropdown-empty">لا توجد مادة مطابقة</div>${addNewHtml}</div>`;
@@ -5605,6 +5644,8 @@ function renderTagLogImportBody(bodyEl){
 /* ---- الواجهة ---- */
 function renderTagCaptureTab(el){
   if(!el) return;
+  TAGLOG_MATERIAL_CACHE = null;
+  TAGLOG_SITE_CACHE = null;
   const scSlots = taglogShortcutsSlots();
   el.innerHTML = `
     <div class="panel">
