@@ -2025,7 +2025,8 @@ function sidrFullReportAoa(){
 }
 function sidrShortageOnlyAoa(site){
   const header = ['الموقع','Product code','Product description','Description','الكمية المطلوبة','الكمية المستلمة','كمية النقص'];
-  let rows = sidrAllRowsFlat().filter(r=>r.status==='ناقص');
+  let rows = sidrAllRowsFlat();
+  if(SIDR_SUMMARY_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
   if(site) rows = rows.filter(r=>r.site===site);
   return [header, ...rows.map(r=>[r.site, r.productCode, r.productDescription, r.description, r.requested, r.received, r.shortage])];
 }
@@ -7901,6 +7902,7 @@ function renderSidrSoloTable(){
 let SIDR_SUMMARY_SEARCH = '';
 let SIDR_SUMMARY_SITE_FILTER = 'all';
 let SIDR_SUMMARY_GROUP_BY_MATERIAL = false;
+let SIDR_SUMMARY_SHORTAGE_ONLY = false;
 
 function renderSidrSummaryView(el){
   const g = sidrGlobalSummary();
@@ -7927,6 +7929,9 @@ function renderSidrSummaryView(el){
       <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;">
         <input type="checkbox" id="sidrGroupByMaterial" ${SIDR_SUMMARY_GROUP_BY_MATERIAL?'checked':''}> تجميع حسب المادة عبر كل المواقع (مع الاحتفاظ بتفاصيل كل موقع)
       </label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;">
+        <input type="checkbox" id="sidrSummaryShortageOnly" ${SIDR_SUMMARY_SHORTAGE_ONLY?'checked':''}> إظهار النواقص فقط (إخفاء المواقع/المواد المكتملة)
+      </label>
       <div class="btnrow" style="margin-top:10px;">
         <button class="secondary" id="btnSidrExportFull">📥 تقرير كامل (كل المواقع والمواد)</button>
         <button class="secondary" id="btnSidrExportAllShort">📥 تقرير النواقص لكل المواقع</button>
@@ -7948,6 +7953,7 @@ function renderSidrSummaryView(el){
   searchInp.addEventListener('input', ()=>{ SIDR_SUMMARY_SEARCH = searchInp.value; debouncedSummary(); });
   document.getElementById('sidrSummarySiteFilter').addEventListener('change', (e)=>{ SIDR_SUMMARY_SITE_FILTER = e.target.value; renderSidrSummaryTable(); });
   document.getElementById('sidrGroupByMaterial').addEventListener('change', (e)=>{ SIDR_SUMMARY_GROUP_BY_MATERIAL = e.target.checked; renderSidrSummaryTable(); });
+  document.getElementById('sidrSummaryShortageOnly').addEventListener('change', (e)=>{ SIDR_SUMMARY_SHORTAGE_ONLY = e.target.checked; renderSidrSummaryTable(); });
   document.getElementById('btnSidrExportFull').addEventListener('click', sidrDownloadFullReport);
   document.getElementById('btnSidrExportAllShort').addEventListener('click', ()=> sidrDownloadAllShortages());
   document.getElementById('btnSidrExportByMaterial').addEventListener('click', sidrDownloadMaterialSummary);
