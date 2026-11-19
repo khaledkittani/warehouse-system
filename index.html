@@ -5071,17 +5071,67 @@ function taglogRenderDropdown(){
     taglogSelectMaterial(res.name);
   });
 }
+/* ---- تحديث موضعي للمادة المختارة (أداء اختيار الاختصارات) ----
+   نفس الـ markup والـ IDs المستخدمة في renderTagCaptureTab بالضبط، لكنها تُبنى في دالة واحدة
+   ليُحدَّث عند اختيار مادة جزء "المادة الحالية + خانة التاج" فقط. بدل إعادة بناء التبويب كاملاً
+   (الذي كان يعيد فرز/رسم كل التاجات المسجَّلة وإعادة ربط كل الأحداث عند كل ضغطة اختصار). */
+function taglogSelectedAreaHtml(){
+  if(!TAGLOG_SELECTED_MATERIAL){
+    return `<div class="msg info tl-block">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`;
+  }
+  return `
+          <div class="tl-block tl-material-current">
+            <div class="lbl">📦 المادة الحالية</div>
+            <div class="name">${esc(TAGLOG_SELECTED_MATERIAL)}</div>
+            <button type="button" id="btnTlChangeMaterial" class="records-btn" style="font-size:11px;margin-top:8px;margin-inline-start:0;">✕ تغيير المادة</button>
+          </div>
+          <div class="tl-block">
+            <label class="flabel">🏷️ Tag</label>
+            <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter، أو استخدم الكاميرا" autocomplete="off">
+            <div class="btnrow">
+              <button class="primary" id="btnTlSave">✅ تسجيل</button>
+              <button type="button" class="qm-barcode-btn" id="btnTlBarcodeScan">📷 مسح بالكاميرا</button>
+            </div>
+            <div id="tlBarcodeArea"></div>
+          </div>`;
+}
+function taglogWireSelectedArea(){
+  const changeBtn = document.getElementById('btnTlChangeMaterial');
+  if(changeBtn) changeBtn.addEventListener('click', taglogChangeMaterial);
+  const tagInp = document.getElementById('tlTagInput');
+  if(tagInp){
+    bindEnterSubmit(['tlTagInput'], 'btnTlSave');
+    const saveBtn = document.getElementById('btnTlSave');
+    if(saveBtn) saveBtn.addEventListener('click', taglogHandleSave);
+    const scanBtn = document.getElementById('btnTlBarcodeScan');
+    if(scanBtn) scanBtn.addEventListener('click', taglogToggleBarcodeScanner);
+  }
+}
+/* يحدّث منطقة المادة المختارة وحدها؛ يرجع false إذا كانت الشاشة غير مبنية بعد (فيُستخدم الرسم الكامل كخطة بديلة). */
+function taglogUpdateSelectedArea(){
+  const area = document.getElementById('tlSelectedArea');
+  if(!area) return false;
+  area.innerHTML = taglogSelectedAreaHtml();
+  taglogWireSelectedArea();
+  return true;
+}
+/* متزامن بالكامل بلا await/debounce: آخر ضغطة اختصار هي التي تُحدَّد فوراً حتى مع ضغطات متلاحقة. */
 function taglogSelectMaterial(name){
   TAGLOG_SELECTED_MATERIAL = name;
   TAGLOG_SEARCH_RESULTS = [];
-  renderTagCaptureTab(document.getElementById('tabContent'));
+  TAGLOG_HL_INDEX = -1;
+  const dd = document.getElementById('tlMaterialDropdown'); if(dd) dd.innerHTML = '';
+  if(!taglogUpdateSelectedArea()) renderTagCaptureTab(document.getElementById('tabContent'));
   const tagInp = document.getElementById('tlTagInput');
   if(tagInp) tagInp.focus({preventScroll:true}); // preventScroll: كي لا يُحرّك اختيار المادة الصفحة ويُخفي الموقع/القائمة عن الشاشة
 }
 function taglogChangeMaterial(){
   taglogStopBarcodeScanner();
   TAGLOG_SELECTED_MATERIAL = null;
-  renderTagCaptureTab(document.getElementById('tabContent'));
+  TAGLOG_SEARCH_RESULTS = [];
+  TAGLOG_HL_INDEX = -1;
+  const dd = document.getElementById('tlMaterialDropdown'); if(dd) dd.innerHTML = '';
+  if(!taglogUpdateSelectedArea()) renderTagCaptureTab(document.getElementById('tabContent'));
   const s = document.getElementById('tlMaterialSearch');
   if(s){ s.value=''; s.focus({preventScroll:true}); }
 }
@@ -5602,22 +5652,7 @@ function renderTagCaptureTab(el){
           </div>
         </div>
 
-        ${TAGLOG_SELECTED_MATERIAL ? `
-          <div class="tl-block tl-material-current">
-            <div class="lbl">📦 المادة الحالية</div>
-            <div class="name">${esc(TAGLOG_SELECTED_MATERIAL)}</div>
-            <button type="button" id="btnTlChangeMaterial" class="records-btn" style="font-size:11px;margin-top:8px;margin-inline-start:0;">✕ تغيير المادة</button>
-          </div>
-          <div class="tl-block">
-            <label class="flabel">🏷️ Tag</label>
-            <input type="text" id="tlTagInput" class="tl-tag-input" placeholder="Scan التاج ثم Enter، أو استخدم الكاميرا" autocomplete="off">
-            <div class="btnrow">
-              <button class="primary" id="btnTlSave">✅ تسجيل</button>
-              <button type="button" class="qm-barcode-btn" id="btnTlBarcodeScan">📷 مسح بالكاميرا</button>
-            </div>
-            <div id="tlBarcodeArea"></div>
-          </div>
-        ` : `<div class="msg info tl-block">ابحث عن مادة أعلاه واخترها لتظهر خانة التاج (Enter يختار أول نتيجة).</div>`}
+        <div id="tlSelectedArea">${taglogSelectedAreaHtml()}</div>
       </div>
 
       <div class="panel tl-log" id="tlRecordsPanel"></div>
@@ -5673,15 +5708,10 @@ function renderTagCaptureTab(el){
   });
   searchInp.focus({preventScroll:true});
 
-  const changeBtn = document.getElementById('btnTlChangeMaterial');
-  if(changeBtn) changeBtn.addEventListener('click', taglogChangeMaterial);
-
-  const tagInp = document.getElementById('tlTagInput');
-  if(tagInp){
-    tagInp.focus({preventScroll:true}); // preventScroll: تسجيل تاج جديد لا يجب أن يُحرّك الصفحة ويُخفي الموقع/القائمة
-    bindEnterSubmit(['tlTagInput'], 'btnTlSave');
-    document.getElementById('btnTlSave').addEventListener('click', taglogHandleSave);
-    document.getElementById('btnTlBarcodeScan').addEventListener('click', taglogToggleBarcodeScanner);
+  taglogWireSelectedArea();
+  if(TAGLOG_SELECTED_MATERIAL){ // نفس الحالة النهائية للتركيز كما كانت قبل التعديل: خانة التاج هي النشطة
+    const tagInp = document.getElementById('tlTagInput');
+    if(tagInp) tagInp.focus({preventScroll:true});
   }
 
   document.getElementById('btnTlTemplate').addEventListener('click', openTagLogTemplateModal);
