@@ -1189,12 +1189,19 @@ async function fetchBackupHistory(limit){
   return await res.json();
 }
 async function fetchBackupById(id){
-  const res = await supabaseAuthedFetch(`${SUPABASE_URL}/rest/v1/wms_backups?select=*&id=eq.${id}`, {
-    headers: supabaseAuthHeaders()
-  });
+  const res = await supabaseAuthedFetch(SUPABASE_URL+'/rest/v1/wms_backups?select=*&id=eq.'+encodeURIComponent(String(id)), {headers:supabaseAuthHeaders()});
   if(!res.ok) throw new Error('تعذّر جلب النسخة');
-  const rows = await res.json();
-  return rows[0];
+  const rows = await res.json(); return rows[0];
+}
+async function deleteServerBackup(id){
+  const res = await supabaseAuthedFetch(SUPABASE_URL+'/rest/v1/wms_backups?id=eq.'+encodeURIComponent(String(id)), {method:'DELETE',headers:supabaseAuthHeaders({'Prefer':'return=minimal'})});
+  if(!res.ok){const detail=await res.text().catch(()=> '');throw new Error('تعذّر حذف النسخة (HTTP '+res.status+'): '+detail);}
+  return true;
+}
+async function deleteServerBackups(ids){
+  const uniqueIds=[...new Set((ids||[]).map(String).filter(Boolean))];
+  for(const id of uniqueIds) await deleteServerBackup(id);
+  return uniqueIds.length;
 }
 function downloadServerBackup(row){
   const dataObj = {};
@@ -9196,27 +9203,41 @@ function renderBackupTab(el){
   });
 }
 async function loadServerBackupHistory(){
-  const el = document.getElementById('serverBackupHistory');
-  if(!el) return;
+  const el=document.getElementById('serverBackupHistory'); if(!el) return;
   try{
-    const rows = await fetchBackupHistory(20);
-    el.innerHTML = `<table class="data">
-      <thead><tr><th>التاريخ والوقت</th><th>الحالة</th><th></th></tr></thead>
-      <tbody>${rows.map(r=>{
-        const d = new Date(r.created_at).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-        return `<tr><td>${d}</td><td>${r.status==='success'?'<span class="pill ok">ناجحة</span>':'<span class="pill bad">فشلت</span>'}</td>
-          <td><button class="secondary" data-dlbk="${r.id}" style="padding:5px 12px;font-size:11.5px;">تنزيل</button></td></tr>`;
-      }).join('') || '<tr><td colspan="3" class="empty">لا يوجد نسخ بعد — تأكد من تفعيل الجدولة (راجع تعليمات SQL)</td></tr>'}</tbody>
-    </table>`;
-    el.querySelectorAll('[data-dlbk]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        try{ const row = await fetchBackupById(btn.dataset.dlbk); downloadServerBackup(row); }
-        catch(e){ alert('تعذّر تنزيل هذه النسخة: '+e.message); }
-      });
+    const rows=await fetchBackupHistory(100);
+    const body=rows.map(r=>{
+      const d=new Date(r.created_at).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      return '<tr><td><input type="checkbox" class="server-backup-check" data-backup-id="'+esc(r.id)+'"></td><td>'+d+'</td><td>'+(r.status==='success'?'<span class="pill ok">ناجحة</span>':'<span class="pill bad">فشلت</span>')+'</td><td><button class="secondary" data-dlbk="'+esc(r.id)+'" style="padding:5px 12px;font-size:11.5px;">تنزيل</button></td></tr>';
+    }).join('');
+    el.innerHTML='<div class="btnrow" style="margin-bottom:10px;align-items:center;">'+
+      '<button class="secondary" id="btnBackupSelectAll" style="padding:7px 12px;font-size:12px;">تحديد الكل</button>'+
+      '<button class="secondary" id="btnBackupSelectNone" style="padding:7px 12px;font-size:12px;">إلغاء التحديد</button>'+
+      '<button class="danger" id="btnDeleteSelectedBackups" style="padding:7px 12px;font-size:12px;" disabled>حذف المحدد (0)</button>'+
+      '<button class="danger" id="btnDeleteAllBackups" style="padding:7px 12px;font-size:12px;">حذف جميع النسخ</button></div>'+
+      '<div class="desc" style="margin-bottom:8px;">حدد النسخ التي تريد حذفها واترك النسخة التي تريد الاحتفاظ بها دون تحديد. يمكنك تنزيل أي نسخة قبل حذفها.</div>'+
+      '<table class="data"><thead><tr><th style="width:42px;"><input type="checkbox" id="chkAllServerBackups"></th><th>التاريخ والوقت</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>'+(body||'<tr><td colspan="4" class="empty">لا توجد نسخ احتياطية.</td></tr>')+'</tbody></table>';
+    const checks=[...el.querySelectorAll('.server-backup-check')];
+    const updateSelection=()=>{const n=checks.filter(x=>x.checked).length;const btn=el.querySelector('#btnDeleteSelectedBackups');btn.disabled=!n;btn.textContent='حذف المحدد ('+n+')';const all=el.querySelector('#chkAllServerBackups');all.checked=checks.length>0&&n===checks.length;all.indeterminate=n>0&&n<checks.length;};
+    checks.forEach(ch=>ch.addEventListener('change',updateSelection));
+    el.querySelector('#chkAllServerBackups').addEventListener('change',e=>{checks.forEach(ch=>ch.checked=e.target.checked);updateSelection();});
+    el.querySelector('#btnBackupSelectAll').addEventListener('click',()=>{checks.forEach(ch=>ch.checked=true);updateSelection();});
+    el.querySelector('#btnBackupSelectNone').addEventListener('click',()=>{checks.forEach(ch=>ch.checked=false);updateSelection();});
+    el.querySelector('#btnDeleteSelectedBackups').addEventListener('click',async()=>{
+      const ids=checks.filter(ch=>ch.checked).map(ch=>ch.dataset.backupId);if(!ids.length)return;
+      if(!confirm('تأكيد حذف '+ids.length+' نسخة محددة نهائياً؟ لا يمكن التراجع.'))return;
+      try{await deleteServerBackups(ids);await loadServerBackupHistory();showMsg('serverBackupMsg','ok','تم حذف '+ids.length+' نسخة احتياطية.');}
+      catch(e){await loadServerBackupHistory();showMsg('serverBackupMsg','bad','فشل الحذف: '+e.message);}
     });
-  }catch(e){
-    el.innerHTML = `<div class="msg bad">تعذّر تحميل سجل النسخ — تأكد من إنشاء جدول wms_backups (راجع تعليمات SQL). ${esc(e.message)}</div>`;
-  }
+    el.querySelector('#btnDeleteAllBackups').addEventListener('click',async()=>{
+      if(!rows.length){showMsg('serverBackupMsg','warn','لا توجد نسخ لحذفها.');return;}
+      if(!confirm('تحذير: سيتم حذف جميع النسخ الاحتياطية وعددها '+rows.length+' نهائياً. هل أنت متأكد؟'))return;
+      try{await deleteServerBackups(rows.map(r=>r.id));await loadServerBackupHistory();showMsg('serverBackupMsg','ok','تم حذف جميع النسخ الاحتياطية.');}
+      catch(e){await loadServerBackupHistory();showMsg('serverBackupMsg','bad','فشل حذف جميع النسخ: '+e.message);}
+    });
+    el.querySelectorAll('[data-dlbk]').forEach(btn=>btn.addEventListener('click',async()=>{try{const row=await fetchBackupById(btn.dataset.dlbk);downloadServerBackup(row);}catch(e){alert('تعذّر تنزيل النسخة: '+e.message);}}));
+    updateSelection();
+  }catch(e){el.innerHTML='<div class="msg bad">تعذّر تحميل سجل النسخ — '+esc(e.message)+'</div>';}
 }
 function renderRestorePreview(res){
   const area = document.getElementById('restorePreviewArea');
