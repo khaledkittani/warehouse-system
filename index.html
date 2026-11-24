@@ -4488,7 +4488,9 @@ function taglogIsDuplicate(tag){
 }
 function taglogRowsForSite(site){
   const n = trim(site).toLowerCase();
-  return STATE.tagLog.filter(r=>trim(r.siteName).toLowerCase()===n);
+  if(!n) return [];
+  // استخراج التقرير يشمل كل اسم موقع يحتوي عبارة البحث، دون البحث في From Site.
+  return STATE.tagLog.filter(r=>trim(r.siteName).toLowerCase().includes(n));
 }
 function taglogSetType(type){
   TAGLOG_TYPE = (type==='Dismantled') ? 'Dismantled' : 'Installed';
