@@ -3694,9 +3694,9 @@ function renderTagLogViewerTab(el){
   });
   document.getElementById('btnExportTlv').addEventListener('click', ()=>{
     // نفس فورم رفع Excel في الوضع الإداري تماماً: اسم القطعة، التاج، اسم الموقع (بلا أي عمود إضافي)
-    const headers = ['اسم القطعة','التاج','اسم الموقع'];
-    const exportRows = rows.map(r=>[r.materialName, r.tag, r.siteName]);
-    exportSectionToExcel(headers, exportRows, 'رصد التاجات', [30,20,22]);
+    const headers = ['اسم القطعة','التاج','اسم الموقع','From Site'];
+    const exportRows = rows.map(r=>[r.materialName, r.tag, r.siteName, r.source || TAGLOG_SOURCE_DEFAULT]);
+    exportSectionToExcel(headers, exportRows, 'رصد التاجات', [30,20,22,24]);
   });
 }
 
@@ -4638,12 +4638,13 @@ function taglogRenderRowsHtml(rows, emptyMsg){
     <td>${esc(r.materialName)}</td>
     <td>${esc(r.type==='Dismantled'?'Dismantled':'Installed')}</td>
     <td>${esc(r.siteName)}</td>
+    <td>${esc(r.source || TAGLOG_SOURCE_DEFAULT)}</td>
     <td>${esc(r.installDate)}</td>
     <td style="white-space:nowrap;">
       <button type="button" class="secondary" data-tledit="${esc(r.id)}" style="padding:3px 10px;font-size:11px;">✏️ تعديل</button>
       <button type="button" class="danger" data-tldel="${esc(r.id)}" style="padding:3px 10px;font-size:11px;margin-inline-start:4px;">🗑 حذف</button>
     </td>
-  </tr>`).join('') || `<tr><td colspan="6" class="empty">${emptyMsg || 'لا توجد تاجات مسجَّلة بعد'}</td></tr>`;
+  </tr>`).join('') || `<tr><td colspan="7" class="empty">${emptyMsg || 'لا توجد تاجات مسجَّلة بعد'}</td></tr>`;
 }
 /* فلترة (بحث حي في كل الأعمدة) وفرز (بالضغط على عنوان أي عمود) لجدول كل التاجات المسجَّلة —
    الترتيب الافتراضي (بدون فرز مُختار) هو نفس ترتيب السابق: الأحدث إدخالاً أولاً. */
@@ -4697,17 +4698,18 @@ function taglogScanTimeText(ts){
 function taglogExportAllToExcel(){
   const rows = STATE.tagLog.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   if(!rows.length){ alert('لا توجد تاجات مسجَّلة للتصدير.'); return; }
-  const header = ['التاج','اسم القطعة','النوع','اسم الموقع','تاريخ التركيب','تاريخ الإدخال'];
+  const header = ['التاج','اسم القطعة','النوع','اسم الموقع','From Site','تاريخ التركيب','تاريخ الإدخال'];
   const aoa = [header, ...rows.map(r=>[
     r.tag || '',
     r.materialName || '',
     r.type === 'Dismantled' ? 'Dismantled' : 'Installed',
     r.siteName || '',
+    r.source || TAGLOG_SOURCE_DEFAULT,
     r.installDate || '',
     taglogScanTimeText(r.createdAt)
   ])];
   downloadWorkbook(
-    [{name:'رصد التاجات', ws: aoaSheet(aoa, [24,36,14,26,14,18])}],
+    [{name:'رصد التاجات', ws: aoaSheet(aoa, [24,36,14,26,24,14,18])}],
     `رصد_التاجات_${todayStr()}.xlsx`
   );
 }
@@ -4802,6 +4804,7 @@ function renderTagLogRecordsPanel(onlyResults){
         <th data-sort="material" style="cursor:pointer;user-select:none;">اسم القطعة${sortArrow('material')}</th>
         <th data-sort="type" style="cursor:pointer;user-select:none;">النوع${sortArrow('type')}</th>
         <th data-sort="site" style="cursor:pointer;user-select:none;">اسم الموقع${sortArrow('site')}</th>
+        <th>From Site</th>
         <th data-sort="date" style="cursor:pointer;user-select:none;">تاريخ التركيب${sortArrow('date')}</th>
         <th>إجراءات</th>
       </tr></thead>
