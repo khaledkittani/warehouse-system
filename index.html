@@ -4462,6 +4462,7 @@ async function commitLabelScanTag(code, description, tag){
    ===================================================================== */
 const TAGLOG_SOURCE_DEFAULT = 'Rawabi Macoco';
 let TAGLOG_SITE = (function(){ try{ return localStorage.getItem('wms_taglog_last_site')||''; }catch(e){ return ''; } })();
+let TAGLOG_FROM_SITE = TAGLOG_SOURCE_DEFAULT; // المصدر الافتراضي لكل تاج جديد، ويمكن تغييره من خانة From Site
 let TAGLOG_TYPE = 'Installed'; // خيار Installed/Dismantled حُذف من واجهة الرصد اليدوي بناءً على طلب المستخدم (الصفحة تُستخدم لرصد المواد المركبة فقط)؛ القيمة ثابتة الآن، والحقل type نفسه يبقى محفوظاً بنفس الصيغة القديمة لأي سجل تاريخي أو مستورد عبر Excel
 let TAGLOG_SEARCH_RESULTS = [];
 let TAGLOG_HL_INDEX = -1;
@@ -4511,7 +4512,7 @@ function taglogDismantledDateForMaterial(materialName){
 }
 /* إنشاء السجل وإضافته إلى STATE.tagLog بشكل متزامن بالكامل (بلا أي await) — فيُحسم التكرار فوراً حتى لو أُدخل التاج التالي
    مباشرة أو تكررت الضغطة. الحفظ الفعلي منفصل عنه (انظر قائمة الانتظار TAGQ أدناه). */
-function taglogMakeRow(tag, materialName, type, siteOverride){
+function taglogMakeRow(tag, materialName, type, siteOverride, fromSiteOverride){
   const site = trim(siteOverride!==undefined ? siteOverride : TAGLOG_SITE);
   const tagVal = trim(tag);
   if(!site) return {ok:false, msg:'اكتب اسم الموقع أولاً.'};
@@ -4528,7 +4529,7 @@ function taglogMakeRow(tag, materialName, type, siteOverride){
     id: 'TL'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
     tag: tagVal,
     materialName: materialName,
-    source: TAGLOG_SOURCE_DEFAULT,
+    source: trim(fromSiteOverride!==undefined ? fromSiteOverride : TAGLOG_SOURCE_DEFAULT) || TAGLOG_SOURCE_DEFAULT,
     siteName: site,
     type: rowType,
     installDate,
@@ -4618,6 +4619,7 @@ async function taglogUpdateRow(id, updates){
   row.materialName = materialVal;
   row.type = (updates.type==='Dismantled') ? 'Dismantled' : 'Installed';
   row.siteName = siteVal;
+  row.source = trim(updates.source) || TAGLOG_SOURCE_DEFAULT;
   if(dateVal) row.installDate = dateVal;
   await taglogSaveSerial();
   return {ok:true, row};
@@ -4744,6 +4746,8 @@ function taglogOpenEditModal(id, onChanged){
       </select>
       <label class="flabel">اسم الموقع</label>
       <input type="text" id="tlEditSite" value="${esc(row.siteName)}">
+      <label class="flabel">From Site</label>
+      <input type="text" id="tlEditSource" value="${esc(row.source || TAGLOG_SOURCE_DEFAULT)}">
       <label class="flabel">تاريخ التركيب</label>
       <input type="date" id="tlEditDate" value="${esc(row.installDate)}">
       <div id="tlEditMsg"></div>
@@ -4755,6 +4759,7 @@ function taglogOpenEditModal(id, onChanged){
         materialName: document.getElementById('tlEditMaterial').value,
         type: document.getElementById('tlEditType').value,
         siteName: document.getElementById('tlEditSite').value,
+        source: document.getElementById('tlEditSource').value,
         installDate: document.getElementById('tlEditDate').value,
       };
       const res = await taglogUpdateRow(id, updates);
@@ -5235,7 +5240,9 @@ function taglogHandleSave(){
     if(s) s.focus({preventScroll:true});
     return;
   }
-  const res = taglogMakeRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE);
+  const fromSiteInp = document.getElementById('tlFromSite');
+  TAGLOG_FROM_SITE = trim(fromSiteInp ? fromSiteInp.value : TAGLOG_FROM_SITE) || TAGLOG_SOURCE_DEFAULT;
+  const res = taglogMakeRow(tagVal, TAGLOG_SELECTED_MATERIAL, TAGLOG_TYPE, undefined, TAGLOG_FROM_SITE);
   if(!res.ok){
     alert(res.msg);
     if(tagInp){ tagInp.focus({preventScroll:true}); tagInp.select(); }
@@ -5453,7 +5460,7 @@ function buildTagLogReportBlob(rows){
       newRowsXml += `<row r="${rnum}"/>`;
       return;
     }
-    const values = [rec.tag, rec.materialName, rec.source, rec.siteName, taglogFormatDateForReport(rec.installDate)];
+    const values = [rec.tag, rec.materialName, rec.source || TAGLOG_SOURCE_DEFAULT, rec.siteName, taglogFormatDateForReport(rec.installDate)];
     let cellsXml = '';
     cols.forEach((col, ci)=>{
       const s = styleByCol[col];
@@ -5698,6 +5705,8 @@ function renderTagCaptureTab(el){
             <div id="tlSiteDropdown"></div>
           </div>
           <div id="tlSiteWarning"></div>
+          <label class="flabel" style="margin-top:10px;">From Site</label>
+          <input type="text" id="tlFromSite" class="tl-site-input" style="font-size:18px;padding:8px 10px;" value="${esc(TAGLOG_FROM_SITE)}" placeholder="RAWABI MACOCO" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
         </div>
 
         <div class="tl-block tl-shortcuts">
