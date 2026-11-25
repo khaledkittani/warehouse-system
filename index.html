@@ -2374,19 +2374,12 @@ const AUTO_BACKUP_MIN_INTERVAL_MS = 5*60*1000; // 5 دقائق كحد أدنى �
 function buildBackupObject(){
   // نسخة معزولة تماماً (Deep Clone) وقت الاستدعاء — حتى لا يؤثر أي تعديل لاحق على STATE على نسخة تم بناؤها سابقاً
   // (كل بيانات STATE قابلة للتسلسل بالكامل: كائنات/مصفوفات/نصوص/أرقام فقط، لا تواريخ ولا مراجع دائرية)
-  const snapshot = JSON.parse(JSON.stringify({
-    stock: STATE.stock,
-    dismantled: STATE.dismantled,
-    ledger: STATE.ledger,
-    processedSids: STATE.processedSids,
-    issues: STATE.issues,
-    processedFiles: STATE.processedFiles,
-    meta: STATE.meta,
-    goodsCatalog: STATE.goodsCatalog,
-    goodsLedger: STATE.goodsLedger,
-    cableItems: STATE.cableItems,
-    cableLedger: STATE.cableLedger,
-  }));
+  // تضمين جميع أقسام STATE المسجلة في STORE_KEYS، بما فيها رصد التاجات والإعدادات التابعة له.
+  const snapshotSource = Object.keys(STORE_KEYS).reduce((out, key)=>{
+    out[key] = STATE[key];
+    return out;
+  }, {});
+  const snapshot = JSON.parse(JSON.stringify(snapshotSource));
   return {
     system: BACKUP_SYSTEM_ID,
     appVersion: APP_VERSION,
@@ -2401,6 +2394,7 @@ function backupSummary(backupObj){
   return {
     materials: Object.keys(d.stock||{}).length + Object.keys(d.goodsCatalog||{}).length,
     transactions: (d.ledger||[]).length + (d.goodsLedger||[]).length,
+    tagLog: Array.isArray(d.tagLog) ? d.tagLog.length : 0,
     sids: Object.keys(d.processedSids||{}).length,
     issues: (d.issues||[]).length,
     dismantled: (d.dismantled||[]).length,
@@ -2430,7 +2424,7 @@ function validateBackupObject(obj){
     errors.push('الملف لا يحتوي على بيانات (data) صالحة.');
   } else {
     const expectObj = ['stock','processedSids','goodsCatalog','meta'];
-    const expectArr = ['ledger','dismantled','issues','goodsLedger','processedFiles'];
+    const expectArr = ['ledger','dismantled','issues','goodsLedger','processedFiles','tagLog'];
     expectObj.forEach(k=>{ if(obj.data[k]!==undefined && (typeof obj.data[k]!=='object' || Array.isArray(obj.data[k]))) errors.push(`الحقل "${k}" تالف في النسخة الاحتياطية.`); });
     expectArr.forEach(k=>{ if(obj.data[k]!==undefined && !Array.isArray(obj.data[k])) errors.push(`الحقل "${k}" تالف في النسخة الاحتياطية.`); });
   }
@@ -2533,19 +2527,12 @@ async function performRestore(backupObj){
   await takeSafetyBackup(); // أمان أولاً — قبل أي تعديل على البيانات الحالية
   const migrated = migrateBackupData(backupObj);
   // نجهّز الحالة الجديدة كاملة في متغير مؤقت أولاً، مع قيم افتراضية آمنة لأي حقل ناقص، ثم نعتمدها دفعة واحدة
-  const fresh = {
-    stock: migrated.stock || {},
-    dismantled: migrated.dismantled || [],
-    ledger: migrated.ledger || [],
-    processedSids: migrated.processedSids || {},
-    issues: migrated.issues || [],
-    processedFiles: migrated.processedFiles || [],
-    meta: migrated.meta || {setupDone:false},
-    goodsCatalog: migrated.goodsCatalog || {},
-    goodsLedger: migrated.goodsLedger || [],
-    cableItems: migrated.cableItems || {},
-    cableLedger: migrated.cableLedger || [],
-  };
+  // نستخدم كل مفاتيح التخزين المسجلة. إذا كان الملف قديماً ولا يحتوي قسماً جديداً،
+  // نحافظ على بيانات ذلك القسم الحالية بدلاً من تصفيرها.
+  const fresh = {};
+  Object.keys(STORE_KEYS).forEach(k=>{
+    fresh[k] = Object.prototype.hasOwnProperty.call(migrated, k) ? migrated[k] : STATE[k];
+  });
   Object.keys(fresh).forEach(k=>{ STATE[k] = fresh[k]; });
   // تصفير أي حالة مؤقتة في الذاكرة قد تشير لبيانات لم تعد موجودة
   GOODS_BATCH = null; GOODS_SELECTED_KEY = null;
