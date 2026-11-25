@@ -2032,8 +2032,9 @@ function sidrFullReportAoa(){
 }
 function sidrShortageOnlyAoa(site){
   const header = ['الموقع','Product code','Product description','Description','الكمية المطلوبة','الكمية المستلمة','كمية النقص'];
-  let rows = sidrAllRowsFlat();
-  if(SIDR_SUMMARY_SHORTAGE_ONLY) rows = rows.filter(r=>r.status==='ناقص');
+  // هذا التقرير مخصص للنواقص فقط؛ لا يعتمد على خيار إظهار النواقص في الشاشة.
+  // استبعاد المواد المكتملة والمواد التي لديها زيادة بشكل صريح.
+  let rows = sidrAllRowsFlat().filter(r=>r.status==='ناقص' && Number(r.shortage)>0);
   if(site) rows = rows.filter(r=>r.site===site);
   return [header, ...rows.map(r=>[r.site, r.productCode, r.productDescription, r.description, r.requested, r.received, r.shortage])];
 }
