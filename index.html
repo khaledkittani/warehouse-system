@@ -2526,7 +2526,8 @@ async function performRestore(backupObj){
   if(!v.ok) return {ok:false, msg: v.errors.join(' — ')};
   await takeSafetyBackup(); // أمان أولاً — قبل أي تعديل على البيانات الحالية
   const migrated = migrateBackupData(backupObj);
-  // نجهّز الحالة الجديدة كاملة في متغير مؤقت أولاً، مع قيم افتراضية آمنة لأي حقل ناقص، ثم نعتمدها دفعة واحدة
+  // نحتفظ بنسخة من الحالة الحالية للرجوع إليها إذا تعذّر حفظ الاستعادة.
+  const previous = JSON.parse(JSON.stringify(Object.keys(STORE_KEYS).reduce((out,k)=>{out[k]=STATE[k];return out;},{})));
   // نستخدم كل مفاتيح التخزين المسجلة. إذا كان الملف قديماً ولا يحتوي قسماً جديداً،
   // نحافظ على بيانات ذلك القسم الحالية بدلاً من تصفيرها.
   const fresh = {};
@@ -2536,7 +2537,13 @@ async function performRestore(backupObj){
   Object.keys(fresh).forEach(k=>{ STATE[k] = fresh[k]; });
   // تصفير أي حالة مؤقتة في الذاكرة قد تشير لبيانات لم تعد موجودة
   GOODS_BATCH = null; GOODS_SELECTED_KEY = null;
-  await saveState(Object.keys(STORE_KEYS));
+  const saved = await saveState(Object.keys(STORE_KEYS));
+  if(!saved || !saved.ok){
+    // لا نعلن نجاح الاستعادة عند فشل الحفظ؛ نعيد الحالة السابقة ونحاول تثبيتها.
+    Object.keys(previous).forEach(k=>{ STATE[k] = previous[k]; });
+    const rollback = await saveState(Object.keys(STORE_KEYS));
+    return {ok:false, msg:'تعذّر حفظ بيانات الاستعادة. تمت إعادة الحالة السابقة '+(rollback&&rollback.ok?'بنجاح.':'لكن تعذّر تأكيد حفظ التراجع؛ افحص الاتصال والنسخة الاحتياطية.')};
+  }
   return {ok:true, summary: backupSummary({data: fresh})};
 }
 
